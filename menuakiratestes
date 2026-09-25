@@ -1,8 +1,8 @@
 -- =========================================================================
--- AKIRA MENU V2.2.2 — Persistência + Posições Dinâmicas (Fix visual)
+-- AKIRA MENU V2.2.3 — Persistência + Posições com atualização AO VIVO
 --  • Salva API Key + Posições em arquivo (Akira_Config.json)
 --  • Aba Posições: adicionar / editar / excluir / salvar / ir (até 15)
---  • Fix: excluir/adicionar atualizam na hora no menu
+--  • Fix: tudo atualiza AO VIVO na UI (sem re-render do menu)
 -- =========================================================================
 
 -- =========================================================================
@@ -879,7 +879,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.2"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.3"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -3095,7 +3095,7 @@ do
 end
 
 -- =========================================================================
--- EXTRA (hotbar: Visual / Posições) — FIX atualização instantânea
+-- EXTRA (hotbar: Visual / Posições) — Atualização AO VIVO
 -- =========================================================================
 local ExtraSubPage = "Visual"
 
@@ -3239,86 +3239,79 @@ local function ShowExtraPosicoesContent()
     descText.TextXAlignment = _XL
     descText.TextYAlignment = Enum.TextYAlignment.Top
 
-    -- Re-renderiza o menu no próximo frame
-    local function refreshMenu()
-        task.defer(function()
-            task.wait(0.05)
-            ShowExtra()
-        end)
-    end
-
     -- Botão adicionar
-    local podeAdicionar = #Persist.posicoes < Persist.limite_posicoes
-    UI.ActionButton(_CH, 2,
-        podeAdicionar and ("➕ Adicionar Posição  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")")
-                          or ("🚫 Limite atingido  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")"),
-        podeAdicionar and _K.Success or _RGB(70,70,80),
-        function()
-            if #Persist.posicoes >= Persist.limite_posicoes then
-                Notify("POSIÇÃO", "Limite de "..Persist.limite_posicoes.." posições atingido.", "Error")
-                return
-            end
-            if not RefreshCharacter() then
-                Notify("POSIÇÃO", "Personagem não encontrado.", "Error")
-                return
-            end
-            local n = #Persist.posicoes + 1
-            local cf = rootPart.CFrame
-            local rx, ry, rz = cf:ToEulerAnglesXYZ()
-            table.insert(Persist.posicoes, {
-                nome = "Posição "..n,
-                x = cf.Position.X,
-                y = cf.Position.Y,
-                z = cf.Position.Z,
-                rx = rx, ry = ry, rz = rz
-            })
-            persistSalvar()
-            Notify("POSIÇÃO", "📍 Posição "..n.." adicionada!", "Success")
-            refreshMenu()
-        end)
+    local btnAdd = UI.ActionButton(_CH, 2, "", _K.Success, function() end)
+    local function atualizarBotaoAdd()
+        if #Persist.posicoes < Persist.limite_posicoes then
+            btnAdd.Text = "➕ Adicionar Posição  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")"
+            btnAdd.BackgroundColor3 = _K.Success
+        else
+            btnAdd.Text = "🚫 Limite atingido  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")"
+            btnAdd.BackgroundColor3 = _RGB(70,70,80)
+        end
+    end
+    atualizarBotaoAdd()
 
-    -- Lista de posições
-    if #Persist.posicoes == 0 then
-        local vazio = _I("Frame", _CH)
-        vazio.Size = _U2(1, 0, 0, 55)
-        vazio.BackgroundColor3 = _RGB(18,18,24)
-        vazio.BorderSizePixel = 0
-        vazio.LayoutOrder = 3
-        Corner(vazio, 8)
-        Stroke(vazio, _K.Stroke, 1)
-        local vazioLbl = _I("TextLabel", vazio)
-        vazioLbl.BackgroundTransparency = 1
-        vazioLbl.Size = _U2(1, 1, 1, 0)
-        vazioLbl.Text = "Nenhuma posição salva ainda.\nClique em '➕ Adicionar Posição' acima."
-        vazioLbl.TextColor3 = _K.DarkGray
-        vazioLbl.Font = _GM
-        vazioLbl.TextSize = 10
-        vazioLbl.TextWrapped = true
-        vazioLbl.TextXAlignment = _XC
-        vazioLbl.TextYAlignment = Enum.TextYAlignment.Center
-        return
+    -- Container dos cards
+    local container = _I("Frame", _CH)
+    container.Size = _U2(1, 0, 0, 0)
+    container.AutomaticSize = Enum.AutomaticSize.Y
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = 3
+    local containerLay = _I("UIListLayout", container)
+    containerLay.Padding = _UD(0, 7)
+    containerLay.SortOrder = Enum.SortOrder.LayoutOrder
+    containerLay.Parent = container
+
+    -- Placeholder "vazio"
+    local placeholder = nil
+    local function atualizarPlaceholder()
+        if #Persist.posicoes == 0 then
+            if not placeholder or not placeholder.Parent then
+                placeholder = _I("Frame", container)
+                placeholder.Size = _U2(1, 0, 0, 55)
+                placeholder.BackgroundColor3 = _RGB(18,18,24)
+                placeholder.BorderSizePixel = 0
+                placeholder.LayoutOrder = 0
+                Corner(placeholder, 8)
+                Stroke(placeholder, _K.Stroke, 1)
+                local lbl = _I("TextLabel", placeholder)
+                lbl.BackgroundTransparency = 1
+                lbl.Size = _U2(1, 1, 1, 0)
+                lbl.Text = "Nenhuma posição salva ainda.\nClique em '➕ Adicionar Posição' acima."
+                lbl.TextColor3 = _K.DarkGray
+                lbl.Font = _GM
+                lbl.TextSize = 10
+                lbl.TextWrapped = true
+                lbl.TextXAlignment = _XC
+                lbl.TextYAlignment = Enum.TextYAlignment.Center
+            end
+        else
+            if placeholder then
+                placeholder:Destroy()
+                placeholder = nil
+            end
+        end
     end
 
-    -- Função auxiliar: acha o índice atual pelo objeto (evita bug de closure)
-    local function acharIndiceDaPosicao(alvo)
+    -- Função auxiliar
+    local function acharIndice(alvo)
         for j, p in ipairs(Persist.posicoes) do
-            if p == alvo then
-                return j
-            end
+            if p == alvo then return j end
         end
         return nil
     end
 
-    for ordem, pos in ipairs(Persist.posicoes) do
-        local card = _I("Frame", _CH)
+    -- Cria card pra uma posição
+    local function criarCardPosicao(pos, layoutOrder)
+        local card = _I("Frame", container)
         card.Size = _U2(1, 0, 0, 94)
         card.BackgroundColor3 = _RGB(18, 18, 24)
         card.BorderSizePixel = 0
-        card.LayoutOrder = ordem + 2
+        card.LayoutOrder = layoutOrder or 1
         Corner(card, 8)
         Stroke(card, _K.Stroke, 1)
 
-        -- Nome
         local nomeLbl = _I("TextLabel", card)
         nomeLbl.BackgroundTransparency = 1
         nomeLbl.Position = _UO(12, 8)
@@ -3329,7 +3322,6 @@ local function ShowExtraPosicoesContent()
         nomeLbl.TextSize = 12
         nomeLbl.TextXAlignment = _XL
 
-        -- Botão editar
         local btnEdit = _I("TextButton", card)
         btnEdit.AnchorPoint = _V2(1, 0)
         btnEdit.Position = _U2(1, -44, 0, 8)
@@ -3343,7 +3335,6 @@ local function ShowExtraPosicoesContent()
         btnEdit.AutoButtonColor = false
         Corner(btnEdit, 6)
 
-        -- Botão excluir
         local btnDel = _I("TextButton", card)
         btnDel.AnchorPoint = _V2(1, 0)
         btnDel.Position = _U2(1, -10, 0, 8)
@@ -3357,7 +3348,6 @@ local function ShowExtraPosicoesContent()
         btnDel.AutoButtonColor = false
         Corner(btnDel, 6)
 
-        -- Coords
         local coordLbl = _I("TextLabel", card)
         coordLbl.BackgroundTransparency = 1
         coordLbl.Position = _UO(12, 32)
@@ -3368,7 +3358,6 @@ local function ShowExtraPosicoesContent()
         coordLbl.TextSize = 9
         coordLbl.TextXAlignment = _XL
 
-        -- Botão Salvar
         local btnSave = _I("TextButton", card)
         btnSave.AnchorPoint = _V2(1, 1)
         btnSave.Position = _U2(0.5, -5, 1, -10)
@@ -3382,7 +3371,6 @@ local function ShowExtraPosicoesContent()
         btnSave.AutoButtonColor = false
         Corner(btnSave, 6)
 
-        -- Botão Ir
         local btnIr = _I("TextButton", card)
         btnIr.AnchorPoint = _V2(1, 1)
         btnIr.Position = _U2(1, -12, 1, -10)
@@ -3396,18 +3384,18 @@ local function ShowExtraPosicoesContent()
         btnIr.AutoButtonColor = false
         Corner(btnIr, 6)
 
-        -- Handlers
+        -- Handlers com atualização DIRETA (ao vivo)
         btnEdit.MouseButton1Click:Connect(function()
             abrirModalEditarNome(pos.nome, function(novoNome)
                 pos.nome = novoNome
+                nomeLbl.Text = "📍 "..novoNome
                 persistSalvar()
                 Notify("POSIÇÃO", "Nome atualizado: "..novoNome, "Success")
-                refreshMenu()
             end)
         end)
 
         btnDel.MouseButton1Click:Connect(function()
-            local idxAtual = acharIndiceDaPosicao(pos)
+            local idxAtual = acharIndice(pos)
             if not idxAtual then
                 Notify("POSIÇÃO", "Posição já foi removida.", "Orange")
                 return
@@ -3415,8 +3403,10 @@ local function ShowExtraPosicoesContent()
             local nomeRemovido = pos.nome
             table.remove(Persist.posicoes, idxAtual)
             persistSalvar()
+            card:Destroy()
+            atualizarPlaceholder()
+            atualizarBotaoAdd()
             Notify("POSIÇÃO", "🗑️ '"..nomeRemovido.."' excluída!", "Orange")
-            refreshMenu()
         end)
 
         btnSave.MouseButton1Click:Connect(function()
@@ -3430,9 +3420,9 @@ local function ShowExtraPosicoesContent()
             pos.y = cf.Position.Y
             pos.z = cf.Position.Z
             pos.rx = rx; pos.ry = ry; pos.rz = rz
+            coordLbl.Text = string.format("X: %.0f   Y: %.0f   Z: %.0f", pos.x, pos.y, pos.z)
             persistSalvar()
             Notify("POSIÇÃO", "💾 '"..pos.nome.."' atualizada!", "Success")
-            refreshMenu()
         end)
 
         btnIr.MouseButton1Click:Connect(function()
@@ -3444,7 +3434,43 @@ local function ShowExtraPosicoesContent()
             pcall(function() character:PivotTo(cf) end)
             Notify("POSIÇÃO", "📌 Teleportado para '"..pos.nome.."'", "Success")
         end)
+
+        return card
     end
+
+    -- Handler do botão adicionar
+    btnAdd.MouseButton1Click:Connect(function()
+        if #Persist.posicoes >= Persist.limite_posicoes then
+            Notify("POSIÇÃO", "Limite de "..Persist.limite_posicoes.." posições atingido.", "Error")
+            return
+        end
+        if not RefreshCharacter() then
+            Notify("POSIÇÃO", "Personagem não encontrado.", "Error")
+            return
+        end
+        local n = #Persist.posicoes + 1
+        local cf = rootPart.CFrame
+        local rx, ry, rz = cf:ToEulerAnglesXYZ()
+        local nova = {
+            nome = "Posição "..n,
+            x = cf.Position.X,
+            y = cf.Position.Y,
+            z = cf.Position.Z,
+            rx = rx, ry = ry, rz = rz
+        }
+        table.insert(Persist.posicoes, nova)
+        persistSalvar()
+        criarCardPosicao(nova, n)
+        atualizarPlaceholder()
+        atualizarBotaoAdd()
+        Notify("POSIÇÃO", "📍 Posição "..n.." adicionada!", "Success")
+    end)
+
+    -- Renderiza as existentes
+    for i, pos in ipairs(Persist.posicoes) do
+        criarCardPosicao(pos, i)
+    end
+    atualizarPlaceholder()
 end
 
 local function ShowExtra()
@@ -3632,4 +3658,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.2.2 carregado com sucesso!")
+print("AKIRA MENU V2.2.3 carregado com sucesso!")
