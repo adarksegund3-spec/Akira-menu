@@ -1,9 +1,8 @@
 -- =========================================================================
--- AKIRA MENU V2.2.6 — Gravar Rota (UI limpa + botão funcional)
---  • Gravação captura posição, rotação, pulo e velocidade
---  • Reprodução com animação (Move) + posição exata (PivotTo)
---  • UI: botão único Iniciar/Parar + Rotas Temporárias + Rotas Salvas
---  • Persistência em Akira_Config.json
+-- AKIRA MENU V2.2.9 — Gravar Rota (reprodução suave, sem config extra)
+--  • Reprodução: PivotTo + zerar velocity da física (elimina tremor)
+--  • UI: botão Iniciar/Parar + Rotas Temporárias + Rotas Salvas
+--  • Sem card de "Configurações do Motor"
 -- =========================================================================
 
 -- =========================================================================
@@ -142,8 +141,7 @@ local function persistCarregar()
                             rx = tonumber(f.rx) or 0,
                             ry = tonumber(f.ry) or 0,
                             rz = tonumber(f.rz) or 0,
-                            j = f.j and true or false,
-                            ws = tonumber(f.ws) or 16
+                            j = f.j and true or false
                         })
                     end
                 end
@@ -907,7 +905,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.6"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.9"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -3558,9 +3556,7 @@ local Gravacao = {
     Frames = {},
     StartGravacao = 0,
     UltimoFrame = -math.huge,
-    Velocidade = 15,
     MostrarRota = true,
-    Natural = true,
     GravConn = nil,
     RepConn = nil,
     LinhasFolder = nil,
@@ -3655,7 +3651,7 @@ local function gravIniciar()
             gravNotificarMudanca()
             return
         end
-        if agora - Gravacao.UltimoFrame < (1 / Gravacao.Velocidade) then return end
+        if agora - Gravacao.UltimoFrame < (1 / 30) then return end
         Gravacao.UltimoFrame = agora
 
         local cf = rootPart.CFrame
@@ -3666,8 +3662,7 @@ local function gravIniciar()
             y = cf.Position.Y,
             z = cf.Position.Z,
             rx = rx, ry = ry, rz = rz,
-            j = humanoid.Jump,
-            ws = humanoid.WalkSpeed
+            j = humanoid.Jump
         })
     end)
 end
@@ -3703,7 +3698,10 @@ local function gravPararReproducao(silencioso)
     if RefreshCharacter() then
         humanoid:Move(Vector3.zero, false)
         humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
         pcall(function() humanoid.AutoRotate = true end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
     end
     pararAnimacaoAndar()
     if not silencioso then
@@ -3733,7 +3731,11 @@ local function gravReproduzir(frames, nome)
 
     Gravacao.Estado = "reproduzindo"
     pcall(function() humanoid.AutoRotate = false end)
-    humanoid.WalkSpeed = 16
+    humanoid.WalkSpeed = 0
+    humanoid.JumpPower = 0
+    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false) end)
+    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false) end)
+
     Notify("REPRODUÇÃO", "▶️ "..(nome or (#frames.." frames")), "Success")
     gravNotificarMudanca()
 
@@ -3741,6 +3743,7 @@ local function gravReproduzir(frames, nome)
     local idx = 1
     local maxT = frames[#frames].t
     local ultimaPos = Vector3.new(frames[1].x, frames[1].y, frames[1].z)
+    local animando = false
 
     Gravacao.RepConn = R.RenderStepped:Connect(function()
         if Gravacao.Estado ~= "reproduzindo" then return end
@@ -3770,27 +3773,35 @@ local function gravReproduzir(frames, nome)
         local rb = CFrame.Angles(b.rx or 0, b.ry or 0, b.rz or 0)
         local rotAtual = ra:Lerp(rb, alpha)
 
-        if a.ws then humanoid.WalkSpeed = a.ws end
+        -- ✅ PivotTo para posição exata
+        local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
+        pcall(function() character:PivotTo(cf) end)
 
-        if Gravacao.Natural then
-            local dir = posAtual - ultimaPos
-            dir = Vector3.new(dir.X, 0, dir.Z)
-            if dir.Magnitude > 0.01 then
-                humanoid:Move(dir.Unit, false)
-            else
-                humanoid:Move(Vector3.zero, false)
-            end
-            local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
-            pcall(function() character:PivotTo(cf) end)
-            if a.j and not b.j then
-                humanoid.Jump = true
+        -- ✅ ZERAR velocidade residual da física (elimina tremor)
+        if rootPart then
+            pcall(function()
+                rootPart.AssemblyLinearVelocity = Vector3.zero
+                rootPart.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+
+        -- ✅ Animação de andar liga quando se move
+        local delta = (posAtual - ultimaPos).Magnitude
+        if delta > 0.005 then
+            if not animando then
+                iniciarAnimacaoAndar()
+                animando = true
             end
         else
-            local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
-            pcall(function() character:PivotTo(cf) end)
-            if a.j and not b.j then
-                humanoid.Jump = true
+            if animando then
+                pararAnimacaoAndar()
+                animando = false
             end
+        end
+
+        -- Pulo
+        if a.j and not b.j then
+            humanoid.Jump = true
         end
 
         ultimaPos = posAtual
@@ -3798,7 +3809,7 @@ local function gravReproduzir(frames, nome)
 end
 
 -- =========================================================================
--- ABA: GRAVAR ROTA (UI limpa)
+-- ABA: GRAVAR ROTA (UI limpa, sem card de motor)
 -- =========================================================================
 local GravarRotaAbaAtiva = false
 
@@ -3968,7 +3979,7 @@ local function ShowGravarRota()
         for i, f in ipairs(Gravacao.Frames) do
             copia[i] = { t = f.t, x = f.x, y = f.y, z = f.z,
                 rx = f.rx or 0, ry = f.ry or 0, rz = f.rz or 0,
-                j = f.j and true or false, ws = f.ws or 16 }
+                j = f.j and true or false }
         end
         table.insert(Persist.rotas_salvas, { nome = nome, frames = copia })
         persistSalvar()
@@ -4165,44 +4176,22 @@ local function ShowGravarRota()
     end
 
     -- ============================================================
-    -- COLUNA DIREITA: Configurações do Motor
+    -- COLUNA DIREITA: apenas card de ajuda
     -- ============================================================
-    local cardMotor = UI.Card(col2, 1, "⚙️ Configurações do Motor")
+    local cardAjuda = UI.Card(col2, 1, "💡 Como usar")
 
-    UI.Slider(cardMotor, 1, "Velocidade de Gravação", Gravacao.Velocidade, 5, 30, false, function(v)
-        Gravacao.Velocidade = v
-    end)
-
-    UI.Toggle(cardMotor, 2, "MoveTo (natural)", Gravacao.Natural, function(v)
-        Gravacao.Natural = v
-        if v then
-            Notify("MOTOR", "Natural: andar animado.", "Success")
-        else
-            Notify("MOTOR", "Preciso: teleporte exato.", "Orange")
-        end
-    end)
-
-    local infoCard = _I("Frame", cardMotor)
-    infoCard.Size = _U2(1, 0, 0, 0)
-    infoCard.AutomaticSize = Enum.AutomaticSize.Y
-    infoCard.BackgroundColor3 = _RGB(15, 15, 20)
-    infoCard.BorderSizePixel = 0
-    infoCard.LayoutOrder = 3
-    Corner(infoCard, 6)
-    Stroke(infoCard, _K.Stroke, 1)
-    Padding(infoCard, 10, 10, 10, 10)
-
-    local infoTxt = _I("TextLabel", infoCard)
-    infoTxt.Size = _U2(1, 0, 0, 0)
-    infoTxt.AutomaticSize = Enum.AutomaticSize.Y
-    infoTxt.BackgroundTransparency = 1
-    infoTxt.Text = "💡 Como usar:\n1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n\n⚡ Rotas ficam salvas no arquivo Akira_Config.json"
-    infoTxt.TextColor3 = _K.DarkGray
-    infoTxt.Font = _GM
-    infoTxt.TextSize = 9
-    infoTxt.TextWrapped = true
-    infoTxt.TextXAlignment = _XL
-    infoTxt.TextYAlignment = Enum.TextYAlignment.Top
+    local passos = _I("TextLabel", cardAjuda)
+    passos.Size = _U2(1, 0, 0, 0)
+    passos.AutomaticSize = Enum.AutomaticSize.Y
+    passos.BackgroundTransparency = 1
+    passos.Text = "1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n5. Selecione a rota e clique em Reproduzir\n\n⚡ Na reprodução, o boneco anda no mesmo ritmo em que você gravou, com a animação normal do Roblox."
+    passos.TextColor3 = _K.Gray
+    passos.Font = _GM
+    passos.TextSize = 10
+    passos.TextWrapped = true
+    passos.TextXAlignment = _XL
+    passos.TextYAlignment = Enum.TextYAlignment.Top
+    passos.LineHeight = 1.4
 
     Content.CanvasPosition = _V2()
 end
@@ -4338,4 +4327,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.2.6 carregado com sucesso!")
+print("AKIRA MENU V2.2.9 carregado com sucesso!")
