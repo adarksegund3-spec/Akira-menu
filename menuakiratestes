@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.1 — ESP Corrigido + Shaders suaves + Sem Pulo Alto
+-- AKIRA MENU V2.3.2 — ESP Corrigido + Reprodução Sem Tremelique
 -- =========================================================================
 
 -- =========================================================================
@@ -81,8 +81,7 @@ local function persistCarregar()
     local ok3, dados = pcall(function() return HS:JSONDecode(conteudo) end)
     if not ok3 or type(dados) ~= "table" then return end
     if type(dados.ia_key) == "string" and #dados.ia_key > 0 then
-        Persist.ia_key = dados.ia_key
-        IA_CONFIG.ApiKey = dados.ia_key; IA_TEXTOS.ApiKey = dados.ia_key
+        Persist.ia_key = dados.ia_key; IA_CONFIG.ApiKey = dados.ia_key; IA_TEXTOS.ApiKey = dados.ia_key
     end
     if type(dados.posicoes) == "table" then
         local limpos = {}
@@ -782,7 +781,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.1"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.2"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -2405,27 +2404,21 @@ end
 local ExtraSubPage = "Visual"
 
 local ExtraState = {
-    -- Visual / Shaders
     FullbrightAtivo = false,
-    ZoomUnlocked = false,
-    ZoomMaxOriginal = nil, ZoomMinOriginal = nil,
+    ZoomUnlocked = false, ZoomMaxOriginal = nil, ZoomMinOriginal = nil,
     LightOriginal = nil,
     ShaderAtual = "Nenhum",
     FPSBoosterAtivo = false,
-    -- Movimento
     DuploPulo = false,
     VelocidadeAtiva = false, VelocidadeValor = 24,
     InfiniteJump = false,
-    -- ESP
     ESPAtivo = false,
     ESPNome = true, ESPDistancia = true, ESPVida = false,
     ESPCaixa = false, ESPEsqueleto = false, ESPHighlight = true,
     ESPCor = _RGB(255, 80, 80),
-    -- Utilidades
     AntiAFK = false
 }
 
--- FPS global
 local _FPS = 0
 task.spawn(function()
     local count, lastT = 0, tick()
@@ -2646,7 +2639,7 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- ESP - VERSÃO ROBUSTA
+-- ESP — versão baseada no script do Psygen (funciona!)
 -- =========================================================================
 local ESP_Storage = {}
 local hasDrawing = false
@@ -2682,54 +2675,67 @@ end
 
 local function ESP_Criar(player)
     if player == Pl then return end
-    ESP_Limpar(player)
     local char = player.Character
-    if not char then return end
+    if not char or not char.Parent then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
+    -- Limpa resquícios antigos (caso o char tenha sido respawnado)
+    local antigoHL = char:FindFirstChild("ZKY_ESP_HL")
+    local antigoBB = char:FindFirstChild("ZKY_ESP_BB")
+    if antigoHL then antigoHL:Destroy() end
+    if antigoBB then antigoBB:Destroy() end
+
+    local corEsp = ExtraState.ESPCor
+
+    -- HIGHLIGHT (anexado no Character + Adornee explícito)
     local hl = _I("Highlight")
     hl.Name = "ZKY_ESP_HL"
-    hl.FillColor = ExtraState.ESPCor
-    hl.OutlineColor = _RGB(255, 255, 255)
-    hl.FillTransparency = 0.5
-    hl.OutlineTransparency = 0
+    hl.Adornee = char
+    hl.Archivable = true
+    hl.Enabled = ExtraState.ESPHighlight
     hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.Visible = ExtraState.ESPHighlight
+    hl.FillColor = corEsp
+    hl.FillTransparency = 0.5
+    hl.OutlineColor = _RGB(255, 255, 255)
+    hl.OutlineTransparency = 0
     hl.Parent = char
 
+    -- BILLBOARD GUI (anexado no Character)
     local bb = _I("BillboardGui")
     bb.Name = "ZKY_ESP_BB"
-    bb.Size = _U2(0, 200, 0, 50)
-    bb.StudsOffset = Vector3.new(0, 3.2, 0)
+    bb.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    bb.Active = true
     bb.AlwaysOnTop = true
-    bb.LightInfluence = 0
-    bb.Parent = hrp
+    bb.ExtentsOffset = Vector3.new(0, 3, 0)
+    bb.LightInfluence = 1
+    bb.Size = _U2(0, 800, 0, 50)
+    bb.Parent = char
 
     local nomeLbl = _I("TextLabel", bb)
     nomeLbl.Name = "Nome"
-    nomeLbl.Size = _U2(1, 0, 0.5, 0)
     nomeLbl.BackgroundTransparency = 1
-    nomeLbl.Text = player.Name
-    nomeLbl.TextColor3 = ExtraState.ESPCor
+    nomeLbl.Size = _U2(1, 0, 0.5, 0)
     nomeLbl.Font = _GB
-    nomeLbl.TextSize = 14
+    nomeLbl.TextSize = 16
+    nomeLbl.TextColor3 = corEsp
     nomeLbl.TextStrokeTransparency = 0
     nomeLbl.TextStrokeColor3 = _RGB(0, 0, 0)
-    nomeLbl.TextXAlignment = _XC
+    nomeLbl.Text = player.Name
+    nomeLbl.TextWrapped = true
 
     local infoLbl = _I("TextLabel", bb)
     infoLbl.Name = "Info"
+    infoLbl.BackgroundTransparency = 1
     infoLbl.Position = _U2(0, 0, 0.5, 0)
     infoLbl.Size = _U2(1, 0, 0.5, 0)
-    infoLbl.BackgroundTransparency = 1
-    infoLbl.Text = ""
-    infoLbl.TextColor3 = _RGB(255, 255, 255)
     infoLbl.Font = _GM
-    infoLbl.TextSize = 12
+    infoLbl.TextSize = 14
+    infoLbl.TextColor3 = _RGB(255, 255, 255)
     infoLbl.TextStrokeTransparency = 0
     infoLbl.TextStrokeColor3 = _RGB(0, 0, 0)
-    infoLbl.TextXAlignment = _XC
+    infoLbl.Text = ""
+    infoLbl.TextWrapped = true
 
     ESP_Storage[player] = {
         Highlight = hl,
@@ -2738,177 +2744,170 @@ local function ESP_Criar(player)
     }
 end
 
-local function ESP_CriarEsqueleto(d)
-    if not hasDrawing then return end
-    if d.Skeleton then return end
-    d.Skeleton = {}
-    for i = 1, 15 do
-        local ok, ln = pcall(function() return Drawing.new("Line") end)
-        if ok and ln then
-            ln.Color = ExtraState.ESPCor
-            ln.Thickness = 1.5
-            ln.Transparency = 1
-            ln.Visible = false
-            d.Skeleton[i] = ln
-        else
-            break
-        end
-    end
-end
-
-local function ESP_CriarCaixa(d)
-    if not hasDrawing then return end
-    if d.Box then return end
-    d.Box = {}
-    for i = 1, 4 do
-        local ok, ln = pcall(function() return Drawing.new("Line") end)
-        if ok and ln then
-            ln.Color = ExtraState.ESPCor
-            ln.Thickness = 1.5
-            ln.Transparency = 1
-            ln.Visible = false
-            d.Box[i] = ln
-        else
-            break
-        end
-    end
-end
-
-local function ESP_AtualizarUm(p)
+local function ESP_Atualizar()
+    if not ExtraState.ESPAtivo then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
 
-    local char = p.Character
-    if not char or not char.Parent then
-        if ESP_Storage[p] then ESP_Limpar(p) end
-        return
-    end
+    for _, p in ipairs(P:GetPlayers()) do
+        if p ~= Pl then
+            local char = p.Character
+            local d = ESP_Storage[p]
 
-    local d = ESP_Storage[p]
-    -- Se o char mudou (respawn), limpa e recria
-    if d and d.Char ~= char then
-        ESP_Limpar(p)
-        d = nil
-    end
-
-    if not d then
-        ESP_Criar(p)
-        d = ESP_Storage[p]
-        if not d then return end
-    end
-
-    -- Highlight
-    if d.Highlight then
-        d.Highlight.FillColor = ExtraState.ESPCor
-        d.Highlight.Visible = ExtraState.ESPHighlight
-    end
-
-    -- Billboard
-    if d.Billboard then
-        local nomeLbl = d.Billboard:FindFirstChild("Nome")
-        local infoLbl = d.Billboard:FindFirstChild("Info")
-        if nomeLbl then
-            nomeLbl.Visible = ExtraState.ESPNome
-            nomeLbl.Text = p.Name
-            nomeLbl.TextColor3 = ExtraState.ESPCor
-        end
-        if infoLbl then
-            local partes = {}
-            local myChar = Pl.Character
-            if ExtraState.ESPDistancia and myChar then
-                local myHrp = myChar:FindFirstChild("HumanoidRootPart")
-                local theirHrp = char:FindFirstChild("HumanoidRootPart")
-                if myHrp and theirHrp then
-                    local dist = (myHrp.Position - theirHrp.Position).Magnitude
-                    table.insert(partes, string.format("%dm", math.floor(dist)))
+            if not char or not char.Parent then
+                if d then ESP_Limpar(p) end
+            else
+                -- Respawn detectado ou player novo → recria
+                if not d or d.Char ~= char then
+                    ESP_Limpar(p)
+                    ESP_Criar(p)
+                    d = ESP_Storage[p]
                 end
-            end
-            if ExtraState.ESPVida then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum then table.insert(partes, string.format("❤ %d", math.floor(hum.Health))) end
-            end
-            infoLbl.Text = table.concat(partes, "  •  ")
-            infoLbl.Visible = #partes > 0
-        end
-    end
 
-    -- Esqueleto
-    if ExtraState.ESPEsqueleto and hasDrawing then
-        if not d.Skeleton then ESP_CriarEsqueleto(d) end
-        if d.Skeleton then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                local bones = (hum.RigType == Enum.HumanoidRigType.R15) and SKELETON_R15 or SKELETON_R6
-                for i, pair in ipairs(bones) do
-                    local p1 = char:FindFirstChild(pair[1])
-                    local p2 = char:FindFirstChild(pair[2])
-                    local ln = d.Skeleton[i]
-                    if p1 and p2 and ln then
-                        local v1, on1 = cam:WorldToViewportPoint(p1.Position)
-                        local v2, on2 = cam:WorldToViewportPoint(p2.Position)
-                        if on1 and on2 then
-                            ln.From = Vector2.new(v1.X, v1.Y)
-                            ln.To = Vector2.new(v2.X, v2.Y)
-                            ln.Color = ExtraState.ESPCor
-                            ln.Visible = true
-                        else
-                            ln.Visible = false
+                if d then
+                    -- Highlight
+                    if d.Highlight then
+                        d.Highlight.Enabled = ExtraState.ESPHighlight
+                        d.Highlight.FillColor = ExtraState.ESPCor
+                    end
+
+                    -- Billboard: nome + info
+                    if d.Billboard then
+                        local nomeLbl = d.Billboard:FindFirstChild("Nome")
+                        local infoLbl = d.Billboard:FindFirstChild("Info")
+                        if nomeLbl then
+                            nomeLbl.Visible = ExtraState.ESPNome
+                            nomeLbl.Text = p.Name
+                            nomeLbl.TextColor3 = ExtraState.ESPCor
                         end
-                    elseif ln then
-                        ln.Visible = false
+                        if infoLbl then
+                            local partes = {}
+                            if ExtraState.ESPDistancia and rootPart and char:FindFirstChild("HumanoidRootPart") then
+                                local dist = math.floor((rootPart.Position - char.HumanoidRootPart.Position).Magnitude)
+                                table.insert(partes, "Dist: "..dist.."m")
+                            end
+                            if ExtraState.ESPVida then
+                                local hum = char:FindFirstChildOfClass("Humanoid")
+                                if hum then
+                                    table.insert(partes, "❤ "..math.floor(hum.Health))
+                                end
+                            end
+                            infoLbl.Text = table.concat(partes, "  •  ")
+                            infoLbl.Visible = #partes > 0
+                        end
+                    end
+
+                    -- ESQUELETO via Drawing
+                    if ExtraState.ESPEsqueleto and hasDrawing then
+                        if not d.Skeleton then
+                            d.Skeleton = {}
+                            for i = 1, 15 do
+                                local ok, ln = pcall(function() return Drawing.new("Line") end)
+                                if ok and ln then
+                                    ln.Color = ExtraState.ESPCor
+                                    ln.Thickness = 1.5
+                                    ln.Transparency = 1
+                                    ln.Visible = false
+                                    d.Skeleton[i] = ln
+                                else break end
+                            end
+                        end
+                        if d.Skeleton then
+                            local hum = char:FindFirstChildOfClass("Humanoid")
+                            if hum then
+                                local bones = (hum.RigType == Enum.HumanoidRigType.R15) and SKELETON_R15 or SKELETON_R6
+                                for i, pair in ipairs(bones) do
+                                    local p1 = char:FindFirstChild(pair[1])
+                                    local p2 = char:FindFirstChild(pair[2])
+                                    local ln = d.Skeleton[i]
+                                    if p1 and p2 and ln then
+                                        local v1, on1 = cam:WorldToViewportPoint(p1.Position)
+                                        local v2, on2 = cam:WorldToViewportPoint(p2.Position)
+                                        if on1 and on2 then
+                                            ln.From = Vector2.new(v1.X, v1.Y)
+                                            ln.To = Vector2.new(v2.X, v2.Y)
+                                            ln.Color = ExtraState.ESPCor
+                                            ln.Visible = true
+                                        else
+                                            ln.Visible = false
+                                        end
+                                    elseif ln then
+                                        ln.Visible = false
+                                    end
+                                end
+                            end
+                        end
+                    else
+                        if d.Skeleton then
+                            for _, ln in ipairs(d.Skeleton) do pcall(function() ln:Remove() end) end
+                            d.Skeleton = nil
+                        end
+                    end
+
+                    -- CAIXA via Drawing
+                    if ExtraState.ESPCaixa and hasDrawing then
+                        if not d.Box then
+                            d.Box = {}
+                            for i = 1, 4 do
+                                local ok, ln = pcall(function() return Drawing.new("Line") end)
+                                if ok and ln then
+                                    ln.Color = ExtraState.ESPCor
+                                    ln.Thickness = 1.5
+                                    ln.Transparency = 1
+                                    ln.Visible = false
+                                    d.Box[i] = ln
+                                else break end
+                            end
+                        end
+                        if d.Box then
+                            local hrp2 = char:FindFirstChild("HumanoidRootPart")
+                            if hrp2 then
+                                local topPos = hrp2.Position + Vector3.new(0, 3, 0)
+                                local botPos = hrp2.Position - Vector3.new(0, 3, 0)
+                                local topV, on1 = cam:WorldToViewportPoint(topPos)
+                                local botV, on2 = cam:WorldToViewportPoint(botPos)
+                                if on1 and on2 then
+                                    local h = math.abs(topV.Y - botV.Y)
+                                    local w = h * 0.55
+                                    local x, y = topV.X, topV.Y
+                                    local x1, y1 = x - w/2, y
+                                    local x2, y2 = x + w/2, y
+                                    local x3, y3 = x + w/2, y + h
+                                    local x4, y4 = x - w/2, y + h
+                                    if d.Box[1] then d.Box[1].From = Vector2.new(x1,y1); d.Box[1].To = Vector2.new(x2,y2); d.Box[1].Visible = true; d.Box[1].Color = ExtraState.ESPCor end
+                                    if d.Box[2] then d.Box[2].From = Vector2.new(x2,y2); d.Box[2].To = Vector2.new(x3,y3); d.Box[2].Visible = true; d.Box[2].Color = ExtraState.ESPCor end
+                                    if d.Box[3] then d.Box[3].From = Vector2.new(x3,y3); d.Box[3].To = Vector2.new(x4,y4); d.Box[3].Visible = true; d.Box[3].Color = ExtraState.ESPCor end
+                                    if d.Box[4] then d.Box[4].From = Vector2.new(x4,y4); d.Box[4].To = Vector2.new(x1,y1); d.Box[4].Visible = true; d.Box[4].Color = ExtraState.ESPCor end
+                                else
+                                    for _, ln in ipairs(d.Box) do ln.Visible = false end
+                                end
+                            end
+                        end
+                    else
+                        if d.Box then
+                            for _, ln in ipairs(d.Box) do pcall(function() ln:Remove() end) end
+                            d.Box = nil
+                        end
                     end
                 end
             end
         end
-    else
-        if d.Skeleton then
-            for _, ln in ipairs(d.Skeleton) do pcall(function() ln:Remove() end) end
-            d.Skeleton = nil
-        end
     end
 
-    -- Caixa
-    if ExtraState.ESPCaixa and hasDrawing then
-        if not d.Box then ESP_CriarCaixa(d) end
-        if d.Box then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local root = hrp.Position
-                local topPos = root + Vector3.new(0, 3, 0)
-                local bottomPos = root - Vector3.new(0, 3, 0)
-                local topV, on1 = cam:WorldToViewportPoint(topPos)
-                local botV, on2 = cam:WorldToViewportPoint(bottomPos)
-                if on1 and on2 then
-                    local h = math.abs(topV.Y - botV.Y)
-                    local w = h * 0.55
-                    local x = topV.X
-                    local y = topV.Y
-                    local x1, y1 = x - w/2, y
-                    local x2, y2 = x + w/2, y
-                    local x3, y3 = x + w/2, y + h
-                    local x4, y4 = x - w/2, y + h
-                    if d.Box[1] then d.Box[1].From = Vector2.new(x1,y1); d.Box[1].To = Vector2.new(x2,y2); d.Box[1].Visible = true; d.Box[1].Color = ExtraState.ESPCor end
-                    if d.Box[2] then d.Box[2].From = Vector2.new(x2,y2); d.Box[2].To = Vector2.new(x3,y3); d.Box[2].Visible = true; d.Box[2].Color = ExtraState.ESPCor end
-                    if d.Box[3] then d.Box[3].From = Vector2.new(x3,y3); d.Box[3].To = Vector2.new(x4,y4); d.Box[3].Visible = true; d.Box[3].Color = ExtraState.ESPCor end
-                    if d.Box[4] then d.Box[4].From = Vector2.new(x4,y4); d.Box[4].To = Vector2.new(x1,y1); d.Box[4].Visible = true; d.Box[4].Color = ExtraState.ESPCor end
-                else
-                    for _, ln in ipairs(d.Box) do ln.Visible = false end
-                end
-            end
-        end
-    else
-        if d.Box then
-            for _, ln in ipairs(d.Box) do pcall(function() ln:Remove() end) end
-            d.Box = nil
-        end
+    -- Limpa players que saíram
+    for p in pairs(ESP_Storage) do
+        if not p.Parent or p == Pl then ESP_Limpar(p) end
     end
 end
 
-R.RenderStepped:Connect(function()
-    if not ExtraState.ESPAtivo then return end
-    for _, p in ipairs(P:GetPlayers()) do
-        if p ~= Pl then
-            pcall(ESP_AtualizarUm, p)
+-- Loop principal de ESP
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        if ExtraState.ESPAtivo then
+            pcall(ESP_Atualizar)
+        else
+            for p in pairs(ESP_Storage) do ESP_Limpar(p) end
         end
     end
 end)
@@ -2968,7 +2967,7 @@ local function PanicMode()
 end
 
 -- =========================================================================
--- SUB-ABA: VISUAL (Zoom + Shaders + FPS Booster — Fullbright foi pros Shaders)
+-- SUB-ABA: VISUAL
 -- =========================================================================
 local function extraSalvarLighting()
     if ExtraState.LightOriginal then return end
@@ -3001,7 +3000,6 @@ local function ShowExtraVisualContent()
         end
     end)
 
-    -- Card de Shaders (agora com Fullbright aqui dentro)
     local shaderCard = UI.Card(_CH, 2, "🎨 Shaders / Efeitos Visuais")
 
     local shaderDesc = _I("TextLabel", shaderCard)
@@ -3050,7 +3048,6 @@ local function ShowExtraVisualContent()
         end
     end)
 
-    -- Card de FPS Booster
     local fpsCard = UI.Card(_CH, 3, "⚡ FPS Booster")
 
     local fpsDesc = _I("TextLabel", fpsCard)
@@ -3075,7 +3072,7 @@ local function ShowExtraVisualContent()
 end
 
 -- =========================================================================
--- SUB-ABA: MOVIMENTO (sem pulo alto)
+-- SUB-ABA: MOVIMENTO
 -- =========================================================================
 local function ShowExtraMovimentoContent()
     local card = UI.Card(_CH, 1, "🏃 Movimento")
@@ -3526,10 +3523,15 @@ local function gravPararReproducao(silencioso)
     Gravacao.Estado = "idle"
     if Gravacao.RepConn then Gravacao.RepConn:Disconnect(); Gravacao.RepConn = nil end
     if RefreshCharacter() then
-        humanoid:Move(Vector3.zero, false); humanoid.WalkSpeed = 16; humanoid.JumpPower = 50
+        pcall(function() rootPart.Anchored = false end)
+        humanoid:Move(Vector3.zero, false)
+        humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
         pcall(function() humanoid.AutoRotate = true end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true) end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
     end
     pararAnimacaoAndar()
     if not silencioso then Notify("REPRODUÇÃO", "⏹️ Reprodução parada.", "Orange") end
@@ -3542,50 +3544,87 @@ local function gravReproduzir(frames, nome)
     if Playback.Running then Notify("REPRODUÇÃO", "Pare o Auto Parkour antes.", "Error"); return end
     if not frames or #frames < 2 then Notify("REPRODUÇÃO", "Frames insuficientes.", "Error"); return end
     if not RefreshCharacter() then Notify("REPRODUÇÃO", "Personagem não encontrado.", "Error"); return end
+
     Gravacao.Estado = "reproduzindo"
+
+    -- ✅ SALVA ESTADOS ORIGINAIS
+    local rootAnchoredOriginal = rootPart.Anchored
+    local autoRotateOriginal = humanoid.AutoRotate
+    local walkSpeedOriginal = humanoid.WalkSpeed
+    local jumpPowerOriginal = humanoid.JumpPower
+
+    -- ✅ DESLIGA FÍSICA — elimina tremelique
+    pcall(function() rootPart.Anchored = true end)
     pcall(function() humanoid.AutoRotate = false end)
-    humanoid.WalkSpeed = 0; humanoid.JumpPower = 0
+    humanoid.WalkSpeed = 0
+    humanoid.JumpPower = 0
     pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false) end)
     pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false) end)
+    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false) end)
+    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, false) end)
+
     Notify("REPRODUÇÃO", "▶️ "..(nome or (#frames.." frames")), "Success")
     gravNotificarMudanca()
-    local t0 = os.clock(); local idx = 1
+
+    local t0 = os.clock()
+    local idx = 1
     local maxT = frames[#frames].t
     local ultimaPos = Vector3.new(frames[1].x, frames[1].y, frames[1].z)
     local animando = false
+
     Gravacao.RepConn = R.RenderStepped:Connect(function()
         if Gravacao.Estado ~= "reproduzindo" then return end
-        if not RefreshCharacter() then gravPararReproducao(true); return end
+        if not RefreshCharacter() then
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                rootPart = character.HumanoidRootPart
+                pcall(function() rootPart.Anchored = true end)
+            else
+                gravPararReproducao(true); return
+            end
+        end
+
         local elapsed = os.clock() - t0
         if elapsed >= maxT then
-            gravPararReproducao(true)
-            Notify("REPRODUÇÃO", "✅ Finalizada!", "Success"); return
+            pcall(function() rootPart.Anchored = rootAnchoredOriginal end)
+            pcall(function() humanoid.AutoRotate = autoRotateOriginal end)
+            humanoid.WalkSpeed = walkSpeedOriginal
+            humanoid.JumpPower = jumpPowerOriginal
+            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
+            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
+            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true) end)
+            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
+            Gravacao.Estado = "idle"
+            if Gravacao.RepConn then Gravacao.RepConn:Disconnect(); Gravacao.RepConn = nil end
+            pararAnimacaoAndar()
+            Notify("REPRODUÇÃO", "✅ Finalizada!", "Success")
+            gravNotificarMudanca()
+            return
         end
+
         while idx < #frames - 1 and elapsed > frames[idx + 1].t do idx = idx + 1 end
-        local a = frames[idx]; local b = frames[idx + 1] or a
+        local a = frames[idx]
+        local b = frames[idx + 1] or a
         local d = b.t - a.t
         local alpha = d > 0 and math.clamp((elapsed - a.t) / d, 0, 1) or 0
+
         local pa = Vector3.new(a.x, a.y, a.z)
         local pb = Vector3.new(b.x, b.y, b.z)
         local posAtual = pa:Lerp(pb, alpha)
+
         local ra = CFrame.Angles(a.rx or 0, a.ry or 0, a.rz or 0)
         local rb = CFrame.Angles(b.rx or 0, b.ry or 0, b.rz or 0)
         local rotAtual = ra:Lerp(rb, alpha)
+
         local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
         pcall(function() character:PivotTo(cf) end)
-        if rootPart then
-            pcall(function()
-                rootPart.AssemblyLinearVelocity = Vector3.zero
-                rootPart.AssemblyAngularVelocity = Vector3.zero
-            end)
-        end
+
         local delta = (posAtual - ultimaPos).Magnitude
         if delta > 0.005 then
             if not animando then iniciarAnimacaoAndar(); animando = true end
         else
             if animando then pararAnimacaoAndar(); animando = false end
         end
-        if a.j and not b.j then humanoid.Jump = true end
+
         ultimaPos = posAtual
     end)
 end
@@ -3825,7 +3864,7 @@ local function ShowGravarRota()
     local passos = _I("TextLabel", cardAjuda)
     passos.Size = _U2(1, 0, 0, 0); passos.AutomaticSize = Enum.AutomaticSize.Y
     passos.BackgroundTransparency = 1
-    passos.Text = "1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n5. Selecione a rota e clique em Reproduzir\n\n⚡ Na reprodução, o boneco anda no mesmo ritmo em que você gravou, com a animação normal do Roblox."
+    passos.Text = "1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n5. Selecione a rota e clique em Reproduzir\n\n⚡ A reprodução usa Ancored (física desligada) — sem tremelique e sem lag."
     passos.TextColor3 = _K.Gray; passos.Font = _GM
     passos.TextSize = 10; passos.TextWrapped = true
     passos.TextXAlignment = _XL; passos.TextYAlignment = Enum.TextYAlignment.Top
@@ -3944,4 +3983,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.1 carregado!")
+print("AKIRA MENU V2.3.2 carregado!")
