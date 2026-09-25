@@ -1,7 +1,8 @@
 -- =========================================================================
--- AKIRA MENU V2.2.2 — Persistência + Posições Dinâmicas
+-- AKIRA MENU V2.2.2 — Persistência + Posições Dinâmicas (Fix visual)
 --  • Salva API Key + Posições em arquivo (Akira_Config.json)
---  • Aba Posições: adicionar / editar nome / excluir / salvar / ir (até 15)
+--  • Aba Posições: adicionar / editar / excluir / salvar / ir (até 15)
+--  • Fix: excluir/adicionar atualizam na hora no menu
 -- =========================================================================
 
 -- =========================================================================
@@ -84,7 +85,7 @@ local LINK_PEGAR_KEY = "https://console.groq.com/keys"
 local httpRequest = request or (syn and syn.request) or (http and http.request) or http_request
 
 -- =========================================================================
--- PERSISTÊNCIA (Akira_Config.json)
+-- PERSISTÊNCIA
 -- =========================================================================
 local ARQ_CONFIG = "Akira_Config.json"
 local SUPORTA_SALVAR = (type(writefile)=="function") and (type(readfile)=="function") and (type(isfile)=="function")
@@ -1358,7 +1359,7 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
--- MODAL: EDITAR NOME DA POSIÇÃO
+-- MODAL: EDITAR NOME
 -- =========================================================================
 local function abrirModalEditarNome(nomeAtual, aoConfirmar)
     local modal = _I("Frame", Gui)
@@ -2020,7 +2021,7 @@ local function ShowVolvers()
 end
 
 -- =========================================================================
--- INTELIGÊNCIA ARTIFICIAL (Corrigir / Gerar Texto / Key)
+-- INTELIGÊNCIA ARTIFICIAL
 -- =========================================================================
 local IASubPage = "Corrigir"
 local iaOcupado = false
@@ -3094,7 +3095,7 @@ do
 end
 
 -- =========================================================================
--- EXTRA (hotbar: Visual / Posições)
+-- EXTRA (hotbar: Visual / Posições) — FIX atualização instantânea
 -- =========================================================================
 local ExtraSubPage = "Visual"
 
@@ -3212,7 +3213,7 @@ local function ShowExtraPosicoesContent()
     descCard.Size = _U2(1, 0, 0, 78)
     descCard.BackgroundColor3 = _RGB(25, 22, 35)
     descCard.BorderSizePixel = 0
-    descCard.LayoutOrder = 0
+    descCard.LayoutOrder = 1
     Corner(descCard, 8)
     Stroke(descCard, _K.Purple, 1.5)
 
@@ -3238,9 +3239,17 @@ local function ShowExtraPosicoesContent()
     descText.TextXAlignment = _XL
     descText.TextYAlignment = Enum.TextYAlignment.Top
 
+    -- Re-renderiza o menu no próximo frame
+    local function refreshMenu()
+        task.defer(function()
+            task.wait(0.05)
+            ShowExtra()
+        end)
+    end
+
     -- Botão adicionar
     local podeAdicionar = #Persist.posicoes < Persist.limite_posicoes
-    local btnAdd = UI.ActionButton(_CH, 1,
+    UI.ActionButton(_CH, 2,
         podeAdicionar and ("➕ Adicionar Posição  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")")
                           or ("🚫 Limite atingido  ("..#Persist.posicoes.."/"..Persist.limite_posicoes..")"),
         podeAdicionar and _K.Success or _RGB(70,70,80),
@@ -3265,7 +3274,7 @@ local function ShowExtraPosicoesContent()
             })
             persistSalvar()
             Notify("POSIÇÃO", "📍 Posição "..n.." adicionada!", "Success")
-            ShowExtra()
+            refreshMenu()
         end)
 
     -- Lista de posições
@@ -3274,7 +3283,7 @@ local function ShowExtraPosicoesContent()
         vazio.Size = _U2(1, 0, 0, 55)
         vazio.BackgroundColor3 = _RGB(18,18,24)
         vazio.BorderSizePixel = 0
-        vazio.LayoutOrder = 2
+        vazio.LayoutOrder = 3
         Corner(vazio, 8)
         Stroke(vazio, _K.Stroke, 1)
         local vazioLbl = _I("TextLabel", vazio)
@@ -3290,12 +3299,22 @@ local function ShowExtraPosicoesContent()
         return
     end
 
-    for i, pos in ipairs(Persist.posicoes) do
+    -- Função auxiliar: acha o índice atual pelo objeto (evita bug de closure)
+    local function acharIndiceDaPosicao(alvo)
+        for j, p in ipairs(Persist.posicoes) do
+            if p == alvo then
+                return j
+            end
+        end
+        return nil
+    end
+
+    for ordem, pos in ipairs(Persist.posicoes) do
         local card = _I("Frame", _CH)
         card.Size = _U2(1, 0, 0, 94)
         card.BackgroundColor3 = _RGB(18, 18, 24)
         card.BorderSizePixel = 0
-        card.LayoutOrder = i + 1
+        card.LayoutOrder = ordem + 2
         Corner(card, 8)
         Stroke(card, _K.Stroke, 1)
 
@@ -3349,7 +3368,7 @@ local function ShowExtraPosicoesContent()
         coordLbl.TextSize = 9
         coordLbl.TextXAlignment = _XL
 
-        -- Botão Salvar (sobrescrever coords)
+        -- Botão Salvar
         local btnSave = _I("TextButton", card)
         btnSave.AnchorPoint = _V2(1, 1)
         btnSave.Position = _U2(0.5, -5, 1, -10)
@@ -3383,15 +3402,21 @@ local function ShowExtraPosicoesContent()
                 pos.nome = novoNome
                 persistSalvar()
                 Notify("POSIÇÃO", "Nome atualizado: "..novoNome, "Success")
-                ShowExtra()
+                refreshMenu()
             end)
         end)
 
         btnDel.MouseButton1Click:Connect(function()
-            table.remove(Persist.posicoes, i)
+            local idxAtual = acharIndiceDaPosicao(pos)
+            if not idxAtual then
+                Notify("POSIÇÃO", "Posição já foi removida.", "Orange")
+                return
+            end
+            local nomeRemovido = pos.nome
+            table.remove(Persist.posicoes, idxAtual)
             persistSalvar()
-            Notify("POSIÇÃO", "Posição '"..pos.nome.."' excluída.", "Orange")
-            ShowExtra()
+            Notify("POSIÇÃO", "🗑️ '"..nomeRemovido.."' excluída!", "Orange")
+            refreshMenu()
         end)
 
         btnSave.MouseButton1Click:Connect(function()
@@ -3407,7 +3432,7 @@ local function ShowExtraPosicoesContent()
             pos.rx = rx; pos.ry = ry; pos.rz = rz
             persistSalvar()
             Notify("POSIÇÃO", "💾 '"..pos.nome.."' atualizada!", "Success")
-            ShowExtra()
+            refreshMenu()
         end)
 
         btnIr.MouseButton1Click:Connect(function()
