@@ -1,8 +1,8 @@
 -- =========================================================================
--- AKIRA MENU V2.2.4 — Gravar Rota + Persistência
---  • Aba "Gravar Rota": gravar movimentos, reproduzir, salvar em arquivo
---  • Visual igual ao HAVAC (2 colunas: Gravação + Config Motor)
---  • Persistência: Akira_Config.json
+-- AKIRA MENU V2.2.5 — Gravar Rota profissional (animação + UI limpa)
+--  • Gravação: captura posição, rotação, pulo E velocidade
+--  • Reprodução: aciona animação (Move) + mantém posição exata (PivotTo)
+--  • UI: botão único Iniciar → Parar → Preview → Salvar
 -- =========================================================================
 
 -- =========================================================================
@@ -93,7 +93,7 @@ local SUPORTA_SALVAR = (type(writefile)=="function") and (type(readfile)=="funct
 local Persist = {
     ia_key = "",
     posicoes = {},
-    rotas_salvas = {}, -- {{nome, frames}, ...}
+    rotas_salvas = {},
     limite_posicoes = 15
 }
 
@@ -140,7 +140,9 @@ local function persistCarregar()
                             x = f.x, y = f.y, z = f.z,
                             rx = tonumber(f.rx) or 0,
                             ry = tonumber(f.ry) or 0,
-                            rz = tonumber(f.rz) or 0
+                            rz = tonumber(f.rz) or 0,
+                            j = f.j and true or false,
+                            ws = tonumber(f.ws) or 16
                         })
                     end
                 end
@@ -904,7 +906,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.4"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.5"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -1385,7 +1387,7 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
--- MODAL: EDITAR NOME (genérico)
+-- MODAL: EDITAR NOME
 -- =========================================================================
 local function abrirModalEditarNome(titulo, nomeAtual, aoConfirmar)
     local modal = _I("Frame", Gui)
@@ -1460,554 +1462,6 @@ local function abrirModalEditarNome(titulo, nomeAtual, aoConfirmar)
     end)
 
     box:CaptureFocus()
-end
-
--- =========================================================================
--- SISTEMA DE GRAVAÇÃO DE ROTA
--- =========================================================================
-local Gravacao = {
-    Ativa = false,
-    Reproduzindo = false,
-    Frames = {},
-    StartGravacao = 0,
-    UltimoFrame = -math.huge,
-    Velocidade = 10, -- Hz
-    MostrarRota = true,
-    MoveTo = false,
-    GravConn = nil,
-    RepConn = nil,
-    LinhasFolder = nil,
-    RotaSelecionada = nil,
-    MAX_FRAMES = 5000,
-    MAX_SEGUNDOS = 300
-}
-
--- Pasta de linhas própria (não conflita com o parkour)
-local function gravClearLines()
-    if not Gravacao.LinhasFolder then return end
-    for _, o in ipairs(Gravacao.LinhasFolder:GetChildren()) do
-        o:Destroy()
-    end
-end
-
-local function gravCreateLine(a, b)
-    if not a or not b then return end
-    local d = b - a
-    local dist = d.Magnitude
-    if dist < .01 then return end
-    if not Gravacao.LinhasFolder then
-        Gravacao.LinhasFolder = _I("Folder")
-        Gravacao.LinhasFolder.Name = "ZKY_GravacaoLines"
-        Gravacao.LinhasFolder.Parent = workspace
-    end
-    local l = _I("Part")
-    l.Name = "GravSeg"
-    l.Anchored = true
-    l.CanCollide = false
-    l.CanTouch = false
-    l.CanQuery = false
-    l.CastShadow = false
-    l.Material = Enum.Material.Neon
-    l.Color = _RGB(150, 110, 240)
-    l.Transparency = 0.2
-    l.Size = Vector3.new(.15, .15, dist)
-    l.CFrame = CFrame.lookAt((a + b) / 2, b)
-    l.Parent = Gravacao.LinhasFolder
-end
-
-local function gravMostrarLinhas(frames, mostrar)
-    gravClearLines()
-    if not mostrar then return end
-    if not frames or #frames < 2 then return end
-    local last = nil
-    for _, f in ipairs(frames) do
-        local p = Vector3.new(f.x, f.y, f.z)
-        if last then gravCreateLine(last, p) end
-        last = p
-    end
-end
-
-local function gravIniciar()
-    if Gravacao.Ativa then return end
-    if not RefreshCharacter() then
-        Notify("GRAVAÇÃO", "Personagem não encontrado.", "Error")
-        return
-    end
-    Gravacao.Frames = {}
-    Gravacao.StartGravacao = os.clock()
-    Gravacao.UltimoFrame = -math.huge
-    Gravacao.Ativa = true
-    Notify("GRAVAÇÃO", "⏺️ Gravando... faça seus movimentos!", "Success")
-
-    Gravacao.GravConn = R.Heartbeat:Connect(function()
-        if not Gravacao.Ativa then return end
-        if not RefreshCharacter() then return end
-        if #Gravacao.Frames >= Gravacao.MAX_FRAMES then
-            Gravacao.Ativa = false
-            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
-            Notify("GRAVAÇÃO", "Limite de "..Gravacao.MAX_FRAMES.." frames atingido. Parado.", "Orange")
-            return
-        end
-        local agora = os.clock()
-        if agora - Gravacao.StartGravacao > Gravacao.MAX_SEGUNDOS then
-            Gravacao.Ativa = false
-            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
-            Notify("GRAVAÇÃO", "Tempo máximo ("..Gravacao.MAX_SEGUNDOS.."s) atingido. Parado.", "Orange")
-            return
-        end
-        if agora - Gravacao.UltimoFrame < (1 / Gravacao.Velocidade) then return end
-        Gravacao.UltimoFrame = agora
-        local cf = rootPart.CFrame
-        local rx, ry, rz = cf:ToEulerAnglesXYZ()
-        table.insert(Gravacao.Frames, {
-            t = agora - Gravacao.StartGravacao,
-            x = cf.Position.X,
-            y = cf.Position.Y,
-            z = cf.Position.Z,
-            rx = rx, ry = ry, rz = rz
-        })
-    end)
-end
-
-local function gravParar()
-    if not Gravacao.Ativa then return end
-    Gravacao.Ativa = false
-    if Gravacao.GravConn then
-        Gravacao.GravConn:Disconnect()
-        Gravacao.GravConn = nil
-    end
-    if #Gravacao.Frames > 0 then
-        local ultimo = Gravacao.Frames[#Gravacao.Frames]
-        Notify("GRAVAÇÃO", "⏹️ Parado! "..#Gravacao.Frames.." frames ("..string.format("%.1f", ultimo.t).."s)", "Success")
-    else
-        Notify("GRAVAÇÃO", "Nada foi gravado.", "Orange")
-    end
-end
-
-local function gravPararReproducao(silencioso)
-    if not Gravacao.Reproduzindo then return end
-    Gravacao.Reproduzindo = false
-    if Gravacao.RepConn then
-        Gravacao.RepConn:Disconnect()
-        Gravacao.RepConn = nil
-    end
-    if RefreshCharacter() then
-        humanoid:Move(Vector3.zero, false)
-        pcall(function() humanoid.AutoRotate = true end)
-    end
-    if not silencioso then
-        Notify("REPRODUÇÃO", "⏹️ Reprodução parada.", "Orange")
-    end
-end
-
-local function gravReproduzir(frames)
-    if Gravacao.Reproduzindo then return end
-    if Playback.Running then
-        Notify("REPRODUÇÃO", "Pare o Auto Parkour antes de reproduzir.", "Error")
-        return
-    end
-    if not frames or #frames < 2 then
-        Notify("REPRODUÇÃO", "Sem frames suficientes pra reproduzir.", "Error")
-        return
-    end
-    if not RefreshCharacter() then
-        Notify("REPRODUÇÃO", "Personagem não encontrado.", "Error")
-        return
-    end
-
-    Gravacao.Reproduzindo = true
-    pcall(function() humanoid.AutoRotate = false end)
-    Notify("REPRODUÇÃO", "▶️ Reproduzindo "..#frames.." frames...", "Success")
-
-    local t0 = os.clock()
-    local idx = 1
-    local maxT = frames[#frames].t
-
-    Gravacao.RepConn = R.Heartbeat:Connect(function()
-        if not Gravacao.Reproduzindo then return end
-        if not RefreshCharacter() then gravPararReproducao(true); return end
-
-        local elapsed = os.clock() - t0
-        if elapsed >= maxT then
-            local f = frames[#frames]
-            ApplyPosition(Vector3.new(f.x, f.y, f.z), CFrame.Angles(f.rx, f.ry, f.rz))
-            gravPararReproducao(true)
-            Notify("REPRODUÇÃO", "✅ Rota finalizada!", "Success")
-            return
-        end
-
-        while idx < #frames - 1 and elapsed > frames[idx + 1].t do
-            idx = idx + 1
-        end
-
-        local a = frames[idx]
-        local b = frames[idx + 1] or a
-        local d = b.t - a.t
-        local alpha = d > 0 and math.clamp((elapsed - a.t) / d, 0, 1) or 0
-
-        local pa = Vector3.new(a.x, a.y, a.z)
-        local pb = Vector3.new(b.x, b.y, b.z)
-        local pos = pa:Lerp(pb, alpha)
-
-        local ra = CFrame.Angles(a.rx or 0, a.ry or 0, a.rz or 0)
-        local rb = CFrame.Angles(b.rx or 0, b.ry or 0, b.rz or 0)
-        local rot = ra:Lerp(rb, alpha)
-
-        if Gravacao.MoveTo then
-            -- MoveTo: mais natural, menos preciso
-            if rootPart then
-                pcall(function() humanoid:MoveTo(pos) end)
-            end
-        else
-            ApplyPosition(pos, rot)
-        end
-    end)
-end
-
--- =========================================================================
--- ABA: GRAVAR ROTA (visual HAVAC)
--- =========================================================================
-local GravarRotaAbaAtiva = false
-
-local function ShowGravarRota()
-    CurrentPage = "GravarRota"
-    GravarRotaAbaAtiva = true
-    ClearContent()
-
-    local col1, col2 = CreateTwoColumns(_CH, 0)
-
-    -- ============================================================
-    -- COLUNA ESQUERDA: Gravação & Execução
-    -- ============================================================
-    local cardPrincipal = UI.Card(col1, 1, "🎬 Gravação & Execução")
-
-    -- -------- Sub-seção: Rotas Temporárias --------
-    local subTemp = _I("Frame", cardPrincipal)
-    subTemp.Size = _U2(1, 0, 0, 0)
-    subTemp.AutomaticSize = Enum.AutomaticSize.Y
-    subTemp.BackgroundColor3 = _RGB(18, 18, 24)
-    subTemp.BorderSizePixel = 0
-    subTemp.LayoutOrder = 1
-    Corner(subTemp, 6)
-    Stroke(subTemp, _K.Stroke, 1)
-    Padding(subTemp, 10, 10, 10, 10)
-
-    local layTemp = _I("UIListLayout", subTemp)
-    layTemp.Padding = _UD(0, 8)
-    layTemp.SortOrder = Enum.SortOrder.LayoutOrder
-    layTemp.Parent = subTemp
-
-    local tempTitle = _I("TextLabel", subTemp)
-    tempTitle.Size = _U2(1, 0, 0, 14)
-    tempTitle.BackgroundTransparency = 1
-    tempTitle.Text = "Rotas Temporárias"
-    tempTitle.TextColor3 = _K.PurpleLight
-    tempTitle.Font = _GB
-    tempTitle.TextSize = 11
-    tempTitle.TextXAlignment = _XL
-    tempTitle.LayoutOrder = 0
-
-    -- Toggle Gravar
-    UI.Toggle(subTemp, 1, "Gravar", Gravacao.Ativa, function(v)
-        if v then gravIniciar() else gravParar() end
-    end)
-
-    -- Toggle Mostrar Rota
-    UI.Toggle(subTemp, 2, "Mostrar Rota", Gravacao.MostrarRota, function(v)
-        Gravacao.MostrarRota = v
-        gravMostrarLinhas(Gravacao.Frames, v)
-    end)
-
-    -- Botão Reproduzir / Parar
-    local btnRep = UI.ActionButton(subTemp, 3,
-        Gravacao.Reproduzindo and "⏹️ Parar" or "▶️ Reproduzir / Parar",
-        Gravacao.Reproduzindo and _K.Error or _RGB(40, 40, 55),
-        function()
-            if Gravacao.Reproduzindo then
-                gravPararReproducao()
-            else
-                if #Gravacao.Frames < 2 then
-                    Notify("REPRODUÇÃO", "Grave algo primeiro!", "Error")
-                    return
-                end
-                gravReproduzir(Gravacao.Frames)
-            end
-        end)
-
-    -- TextBox nome da rota
-    local nomeBox = UI.TextBox(subTemp, 4, "Nome da Rota", "Vazio = Automático", "", function() end)
-
-    -- Botão Salvar Rota
-    UI.ActionButton(subTemp, 5, "💾 Salvar Rota", _K.Success, function()
-        if #Gravacao.Frames < 2 then
-            Notify("SALVAR", "Grave algo primeiro!", "Error")
-            return
-        end
-        if #Persist.rotas_salvas >= 30 then
-            Notify("SALVAR", "Limite de 30 rotas salvas atingido.", "Error")
-            return
-        end
-        local nome = nomeBox.Text:gsub("^%s+",""):gsub("%s+$","")
-        if nome == "" then
-            nome = "Rota "..(#Persist.rotas_salvas + 1)
-        end
-        -- Verifica se já existe com mesmo nome
-        for _, r in ipairs(Persist.rotas_salvas) do
-            if r.nome == nome then
-                Notify("SALVAR", "Já existe uma rota chamada '"..nome.."'.", "Error")
-                return
-            end
-        end
-        -- Cópia dos frames (evita referência compartilhada)
-        local copia = {}
-        for i, f in ipairs(Gravacao.Frames) do
-            copia[i] = { t = f.t, x = f.x, y = f.y, z = f.z,
-                rx = f.rx or 0, ry = f.ry or 0, rz = f.rz or 0 }
-        end
-        table.insert(Persist.rotas_salvas, { nome = nome, frames = copia })
-        persistSalvar()
-        nomeBox.Text = ""
-        Notify("SALVAR", "✅ Rota '"..nome.."' salva! ("..#copia.." frames)", "Success")
-        task.defer(function()
-            task.wait(0.1)
-            ShowGravarRota()
-        end)
-    end)
-
-    -- -------- Sub-seção: Rotas Salvas --------
-    local subSalvas = _I("Frame", cardPrincipal)
-    subSalvas.Size = _U2(1, 0, 0, 0)
-    subSalvas.AutomaticSize = Enum.AutomaticSize.Y
-    subSalvas.BackgroundColor3 = _RGB(18, 18, 24)
-    subSalvas.BorderSizePixel = 0
-    subSalvas.LayoutOrder = 2
-    Corner(subSalvas, 6)
-    Stroke(subSalvas, _K.Stroke, 1)
-    Padding(subSalvas, 10, 10, 10, 10)
-
-    local laySalvas = _I("UIListLayout", subSalvas)
-    laySalvas.Padding = _UD(0, 8)
-    laySalvas.SortOrder = Enum.SortOrder.LayoutOrder
-    laySalvas.Parent = subSalvas
-
-    local salvasTitle = _I("TextLabel", subSalvas)
-    salvasTitle.Size = _U2(1, 0, 0, 14)
-    salvasTitle.BackgroundTransparency = 1
-    salvasTitle.Text = "Rotas Salvas"
-    salvasTitle.TextColor3 = _K.PurpleLight
-    salvasTitle.Font = _GB
-    salvasTitle.TextSize = 11
-    salvasTitle.TextXAlignment = _XL
-    salvasTitle.LayoutOrder = 0
-
-    -- Dropdown de rotas
-    local nomes = {}
-    for _, r in ipairs(Persist.rotas_salvas) do
-        table.insert(nomes, r.nome)
-    end
-    if #nomes == 0 then table.insert(nomes, "(Nenhuma)") end
-
-    local selecionadoAtual = Gravacao.RotaSelecionada or nomes[1]
-    UI.Dropdown(subSalvas, 1, "Selecionar Rota", nomes, selecionadoAtual, function(op)
-        if op == "(Nenhuma)" then
-            Gravacao.RotaSelecionada = nil
-            return
-        end
-        Gravacao.RotaSelecionada = op
-    end)
-
-    -- Botão Iniciar / Parar
-    local btnExec = UI.ActionButton(subSalvas, 2,
-        Gravacao.Reproduzindo and "⏹️ Parar" or "▶️ Iniciar / Parar",
-        Gravacao.Reproduzindo and _K.Error or _K.Purple,
-        function()
-            if Gravacao.Reproduzindo then
-                gravPararReproducao()
-                return
-            end
-            local sel = Gravacao.RotaSelecionada
-            if not sel then
-                Notify("EXECUTAR", "Selecione uma rota primeiro.", "Error")
-                return
-            end
-            local rotaEncontrada = nil
-            for _, r in ipairs(Persist.rotas_salvas) do
-                if r.nome == sel then
-                    rotaEncontrada = r
-                    break
-                end
-            end
-            if not rotaEncontrada then
-                Notify("EXECUTAR", "Rota não encontrada.", "Error")
-                return
-            end
-            gravReproduzir(rotaEncontrada.frames)
-        end)
-
-    -- Toggle Ver Rota (mostra as linhas da rota selecionada)
-    UI.Toggle(subSalvas, 3, "Ver Rota", false, function(v)
-        local sel = Gravacao.RotaSelecionada
-        if not sel then
-            if v then Notify("VER ROTA", "Selecione uma rota primeiro.", "Error") end
-            return
-        end
-        local rotaEncontrada = nil
-        for _, r in ipairs(Persist.rotas_salvas) do
-            if r.nome == sel then rotaEncontrada = r break end
-        end
-        if not rotaEncontrada then return end
-        gravMostrarLinhas(rotaEncontrada.frames, v)
-    end)
-
-    -- TextBox Renomear
-    local renomeBox = UI.TextBox(subSalvas, 4, "Renomear Rota", "Novo nome...", "", function() end)
-
-    -- Botão Aplicar Renomear
-    UI.ActionButton(subSalvas, 5, "✏️ Renomear", _RGB(50, 60, 90), function()
-        local sel = Gravacao.RotaSelecionada
-        if not sel then
-            Notify("RENOMEAR", "Selecione uma rota primeiro.", "Error")
-            return
-        end
-        local novo = renomeBox.Text:gsub("^%s+",""):gsub("%s+$","")
-        if novo == "" then
-            Notify("RENOMEAR", "Digite o novo nome primeiro.", "Error")
-            return
-        end
-        -- Verifica duplicata
-        for _, r in ipairs(Persist.rotas_salvas) do
-            if r.nome == novo and r.nome ~= sel then
-                Notify("RENOMEAR", "Já existe uma rota com esse nome.", "Error")
-                return
-            end
-        end
-        for _, r in ipairs(Persist.rotas_salvas) do
-            if r.nome == sel then
-                r.nome = novo
-                break
-            end
-        end
-        Gravacao.RotaSelecionada = novo
-        persistSalvar()
-        renomeBox.Text = ""
-        Notify("RENOMEAR", "✅ Renomeada para '"..novo.."'", "Success")
-        task.defer(function()
-            task.wait(0.1)
-            ShowGravarRota()
-        end)
-    end)
-
-    -- Botão Excluir
-    UI.ActionButton(subSalvas, 6, "🗑️ Excluir Rota", _RGB(150, 40, 40), function()
-        local sel = Gravacao.RotaSelecionada
-        if not sel then
-            Notify("EXCLUIR", "Selecione uma rota primeiro.", "Error")
-            return
-        end
-        for i, r in ipairs(Persist.rotas_salvas) do
-            if r.nome == sel then
-                table.remove(Persist.rotas_salvas, i)
-                break
-            end
-        end
-        Gravacao.RotaSelecionada = nil
-        persistSalvar()
-        Notify("EXCLUIR", "🗑️ Rota '"..sel.."' excluída.", "Orange")
-        task.defer(function()
-            task.wait(0.1)
-            ShowGravarRota()
-        end)
-    end)
-
-    -- ============================================================
-    -- COLUNA DIREITA: Configurações do Motor
-    -- ============================================================
-    local cardMotor = UI.Card(col2, 1, "⚙️ Configurações do Motor")
-
-    UI.Slider(cardMotor, 1, "Velocidade de Gravação (Hz)", Gravacao.Velocidade, 1, 30, false, function(v)
-        Gravacao.Velocidade = v
-    end)
-
-    UI.Toggle(cardMotor, 2, "MoveTo (movimento natural)", Gravacao.MoveTo, function(v)
-        Gravacao.MoveTo = v
-    end)
-
-    -- Info
-    local infoCard = _I("Frame", cardMotor)
-    infoCard.Size = _U2(1, 0, 0, 0)
-    infoCard.AutomaticSize = Enum.AutomaticSize.Y
-    infoCard.BackgroundColor3 = _RGB(15, 15, 20)
-    infoCard.BorderSizePixel = 0
-    infoCard.LayoutOrder = 3
-    Corner(infoCard, 6)
-    Stroke(infoCard, _K.Stroke, 1)
-    Padding(infoCard, 8, 8, 8, 8)
-
-    local infoLbl = _I("TextLabel", infoCard)
-    infoLbl.Size = _U2(1, 0, 0, 0)
-    infoLbl.AutomaticSize = Enum.AutomaticSize.Y
-    infoLbl.BackgroundTransparency = 1
-    infoLbl.Text = "ℹ️ Como usar:\n1. Ative 'Gravar'\n2. Faça seus movimentos no jogo\n3. Desative 'Gravar'\n4. Dê um nome e clique em 'Salvar Rota'\n\n💡 Rotas salvas ficam no arquivo Akira_Config.json"
-    infoLbl.TextColor3 = _K.DarkGray
-    infoLbl.Font = _GM
-    infoLbl.TextSize = 9
-    infoLbl.TextWrapped = true
-    infoLbl.TextXAlignment = _XL
-    infoLbl.TextYAlignment = Enum.TextYAlignment.Top
-
-    -- Status de gravação (atualiza ao vivo)
-    local statusCard = _I("Frame", cardMotor)
-    statusCard.Size = _U2(1, 0, 0, 40)
-    statusCard.BackgroundColor3 = _RGB(15, 15, 20)
-    statusCard.BorderSizePixel = 0
-    statusCard.LayoutOrder = 4
-    Corner(statusCard, 6)
-    Stroke(statusCard, Gravacao.Ativa and _K.Error or _K.Stroke, 1)
-
-    local statusDot = _I("Frame", statusCard)
-    statusDot.Size = _UO(10, 10)
-    statusDot.Position = _UO(12, 15)
-    statusDot.BackgroundColor3 = Gravacao.Ativa and _K.Error or _K.DarkGray
-    statusDot.BorderSizePixel = 0
-    Corner(statusDot, 5)
-
-    local statusLbl = _I("TextLabel", statusCard)
-    statusLbl.BackgroundTransparency = 1
-    statusLbl.Position = _UO(30, 0)
-    statusLbl.Size = _U2(1, -40, 1, 0)
-    statusLbl.Text = Gravacao.Ativa and "⏺️ GRAVANDO..." or "⏹️ Parado"
-    statusLbl.TextColor3 = Gravacao.Ativa and _K.Error or _K.Gray
-    statusLbl.Font = _GB
-    statusLbl.TextSize = 11
-    statusLbl.TextXAlignment = _XL
-    statusLbl.TextYAlignment = Enum.TextYAlignment.Center
-
-    -- Loop de atualização ao vivo do status
-    task.spawn(function()
-        while GravarRotaAbaAtiva and statusCard.Parent do
-            task.wait(0.15)
-            if statusLbl.Parent and statusDot.Parent then
-                if Gravacao.Ativa then
-                    local n = #Gravacao.Frames
-                    local tempo = n > 0 and Gravacao.Frames[n].t or 0
-                    statusLbl.Text = string.format("⏺️ GRAVANDO  •  %d frames  •  %.1fs", n, tempo)
-                    statusLbl.TextColor3 = _K.Error
-                    statusDot.BackgroundColor3 = _K.Error
-                elseif Gravacao.Reproduzindo then
-                    statusLbl.Text = "▶️ REPRODUZINDO..."
-                    statusLbl.TextColor3 = _K.PurpleLight
-                    statusDot.BackgroundColor3 = _K.PurpleLight
-                else
-                    local n = #Gravacao.Frames
-                    statusLbl.Text = "⏹️ Parado  •  "..n.." frames gravados"
-                    statusLbl.TextColor3 = _K.Gray
-                    statusDot.BackgroundColor3 = _K.DarkGray
-                end
-            end
-        end
-    end)
-
-    Content.CanvasPosition = _V2()
 end
 
 -- =========================================================================
@@ -2138,7 +1592,6 @@ end
 
 local function ShowTAFFS()
     CurrentPage="TAFFS"
-    GravarRotaAbaAtiva = false
     ClearContent()
     local warningCard=_I("Frame")
     warningCard.Size=_U2(1,0,0,70) warningCard.BackgroundColor3=_RGB(45,35,20)
@@ -2465,7 +1918,6 @@ end
 
 function ShowEBDelta()
     CurrentPage = "EBDelta"
-    GravarRotaAbaAtiva = false
     ClearContent()
     local hotbar = _I("Frame", _CH)
     hotbar.Size = _U2(1,0,0,30)
@@ -2519,7 +1971,6 @@ end
 -- =========================================================================
 local function ShowVolvers()
     CurrentPage="Volvers"
-    GravarRotaAbaAtiva = false
     ClearContent()
     local header=_I("Frame")
     header.Size=_U2(1,0,0,58) header.BackgroundColor3=_K.Card header.BorderSizePixel=0
@@ -2870,7 +2321,6 @@ end
 
 local function ShowIA()
     CurrentPage = "IA"
-    GravarRotaAbaAtiva = false
     ClearContent()
     local hotbar = _I("Frame", _CH)
     hotbar.Size = _U2(1,0,0,30)
@@ -2918,11 +2368,10 @@ local function ShowIA()
 end
 
 -- =========================================================================
--- CRÉDITOS / HOME
+-- CRÉDITOS
 -- =========================================================================
 local function ShowCreditos()
     CurrentPage = "Creditos"
-    GravarRotaAbaAtiva = false
     ClearContent()
     local link = "https://discord.gg/NY2RfC7Kx"
     local header = _I("Frame", _CH)
@@ -3202,7 +2651,6 @@ do
     end
     function ShowTextosProntos()
         CurrentPage = "TextosProntos"
-        GravarRotaAbaAtiva = false
         ClearContent()
         local header = _I("Frame", _CH)
         header.Size = _U2(1, 0, 0, 58)
@@ -3393,7 +2841,6 @@ end)
 
 function ShowCombate()
     CurrentPage = "Combate"
-    GravarRotaAbaAtiva = false
     ClearContent()
     Content.ScrollingEnabled = true
     local col1, col2 = CreateTwoColumns(_CH, 0)
@@ -3657,7 +3104,6 @@ do
     end
     ShowLoja=function()
         CurrentPage="Loja"
-        GravarRotaAbaAtiva = false
         ClearContent()
         local card = UI.Card(_CH, 0, "🔫 Loja de Armas")
         local lbl = _I("TextLabel", card)
@@ -3790,7 +3236,6 @@ local function ShowExtraVisualContent()
 end
 
 local function ShowExtraPosicoesContent()
-    -- Descrição
     local descCard = _I("Frame", _CH)
     descCard.Size = _U2(1, 0, 0, 78)
     descCard.BackgroundColor3 = _RGB(25, 22, 35)
@@ -3821,7 +3266,6 @@ local function ShowExtraPosicoesContent()
     descText.TextXAlignment = _XL
     descText.TextYAlignment = Enum.TextYAlignment.Top
 
-    -- Botão adicionar
     local btnAdd = UI.ActionButton(_CH, 2, "", _K.Success, function() end)
     local function atualizarBotaoAdd()
         if #Persist.posicoes < Persist.limite_posicoes then
@@ -3834,7 +3278,6 @@ local function ShowExtraPosicoesContent()
     end
     atualizarBotaoAdd()
 
-    -- Container dos cards
     local container = _I("Frame", _CH)
     container.Size = _U2(1, 0, 0, 0)
     container.AutomaticSize = Enum.AutomaticSize.Y
@@ -4051,7 +3494,6 @@ end
 
 local function ShowExtra()
     CurrentPage = "Extra"
-    GravarRotaAbaAtiva = false
     ClearContent()
 
     local hotbar = _I("Frame", _CH)
@@ -4103,6 +3545,729 @@ local function ShowExtra()
     else
         ShowExtraVisualContent()
     end
+
+    Content.CanvasPosition = _V2()
+end
+
+-- =========================================================================
+-- SISTEMA DE GRAVAÇÃO PROFISSIONAL
+-- =========================================================================
+local Gravacao = {
+    Estado = "idle",  -- "idle" | "gravando" | "preview" | "reproduzindo"
+    Frames = {},
+    StartGravacao = 0,
+    UltimoFrame = -math.huge,
+    Velocidade = 15,      -- Hz
+    MostrarRota = true,
+    Natural = true,       -- true = Move (com animação), false = PivotTo puro
+    GravConn = nil,
+    RepConn = nil,
+    LinhasFolder = nil,
+    RotaSelecionada = nil,
+    PreviewNomeBox = nil,
+    MAX_FRAMES = 8000,
+    MAX_SEGUNDOS = 600
+}
+
+local function gravClearLines()
+    if not Gravacao.LinhasFolder then return end
+    for _, o in ipairs(Gravacao.LinhasFolder:GetChildren()) do
+        o:Destroy()
+    end
+end
+
+local function gravCreateLine(a, b, cor)
+    if not a or not b then return end
+    local d = b - a
+    local dist = d.Magnitude
+    if dist < .01 then return end
+    if not Gravacao.LinhasFolder then
+        Gravacao.LinhasFolder = _I("Folder")
+        Gravacao.LinhasFolder.Name = "ZKY_GravacaoLines"
+        Gravacao.LinhasFolder.Parent = workspace
+    end
+    local l = _I("Part")
+    l.Name = "GravSeg"
+    l.Anchored = true
+    l.CanCollide = false
+    l.CanTouch = false
+    l.CanQuery = false
+    l.CastShadow = false
+    l.Material = Enum.Material.Neon
+    l.Color = cor or _RGB(150, 110, 240)
+    l.Transparency = 0.2
+    l.Size = Vector3.new(.15, .15, dist)
+    l.CFrame = CFrame.lookAt((a + b) / 2, b)
+    l.Parent = Gravacao.LinhasFolder
+end
+
+local function gravMostrarLinhas(frames, mostrar, cor)
+    gravClearLines()
+    if not mostrar then return end
+    if not frames or #frames < 2 then return end
+    local last = nil
+    for _, f in ipairs(frames) do
+        local p = Vector3.new(f.x, f.y, f.z)
+        if last then gravCreateLine(last, p, cor) end
+        last = p
+    end
+end
+
+local function gravIniciar()
+    if Gravacao.Estado == "gravando" then return end
+    if not RefreshCharacter() then
+        Notify("GRAVAÇÃO", "Personagem não encontrado.", "Error")
+        return
+    end
+    if Gravacao.RepConn then
+        Gravacao.RepConn:Disconnect()
+        Gravacao.RepConn = nil
+    end
+    Gravacao.Frames = {}
+    Gravacao.StartGravacao = os.clock()
+    Gravacao.UltimoFrame = -math.huge
+    Gravacao.Estado = "gravando"
+    Notify("GRAVAÇÃO", "⏺️ Gravando — faça seus movimentos!", "Success")
+
+    Gravacao.GravConn = R.Heartbeat:Connect(function()
+        if Gravacao.Estado ~= "gravando" then return end
+        if not RefreshCharacter() then return end
+        if #Gravacao.Frames >= Gravacao.MAX_FRAMES then
+            Gravacao.Estado = "idle"
+            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
+            Notify("GRAVAÇÃO", "Limite de frames atingido.", "Orange")
+            return
+        end
+        local agora = os.clock()
+        if agora - Gravacao.StartGravacao > Gravacao.MAX_SEGUNDOS then
+            Gravacao.Estado = "idle"
+            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
+            Notify("GRAVAÇÃO", "Tempo máximo atingido.", "Orange")
+            return
+        end
+        if agora - Gravacao.UltimoFrame < (1 / Gravacao.Velocidade) then return end
+        Gravacao.UltimoFrame = agora
+
+        local cf = rootPart.CFrame
+        local rx, ry, rz = cf:ToEulerAnglesXYZ()
+        table.insert(Gravacao.Frames, {
+            t = agora - Gravacao.StartGravacao,
+            x = cf.Position.X,
+            y = cf.Position.Y,
+            z = cf.Position.Z,
+            rx = rx, ry = ry, rz = rz,
+            j = humanoid.Jump,
+            ws = humanoid.WalkSpeed
+        })
+    end)
+end
+
+local function gravParar()
+    if Gravacao.Estado ~= "gravando" then return end
+    if Gravacao.GravConn then
+        Gravacao.GravConn:Disconnect()
+        Gravacao.GravConn = nil
+    end
+    if #Gravacao.Frames >= 2 then
+        Gravacao.Estado = "preview"
+        local ultimo = Gravacao.Frames[#Gravacao.Frames]
+        Notify("GRAVAÇÃO", "⏹️ Parado! "..#Gravacao.Frames.." frames ("..string.format("%.1f", ultimo.t).."s)", "Success")
+        if Gravacao.MostrarRota then
+            gravMostrarLinhas(Gravacao.Frames, true, _RGB(80, 210, 125))
+        end
+    else
+        Gravacao.Estado = "idle"
+        Gravacao.Frames = {}
+        Notify("GRAVAÇÃO", "Nada foi gravado (menos de 2 frames).", "Orange")
+    end
+end
+
+local function gravPararReproducao(silencioso)
+    if Gravacao.Estado ~= "reproduzindo" then return end
+    Gravacao.Estado = "idle"
+    if Gravacao.RepConn then
+        Gravacao.RepConn:Disconnect()
+        Gravacao.RepConn = nil
+    end
+    if RefreshCharacter() then
+        humanoid:Move(Vector3.zero, false)
+        humanoid.WalkSpeed = 16
+        pcall(function() humanoid.AutoRotate = true end)
+    end
+    pararAnimacaoAndar()
+    if not silencioso then
+        Notify("REPRODUÇÃO", "⏹️ Reprodução parada.", "Orange")
+    end
+end
+
+local function gravReproduzir(frames, nome)
+    if Gravacao.Estado == "reproduzindo" then return end
+    if Playback.Running then
+        Notify("REPRODUÇÃO", "Pare o Auto Parkour antes de reproduzir.", "Error")
+        return
+    end
+    if not frames or #frames < 2 then
+        Notify("REPRODUÇÃO", "Sem frames suficientes.", "Error")
+        return
+    end
+    if not RefreshCharacter() then
+        Notify("REPRODUÇÃO", "Personagem não encontrado.", "Error")
+        return
+    end
+
+    Gravacao.Estado = "reproduzindo"
+    pcall(function() humanoid.AutoRotate = false end)
+    humanoid.WalkSpeed = 16
+    Notify("REPRODUÇÃO", "▶️ Reproduzindo "..(nome or (#frames.." frames")).."...", "Success")
+
+    local t0 = os.clock()
+    local idx = 1
+    local maxT = frames[#frames].t
+    local ultimaPos = Vector3.new(frames[1].x, frames[1].y, frames[1].z)
+    local proximoPulo = false
+
+    Gravacao.RepConn = R.RenderStepped:Connect(function()
+        if Gravacao.Estado ~= "reproduzindo" then return end
+        if not RefreshCharacter() then gravPararReproducao(true); return end
+
+        local elapsed = os.clock() - t0
+        if elapsed >= maxT then
+            local f = frames[#frames]
+            gravPararReproducao(true)
+            Notify("REPRODUÇÃO", "✅ Rota finalizada!", "Success")
+            return
+        end
+
+        -- Avança índice
+        while idx < #frames - 1 and elapsed > frames[idx + 1].t do
+            idx = idx + 1
+        end
+
+        local a = frames[idx]
+        local b = frames[idx + 1] or a
+        local d = b.t - a.t
+        local alpha = d > 0 and math.clamp((elapsed - a.t) / d, 0, 1) or 0
+
+        -- Posição interpolada (frame atual)
+        local pa = Vector3.new(a.x, a.y, a.z)
+        local pb = Vector3.new(b.x, b.y, b.z)
+        local posAtual = pa:Lerp(pb, alpha)
+
+        -- Rotação interpolada
+        local ra = CFrame.Angles(a.rx or 0, a.ry or 0, a.rz or 0)
+        local rb = CFrame.Angles(b.rx or 0, b.ry or 0, b.rz or 0)
+        local rotAtual = ra:Lerp(rb, alpha)
+
+        -- Alvo com lookahead (0.2s à frente) para o Move ser suave e natural
+        local lookaheadT = elapsed + 0.2
+        local lookIdx = idx
+        while lookIdx < #frames - 1 and lookaheadT > frames[lookIdx + 1].t do
+            lookIdx = lookIdx + 1
+        end
+        local lf = frames[lookIdx]
+        local alvoMove = Vector3.new(lf.x, lf.y, lf.z)
+
+        -- Aplica WalkSpeed do frame gravado
+        if a.ws then humanoid.WalkSpeed = a.ws end
+
+        if Gravacao.Natural then
+            -- MODO NATURAL: direção com base no movimento real
+            local dir = posAtual - ultimaPos
+            dir = Vector3.new(dir.X, 0, dir.Z)
+            if dir.Magnitude > 0.01 then
+                -- Ativa animação de andar com Move
+                humanoid:Move(dir.Unit, false)
+            else
+                humanoid:Move(Vector3.zero, false)
+            end
+            -- Aplica posição exata via PivotTo (garante 100% de fidelidade)
+            local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
+            pcall(function() character:PivotTo(cf) end)
+
+            -- Pulo: se a era j e b não é j (transição)
+            if a.j and not b.j and not proximoPulo then
+                proximoPulo = true
+                humanoid.Jump = true
+                task.delay(0.15, function() proximoPulo = false end)
+            end
+        else
+            -- MODO PRECISO: só PivotTo, sem animação
+            local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
+            pcall(function() character:PivotTo(cf) end)
+            if a.j and not b.j then
+                humanoid.Jump = true
+            end
+        end
+
+        ultimaPos = posAtual
+    end)
+end
+
+-- =========================================================================
+-- ABA: GRAVAR ROTA (UI profissional)
+-- =========================================================================
+local GravarRotaAbaAtiva = false
+
+local function renderBotaoPrincipal(parent, ordem)
+    if Gravacao.Estado == "gravando" then
+        local btn = _I("TextButton", parent)
+        btn.Size = _U2(1, 0, 0, 56)
+        btn.BackgroundColor3 = _RGB(150, 40, 40)
+        btn.BorderSizePixel = 0
+        btn.Text = "⏹️  PARAR GRAVAÇÃO"
+        btn.TextColor3 = _K.White
+        btn.Font = _GB
+        btn.TextSize = 15
+        btn.AutoButtonColor = false
+        btn.LayoutOrder = ordem
+        Corner(btn, 10)
+        Stroke(btn, _RGB(230, 85, 85), 2)
+        btn.MouseButton1Click:Connect(function()
+            gravParar()
+            task.defer(function()
+                task.wait(0.05)
+                if CurrentPage == "GravarRota" then ShowGravarRota() end
+            end)
+        end)
+        -- pulso
+        task.spawn(function()
+            local pulse = true
+            while btn.Parent and Gravacao.Estado == "gravando" do
+                task.wait(0.6)
+                if not btn.Parent then break end
+                pulse = not pulse
+                btn.BackgroundColor3 = pulse and _RGB(150,40,40) or _RGB(180,50,50)
+            end
+        end)
+        return btn
+    elseif Gravacao.Estado == "preview" then
+        -- Não mostra botão principal, mostra o preview abaixo
+        return nil
+    else
+        local btn = _I("TextButton", parent)
+        btn.Size = _U2(1, 0, 0, 56)
+        btn.BackgroundColor3 = _RGB(40, 150, 80)
+        btn.BorderSizePixel = 0
+        btn.Text = "⏺️  INICIAR GRAVAÇÃO"
+        btn.TextColor3 = _K.White
+        btn.Font = _GB
+        btn.TextSize = 15
+        btn.AutoButtonColor = false
+        btn.LayoutOrder = ordem
+        Corner(btn, 10)
+        Stroke(btn, _K.Success, 2)
+        btn.MouseButton1Click:Connect(function()
+            gravIniciar()
+            task.defer(function()
+                task.wait(0.05)
+                if CurrentPage == "GravarRota" then ShowGravarRota() end
+            end)
+        end)
+        return btn
+    end
+end
+
+local function renderPreview(parent, ordem)
+    local card = _I("Frame", parent)
+    card.Size = _U2(1, 0, 0, 0)
+    card.AutomaticSize = Enum.AutomaticSize.Y
+    card.BackgroundColor3 = _RGB(22, 40, 28)
+    card.BorderSizePixel = 0
+    card.LayoutOrder = ordem
+    Corner(card, 10)
+    Stroke(card, _K.Success, 2)
+    Padding(card, 14, 14, 14, 14)
+
+    local lay = _I("UIListLayout", card)
+    lay.Padding = _UD(0, 10)
+    lay.SortOrder = Enum.SortOrder.LayoutOrder
+    lay.Parent = card
+
+    local titulo = _I("TextLabel", card)
+    titulo.Size = _U2(1, 0, 0, 20)
+    titulo.BackgroundTransparency = 1
+    titulo.Text = "✅ Gravação pronta pra salvar"
+    titulo.TextColor3 = _K.Success
+    titulo.Font = _GB
+    titulo.TextSize = 13
+    titulo.TextXAlignment = _XL
+    titulo.LayoutOrder = 1
+
+    local ultimo = Gravacao.Frames[#Gravacao.Frames] or {t=0}
+    local infoLbl = _I("TextLabel", card)
+    infoLbl.Size = _U2(1, 0, 0, 16)
+    infoLbl.BackgroundTransparency = 1
+    infoLbl.Text = "📊 "..#Gravacao.Frames.." frames  •  "..string.format("%.1f", ultimo.t).." segundos"
+    infoLbl.TextColor3 = _K.Gray
+    infoLbl.Font = _GM
+    infoLbl.TextSize = 10
+    infoLbl.TextXAlignment = _XL
+    infoLbl.LayoutOrder = 2
+
+    local nomeBox = UI.TextBox(card, 3, "Nome da Rota", "Ex: Moita STS Central", Gravacao.PreviewNomeBox or "", function(txt)
+        Gravacao.PreviewNomeBox = txt
+    end)
+    nomeBox.Text = Gravacao.PreviewNomeBox or ""
+
+    -- Botão Salvar
+    local btnSalvar = _I("TextButton", card)
+    btnSalvar.Size = _U2(1, 0, 0, 40)
+    btnSalvar.BackgroundColor3 = _K.Success
+    btnSalvar.BorderSizePixel = 0
+    btnSalvar.Text = "💾  SALVAR ROTA"
+    btnSalvar.TextColor3 = _K.White
+    btnSalvar.Font = _GB
+    btnSalvar.TextSize = 13
+    btnSalvar.AutoButtonColor = false
+    btnSalvar.LayoutOrder = 4
+    Corner(btnSalvar, 8)
+    Stroke(btnSalvar, _K.Success, 2)
+
+    -- Botão Descartar
+    local btnDesc = _I("TextButton", card)
+    btnDesc.Size = _U2(1, 0, 0, 32)
+    btnDesc.BackgroundColor3 = _RGB(60, 40, 40)
+    btnDesc.BorderSizePixel = 0
+    btnDesc.Text = "🗑️  Descartar"
+    btnDesc.TextColor3 = _K.White
+    btnDesc.Font = _GB
+    btnDesc.TextSize = 11
+    btnDesc.AutoButtonColor = false
+    btnDesc.LayoutOrder = 5
+    Corner(btnDesc, 8)
+    Stroke(btnDesc, _RGB(120, 40, 40), 1)
+
+    btnSalvar.MouseButton1Click:Connect(function()
+        if #Persist.rotas_salvas >= 30 then
+            Notify("SALVAR", "Limite de 30 rotas salvas atingido.", "Error")
+            return
+        end
+        local nome = nomeBox.Text:gsub("^%s+",""):gsub("%s+$","")
+        if nome == "" then
+            nome = "Rota "..(#Persist.rotas_salvas + 1)
+        end
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == nome then
+                Notify("SALVAR", "Já existe uma rota chamada '"..nome.."'.", "Error")
+                return
+            end
+        end
+        local copia = {}
+        for i, f in ipairs(Gravacao.Frames) do
+            copia[i] = { t = f.t, x = f.x, y = f.y, z = f.z,
+                rx = f.rx or 0, ry = f.ry or 0, rz = f.rz or 0,
+                j = f.j and true or false, ws = f.ws or 16 }
+        end
+        table.insert(Persist.rotas_salvas, { nome = nome, frames = copia })
+        persistSalvar()
+        Notify("SALVAR", "✅ Rota '"..nome.."' salva! ("..#copia.." frames)", "Success")
+
+        -- Limpa estado
+        Gravacao.Frames = {}
+        Gravacao.Estado = "idle"
+        Gravacao.PreviewNomeBox = nil
+        Gravacao.RotaSelecionada = nome
+        gravClearLines()
+
+        task.defer(function()
+            task.wait(0.05)
+            if CurrentPage == "GravarRota" then ShowGravarRota() end
+        end)
+    end)
+
+    btnDesc.MouseButton1Click:Connect(function()
+        Gravacao.Frames = {}
+        Gravacao.Estado = "idle"
+        Gravacao.PreviewNomeBox = nil
+        gravClearLines()
+        Notify("GRAVAÇÃO", "Gravação descartada.", "Orange")
+        task.defer(function()
+            task.wait(0.05)
+            if CurrentPage == "GravarRota" then ShowGravarRota() end
+        end)
+    end)
+
+    return card
+end
+
+local function renderPainelSalvas(parent, ordem)
+    local card = UI.Card(parent, ordem, "📁 Rotas Salvas ("..#Persist.rotas_salvas..")")
+
+    if #Persist.rotas_salvas == 0 then
+        local vazio = _I("TextLabel", card)
+        vazio.Size = _U2(1, 0, 0, 40)
+        vazio.BackgroundTransparency = 1
+        vazio.Text = "Nenhuma rota salva ainda.\nGrave uma e clique em Salvar."
+        vazio.TextColor3 = _K.DarkGray
+        vazio.Font = _GM
+        vazio.TextSize = 10
+        vazio.TextWrapped = true
+        vazio.TextXAlignment = _XC
+        vazio.LayoutOrder = 1
+        return card
+    end
+
+    local nomes = {}
+    for _, r in ipairs(Persist.rotas_salvas) do
+        table.insert(nomes, r.nome)
+    end
+    local selecionadoAtual = Gravacao.RotaSelecionada or nomes[1]
+    if not table.find(nomes, selecionadoAtual) then selecionadoAtual = nomes[1] end
+    Gravacao.RotaSelecionada = selecionadoAtual
+
+    UI.Dropdown(card, 1, "Selecionar Rota", nomes, selecionadoAtual, function(op)
+        Gravacao.RotaSelecionada = op
+        gravClearLines()
+    end)
+
+    -- Botão reproduzir
+    local btnExec = UI.ActionButton(card, 2,
+        Gravacao.Estado == "reproduzindo" and "⏹️ Parar Reprodução" or "▶️ Reproduzir Rota",
+        Gravacao.Estado == "reproduzindo" and _K.Error or _K.Purple,
+        function()
+            if Gravacao.Estado == "reproduzindo" then
+                gravPararReproducao()
+                task.defer(function()
+                    task.wait(0.05)
+                    if CurrentPage == "GravarRota" then ShowGravarRota() end
+                end)
+                return
+            end
+            local sel = Gravacao.RotaSelecionada
+            if not sel then
+                Notify("REPRODUZIR", "Selecione uma rota primeiro.", "Error")
+                return
+            end
+            local rotaEncontrada = nil
+            for _, r in ipairs(Persist.rotas_salvas) do
+                if r.nome == sel then rotaEncontrada = r; break end
+            end
+            if not rotaEncontrada then
+                Notify("REPRODUZIR", "Rota não encontrada.", "Error")
+                return
+            end
+            gravReproduzir(rotaEncontrada.frames, rotaEncontrada.nome)
+            task.defer(function()
+                task.wait(0.05)
+                if CurrentPage == "GravarRota" then ShowGravarRota() end
+            end)
+        end)
+
+    UI.Toggle(card, 3, "Ver Rota (mostrar caminho)", false, function(v)
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            if v then Notify("VER ROTA", "Selecione uma rota primeiro.", "Error") end
+            return
+        end
+        local rotaEncontrada = nil
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == sel then rotaEncontrada = r; break end
+        end
+        if not rotaEncontrada then return end
+        gravMostrarLinhas(rotaEncontrada.frames, v, _RGB(150, 110, 240))
+    end)
+
+    -- Botões pequenos numa linha
+    local linhaBotoes = _I("Frame", card)
+    linhaBotoes.Size = _U2(1, 0, 0, 32)
+    linhaBotoes.BackgroundTransparency = 1
+    linhaBotoes.LayoutOrder = 4
+    local lbLay = _I("UIListLayout", linhaBotoes)
+    lbLay.FillDirection = Enum.FillDirection.Horizontal
+    lbLay.Padding = _UD(0, 6)
+    lbLay.Parent = linhaBotoes
+
+    local btnRen = _I("TextButton", linhaBotoes)
+    btnRen.Size = _U2(0.5, -3, 1, 0)
+    btnRen.BackgroundColor3 = _RGB(50, 60, 90)
+    btnRen.BorderSizePixel = 0
+    btnRen.Text = "✏️ Renomear"
+    btnRen.TextColor3 = _K.White
+    btnRen.Font = _GB
+    btnRen.TextSize = 10
+    btnRen.AutoButtonColor = false
+    Corner(btnRen, 6)
+    Stroke(btnRen, _K.Stroke, 1)
+
+    local btnDel = _I("TextButton", linhaBotoes)
+    btnDel.Size = _U2(0.5, -3, 1, 0)
+    btnDel.BackgroundColor3 = _RGB(120, 40, 40)
+    btnDel.BorderSizePixel = 0
+    btnDel.Text = "🗑️ Excluir"
+    btnDel.TextColor3 = _K.White
+    btnDel.Font = _GB
+    btnDel.TextSize = 10
+    btnDel.AutoButtonColor = false
+    Corner(btnDel, 6)
+    Stroke(btnDel, _RGB(180, 60, 60), 1)
+
+    btnRen.MouseButton1Click:Connect(function()
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            Notify("RENOMEAR", "Selecione uma rota.", "Error")
+            return
+        end
+        abrirModalEditarNome("✏️ Renomear Rota", sel, function(novo)
+            for _, r in ipairs(Persist.rotas_salvas) do
+                if r.nome == novo and r.nome ~= sel then
+                    Notify("RENOMEAR", "Já existe uma rota com esse nome.", "Error")
+                    return
+                end
+            end
+            for _, r in ipairs(Persist.rotas_salvas) do
+                if r.nome == sel then r.nome = novo; break end
+            end
+            Gravacao.RotaSelecionada = novo
+            persistSalvar()
+            Notify("RENOMEAR", "✅ Renomeada para '"..novo.."'", "Success")
+            task.defer(function()
+                task.wait(0.05)
+                if CurrentPage == "GravarRota" then ShowGravarRota() end
+            end)
+        end)
+    end)
+
+    btnDel.MouseButton1Click:Connect(function()
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            Notify("EXCLUIR", "Selecione uma rota.", "Error")
+            return
+        end
+        for i, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == sel then
+                table.remove(Persist.rotas_salvas, i)
+                break
+            end
+        end
+        Gravacao.RotaSelecionada = nil
+        persistSalvar()
+        gravClearLines()
+        Notify("EXCLUIR", "🗑️ Rota '"..sel.."' excluída.", "Orange")
+        task.defer(function()
+            task.wait(0.05)
+            if CurrentPage == "GravarRota" then ShowGravarRota() end
+        end)
+    end)
+
+    return card
+end
+
+local function ShowGravarRota()
+    CurrentPage = "GravarRota"
+    GravarRotaAbaAtiva = true
+    ClearContent()
+
+    local col1, col2 = CreateTwoColumns(_CH, 0)
+
+    -- ============================================================
+    -- COLUNA ESQUERDA: Gravação
+    -- ============================================================
+    local cardPrincipal = UI.Card(col1, 1, "🎬 Gravador de Rota")
+
+    -- Instrução curta
+    local instr = _I("TextLabel", cardPrincipal)
+    instr.Size = _U2(1, 0, 0, 0)
+    instr.AutomaticSize = Enum.AutomaticSize.Y
+    instr.BackgroundTransparency = 1
+    instr.Text = "Clique em INICIAR, faça seus movimentos no jogo, e clique em PARAR. Depois é só dar um nome e salvar."
+    instr.TextColor3 = _K.DarkGray
+    instr.Font = _GM
+    instr.TextSize = 9
+    instr.TextWrapped = true
+    instr.TextXAlignment = _XL
+    instr.LayoutOrder = 1
+
+    -- Botão principal (Iniciar/Parar)
+    renderBotaoPrincipal(cardPrincipal, 2)
+
+    -- Preview (só aparece se estiver em preview)
+    if Gravacao.Estado == "preview" then
+        renderPreview(cardPrincipal, 3)
+    end
+
+    -- Status ao vivo
+    local statusCard = _I("Frame", cardPrincipal)
+    statusCard.Size = _U2(1, 0, 0, 44)
+    statusCard.BackgroundColor3 = _RGB(15, 15, 20)
+    statusCard.BorderSizePixel = 0
+    statusCard.LayoutOrder = 10
+    Corner(statusCard, 8)
+    local statusStroke = Stroke(statusCard, _K.Stroke, 1)
+
+    local statusDot = _I("Frame", statusCard)
+    statusDot.Size = _UO(12, 12)
+    statusDot.Position = _UO(14, 16)
+    statusDot.BackgroundColor3 = _K.DarkGray
+    statusDot.BorderSizePixel = 0
+    Corner(statusDot, 6)
+
+    local statusLbl = _I("TextLabel", statusCard)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Position = _UO(34, 0)
+    statusLbl.Size = _U2(1, -46, 1, 0)
+    statusLbl.Text = "Pronto"
+    statusLbl.TextColor3 = _K.Gray
+    statusLbl.Font = _GB
+    statusLbl.TextSize = 11
+    statusLbl.TextXAlignment = _XL
+    statusLbl.TextYAlignment = Enum.TextYAlignment.Center
+
+    task.spawn(function()
+        while GravarRotaAbaAtiva and statusCard.Parent do
+            task.wait(0.15)
+            if not statusCard.Parent then break end
+            if Gravacao.Estado == "gravando" then
+                local n = #Gravacao.Frames
+                local tempo = n > 0 and Gravacao.Frames[n].t or 0
+                statusLbl.Text = string.format("⏺️  GRAVANDO  •  %d frames  •  %.1fs", n, tempo)
+                statusLbl.TextColor3 = _K.Error
+                statusDot.BackgroundColor3 = _K.Error
+                statusStroke.Color = _K.Error
+            elseif Gravacao.Estado == "reproduzindo" then
+                statusLbl.Text = "▶️  REPRODUZINDO..."
+                statusLbl.TextColor3 = _K.PurpleLight
+                statusDot.BackgroundColor3 = _K.PurpleLight
+                statusStroke.Color = _K.PurpleLight
+            elseif Gravacao.Estado == "preview" then
+                local n = #Gravacao.Frames
+                local tempo = n > 0 and Gravacao.Frames[n].t or 0
+                statusLbl.Text = string.format("✅  Pronta pra salvar  •  %d frames  •  %.1fs", n, tempo)
+                statusLbl.TextColor3 = _K.Success
+                statusDot.BackgroundColor3 = _K.Success
+                statusStroke.Color = _K.Success
+            else
+                statusLbl.Text = "Pronto para gravar"
+                statusLbl.TextColor3 = _K.Gray
+                statusDot.BackgroundColor3 = _K.DarkGray
+                statusStroke.Color = _K.Stroke
+            end
+        end
+    end)
+
+    -- ============================================================
+    -- COLUNA DIREITA: Config + Rotas Salvas
+    -- ============================================================
+    local cardConfig = UI.Card(col2, 1, "⚙️ Motor")
+
+    UI.Slider(cardConfig, 1, "Velocidade de Gravação (Hz)", Gravacao.Velocidade, 5, 30, false, function(v)
+        Gravacao.Velocidade = v
+    end)
+
+    UI.Toggle(cardConfig, 2, "Reprodução Natural (com animação)", Gravacao.Natural, function(v)
+        Gravacao.Natural = v
+        if v then
+            Notify("MOTOR", "Natural: andar animado, mais fluido.", "Success")
+        else
+            Notify("MOTOR", "Preciso: teleporte exato, sem animação.", "Orange")
+        end
+    end)
+
+    UI.Toggle(cardConfig, 3, "Mostrar caminho durante gravação", Gravacao.MostrarRota, function(v)
+        Gravacao.MostrarRota = v
+    end)
+
+    -- Rotas salvas
+    renderPainelSalvas(col2, 2)
 
     Content.CanvasPosition = _V2()
 end
@@ -4238,4 +4403,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.2.4 carregado com sucesso!")
+print("AKIRA MENU V2.2.5 carregado com sucesso!")
