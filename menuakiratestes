@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.3 — Animação Corrigida + Créditos Padrão + Transparência Total
+-- AKIRA MENU V2.3.4 — Auto Parkour com Animação + Transparência Real
 -- =========================================================================
 
 -- =========================================================================
@@ -505,6 +505,9 @@ local function CriarDummy(pos,rot)
 end
 RemoverDummy=function() if DummyObj then pcall(function() DummyObj:Destroy() end) DummyObj=nil end end
 
+-- =========================================================================
+-- STOP PLAYBACK (com restauração completa)
+-- =========================================================================
 local function StopPlayback(reason)
     if Playback.Connection then Playback.Connection:Disconnect(); Playback.Connection=nil end
     if Playback.WalkConnection then Playback.WalkConnection:Disconnect(); Playback.WalkConnection=nil end
@@ -513,8 +516,24 @@ local function StopPlayback(reason)
     Playback.LastJump=-math.huge Playback.Category=nil Playback.Parkour=nil
     Playback.Tower=nil Playback.TowerRoute=nil Playback.WalkingToStart=false
     if RefreshCharacter() then
+        pcall(function() rootPart.Anchored = false end)
         humanoid:Move(Vector3.zero,false); humanoid.Jump=false
+        humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
         pcall(function() humanoid.AutoRotate=true end)
+        for _, estado in ipairs({
+            Enum.HumanoidStateType.Freefall,
+            Enum.HumanoidStateType.FallingDown,
+            Enum.HumanoidStateType.Ragdoll,
+            Enum.HumanoidStateType.Climbing,
+            Enum.HumanoidStateType.Swimming,
+            Enum.HumanoidStateType.PlatformStanding,
+            Enum.HumanoidStateType.Jumping,
+        }) do
+            pcall(function() humanoid:SetStateEnabled(estado, true) end)
+        end
+        local anim = character and character:FindFirstChild("Animate")
+        if anim then pcall(function() anim.Disabled = false end) end
     end
     pararAnimacaoAndar()
     ClearLines()
@@ -523,33 +542,135 @@ local function StopPlayback(reason)
     elseif reason=="error" then Notify("ERRO","Não foi possível continuar.","Error") end
 end
 
+-- =========================================================================
+-- INICIAR EXECUÇÃO (animação igual à reprodução)
+-- =========================================================================
 local function IniciarExecucao(name)
     if not Playback.Running then return end
     Playback.WalkingToStart = false
-    if RefreshCharacter() then
-        humanoid:Move(Vector3.zero, false)
-        pcall(function() humanoid.AutoRotate = false end)
+    if not RefreshCharacter() then StopPlayback("error"); return end
+
+    -- Salva estados originais
+    local rootAnchoredOrig = rootPart.Anchored
+    local autoRotateOrig = humanoid.AutoRotate
+    local walkSpeedOrig = humanoid.WalkSpeed
+    local jumpPowerOrig = humanoid.JumpPower
+
+    humanoid:Move(Vector3.zero, false)
+
+    -- Desativa Animate pra ele não tocar animação de pulo/queda
+    local animateScript = character:FindFirstChild("Animate")
+    if animateScript then pcall(function() animateScript.Disabled = true end) end
+
+    -- Para todas as animações tocando
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then animator = _I("Animator"); animator.Parent = humanoid end
+    pcall(function()
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            track:Stop(0)
+        end
+    end)
+
+    -- Carrega animação de andar manualmente
+    local isR15 = humanoid.RigType == Enum.HumanoidRigType.R15
+    local walkAnimId = isR15 and "rbxassetid://507777826" or "rbxassetid://180426354"
+    local walkAnim = _I("Animation")
+    walkAnim.AnimationId = walkAnimId
+    local walkPlaybackTrack = animator:LoadAnimation(walkAnim)
+    walkPlaybackTrack.Looped = true
+    walkPlaybackTrack.Priority = Enum.AnimationPriority.Movement
+
+    -- Ancora pra desligar física
+    pcall(function() rootPart.Anchored = true end)
+    pcall(function() humanoid.AutoRotate = false end)
+    humanoid.WalkSpeed = 0
+    humanoid.JumpPower = 0
+
+    -- Bloqueia estados que causam braço levantado
+    for _, estado in ipairs({
+        Enum.HumanoidStateType.Freefall,
+        Enum.HumanoidStateType.FallingDown,
+        Enum.HumanoidStateType.Ragdoll,
+        Enum.HumanoidStateType.Climbing,
+        Enum.HumanoidStateType.Swimming,
+        Enum.HumanoidStateType.PlatformStanding,
+        Enum.HumanoidStateType.Jumping,
+    }) do
+        pcall(function() humanoid:SetStateEnabled(estado, false) end)
     end
+
+    task.wait(0.05)
+    pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+    pcall(function() walkPlaybackTrack:Play(0.1) end)
+
+    -- Loop que mantém Running ativo
+    local estadoLoopAtivo = true
+    task.spawn(function()
+        while estadoLoopAtivo and Playback.Running do
+            pcall(function()
+                if humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                end
+            end)
+            task.wait(0.15)
+        end
+    end)
+
     Playback.StartClock = os.clock()
     Playback.CurrentIndex = 1
     Playback.LastJump = -math.huge
     Notify("EXECUTANDO", name, "Success")
+
+    local ultimaPos = nil
+    local parado = false
+
     task.spawn(function()
         while Playback.Running and not Playback.WalkingToStart do
-            if not RefreshCharacter() then StopPlayback("error"); break end
+            if not RefreshCharacter() then
+                estadoLoopAtivo = false
+                pcall(function() walkPlaybackTrack:Stop(0.1) end)
+                StopPlayback("error"); break
+            end
             local frames = Playback.Route
-            if not frames or #frames < 2 then StopPlayback("error"); break end
+            if not frames or #frames < 2 then
+                estadoLoopAtivo = false
+                pcall(function() walkPlaybackTrack:Stop(0.1) end)
+                StopPlayback("error"); break
+            end
             local elapsed = (os.clock() - Playback.StartClock) * CONFIG.PlaybackSpeed
             local final = frames[#frames]
             if elapsed >= final.t then
                 ApplyPosition(GetPosition(final), GetRotation(final))
+                estadoLoopAtivo = false
+                pcall(function() walkPlaybackTrack:Stop(0.1) end)
+                pcall(function() rootPart.Anchored = rootAnchoredOrig end)
+                pcall(function() humanoid.AutoRotate = autoRotateOrig end)
+                humanoid.WalkSpeed = walkSpeedOrig
+                humanoid.JumpPower = jumpPowerOrig
+                for _, estado in ipairs({
+                    Enum.HumanoidStateType.Freefall,
+                    Enum.HumanoidStateType.FallingDown,
+                    Enum.HumanoidStateType.Ragdoll,
+                    Enum.HumanoidStateType.Climbing,
+                    Enum.HumanoidStateType.Swimming,
+                    Enum.HumanoidStateType.PlatformStanding,
+                    Enum.HumanoidStateType.Jumping,
+                }) do
+                    pcall(function() humanoid:SetStateEnabled(estado, true) end)
+                end
+                local anim = character and character:FindFirstChild("Animate")
+                if anim then pcall(function() anim.Disabled = false end) end
                 StopPlayback("completed")
                 break
             end
             local a, b, alpha = GetFrames(frames, elapsed)
             if not a or not b then break end
             local pa, pb = GetPosition(a), GetPosition(b)
-            if not pa or not pb then StopPlayback("error"); break end
+            if not pa or not pb then
+                estadoLoopAtivo = false
+                pcall(function() walkPlaybackTrack:Stop(0.1) end)
+                StopPlayback("error"); break
+            end
             local pos = pa:Lerp(pb, alpha)
             local ra, rb = GetRotation(a), GetRotation(b)
             local rot
@@ -558,6 +679,21 @@ local function IniciarExecucao(name)
             elseif rb then rot = rb end
             ApplyPosition(pos, rot)
             HandleJump(a, elapsed)
+
+            -- Detecta se está parado pra pausar animação
+            if ultimaPos then
+                local delta = (pos - ultimaPos).Magnitude
+                local movendo = delta > 0.005
+                if not movendo and not parado then
+                    parado = true
+                    pcall(function() walkPlaybackTrack:Stop(0.1) end)
+                elseif movendo and parado then
+                    parado = false
+                    pcall(function() walkPlaybackTrack:Play(0.1) end)
+                end
+            end
+            ultimaPos = pos
+
             R.Heartbeat:Wait()
         end
     end)
@@ -771,7 +907,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.3"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.4"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -804,7 +940,6 @@ local function SideButton(text,selected)
     return b
 end
 
--- ⚠️ Créditos como padrão
 local creditosButton    = SideButton("👑 CRÉDITOS", true)
 local ebDeltaButton     = SideButton("🚀 EB DELTA", false)
 local gravarRotaButton  = SideButton("⏺️ GRAVAR ROTA", false)
@@ -1072,57 +1207,48 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
--- SISTEMA DE TRANSPARÊNCIA GLOBAL
+-- SISTEMA DE TRANSPARÊNCIA GLOBAL (CORRIGIDO)
 -- =========================================================================
 local TranspState = { ativo = false, originais = {} }
 
-local function Transp_Capturar()
-    TranspState.originais = {}
-    for _, obj in ipairs(Main:GetDescendants()) do
-        if obj:IsA("GuiObject") and obj.BackgroundTransparency < 1 then
-            table.insert(TranspState.originais, { obj = obj, t = obj.BackgroundTransparency })
-        end
+local function Transp_Objeto(obj)
+    return obj:IsA("GuiObject") and obj.BackgroundTransparency < 0.99
+end
+
+local function Transp_AplicarEm(obj)
+    if TranspState.originais[obj] == nil then
+        TranspState.originais[obj] = obj.BackgroundTransparency
     end
+    local orig = TranspState.originais[obj]
+    pcall(function()
+        obj.BackgroundTransparency = math.min(0.92, orig + 0.45)
+    end)
 end
 
 local function Transp_Aplicar(ativar)
     if ativar then
-        if not TranspState.ativo then
-            Transp_Capturar()
-            TranspState.ativo = true
+        for _, obj in ipairs(Main:GetDescendants()) do
+            if Transp_Objeto(obj) then
+                Transp_AplicarEm(obj)
+            end
         end
-        for _, item in ipairs(TranspState.originais) do
-            pcall(function()
-                if item.obj and item.obj.Parent then
-                    item.obj.BackgroundTransparency = math.min(0.85, item.t + 0.35)
-                end
-            end)
-        end
+        TranspState.ativo = true
     else
-        for _, item in ipairs(TranspState.originais) do
-            pcall(function()
-                if item.obj and item.obj.Parent then
-                    item.obj.BackgroundTransparency = item.t
-                end
-            end)
+        for obj, orig in pairs(TranspState.originais) do
+            if obj and obj.Parent then
+                pcall(function() obj.BackgroundTransparency = orig end)
+            end
         end
         TranspState.originais = {}
         TranspState.ativo = false
     end
 end
 
--- Exposto para novas telas (chamar sempre que trocar de aba)
 local function Transp_Reaplicar()
-    if TranspState.ativo then
-        TranspState.ativo = false
-        Transp_Capturar()
-        TranspState.ativo = true
-        for _, item in ipairs(TranspState.originais) do
-            pcall(function()
-                if item.obj and item.obj.Parent then
-                    item.obj.BackgroundTransparency = math.min(0.85, item.t + 0.35)
-                end
-            end)
+    if not TranspState.ativo then return end
+    for _, obj in ipairs(Main:GetDescendants()) do
+        if Transp_Objeto(obj) and TranspState.originais[obj] == nil then
+            Transp_AplicarEm(obj)
         end
     end
 end
@@ -3395,9 +3521,6 @@ local function gravParar()
     gravNotificarMudanca()
 end
 
--- =========================================================================
--- REPRODUÇÃO COM ANIMAÇÃO CORRIGIDA
--- =========================================================================
 local function gravPararReproducao(silencioso)
     if Gravacao.Estado ~= "reproduzindo" then return end
     Gravacao.Estado = "idle"
@@ -3415,7 +3538,6 @@ local function gravPararReproducao(silencioso)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true) end)
-        -- Restaura o Animate script
         local animateScript = character and character:FindFirstChild("Animate")
         if animateScript then
             pcall(function() animateScript.Disabled = false end)
@@ -3435,19 +3557,16 @@ local function gravReproduzir(frames, nome)
 
     Gravacao.Estado = "reproduzindo"
 
-    -- ✅ Salva estados originais
     local rootAnchoredOriginal = rootPart.Anchored
     local autoRotateOriginal = humanoid.AutoRotate
     local walkSpeedOriginal = humanoid.WalkSpeed
     local jumpPowerOriginal = humanoid.JumpPower
 
-    -- ✅ DESATIVA o Animate script pra ele não tocar animação de pulo/queda sozinho
     local animateScript = character:FindFirstChild("Animate")
     if animateScript then
         pcall(function() animateScript.Disabled = true end)
     end
 
-    -- ✅ Para TODAS as animações tocando
     local animator = humanoid:FindFirstChildOfClass("Animator")
     if not animator then
         animator = _I("Animator")
@@ -3459,7 +3578,6 @@ local function gravReproduzir(frames, nome)
         end
     end)
 
-    -- ✅ Carrega a animação de andar manualmente
     local isR15 = humanoid.RigType == Enum.HumanoidRigType.R15
     local walkAnimId = isR15 and "rbxassetid://507777826" or "rbxassetid://180426354"
     local walkAnim = _I("Animation")
@@ -3468,13 +3586,11 @@ local function gravReproduzir(frames, nome)
     walkPlaybackTrack.Looped = true
     walkPlaybackTrack.Priority = Enum.AnimationPriority.Movement
 
-    -- ✅ Ancora pra desligar física (elimina tremelique)
     pcall(function() rootPart.Anchored = true end)
     pcall(function() humanoid.AutoRotate = false end)
     humanoid.WalkSpeed = 0
     humanoid.JumpPower = 0
 
-    -- ✅ Bloqueia estados que causam braço levantado
     for _, estado in ipairs({
         Enum.HumanoidStateType.Freefall,
         Enum.HumanoidStateType.FallingDown,
@@ -3487,14 +3603,10 @@ local function gravReproduzir(frames, nome)
         pcall(function() humanoid:SetStateEnabled(estado, false) end)
     end
 
-    -- ✅ Força o estado Running pra tocar a animação de andar
     task.wait(0.05)
     pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
-
-    -- ✅ Toca a animação de andar manualmente
     pcall(function() walkPlaybackTrack:Play(0.1) end)
 
-    -- ✅ Loop que força o estado Running constantemente
     local estadoLoopAtivo = true
     task.spawn(function()
         while estadoLoopAtivo and Gravacao.Estado == "reproduzindo" do
@@ -3531,9 +3643,7 @@ local function gravReproduzir(frames, nome)
         local elapsed = os.clock() - t0
         if elapsed >= maxT then
             estadoLoopAtivo = false
-            -- ✅ Para a animação de andar
             pcall(function() walkPlaybackTrack:Stop(0.1) end)
-            -- ✅ Restaura tudo
             pcall(function() rootPart.Anchored = rootAnchoredOriginal end)
             pcall(function() humanoid.AutoRotate = autoRotateOriginal end)
             humanoid.WalkSpeed = walkSpeedOriginal
@@ -3549,7 +3659,6 @@ local function gravReproduzir(frames, nome)
             }) do
                 pcall(function() humanoid:SetStateEnabled(estado, true) end)
             end
-            -- ✅ Restaura o Animate
             local anim = character and character:FindFirstChild("Animate")
             if anim then pcall(function() anim.Disabled = false end) end
             Gravacao.Estado = "idle"
@@ -3577,7 +3686,6 @@ local function gravReproduzir(frames, nome)
         local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
         pcall(function() character:PivotTo(cf) end)
 
-        -- ✅ Detecta se está parado pra parar a animação de andar
         local delta = (posAtual - ultimaPos).Magnitude
         local movendo = delta > 0.005
         if not movendo and not parado then
@@ -3934,7 +4042,6 @@ task.defer(function()
     for _,rn in ipairs(Tower2RouteOrder) do
         if LoadTowerRoute("Torre 2",rn) then lt2+=1 end
     end
-    -- ✅ Abre CRÉDITOS como aba padrão
     ShowCreditos()
     Notify("ZKY PARKOUR",loaded.."/4 parkours • Torre 1: "..(lt1 and "OK" or "ERRO").." • Torre 2: "..lt2.."/4",
         loaded==4 and lt1 and lt2==4 and "Success" or "Error")
@@ -3948,4 +4055,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.3 carregado!")
+print("AKIRA MENU V2.3.4 carregado!")
