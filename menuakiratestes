@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.0 — Completo com Extra Avançado + Shaders + FPS Booster
+-- AKIRA MENU V2.3.1 — ESP Corrigido + Shaders suaves + Sem Pulo Alto
 -- =========================================================================
 
 -- =========================================================================
@@ -38,7 +38,6 @@ local TCS = game:GetService("TextChatService")
 local RS = game:GetService("ReplicatedStorage")
 local Pl = P.LocalPlayer
 local PG = Pl:WaitForChild("PlayerGui")
-local Cam = workspace.CurrentCamera
 local character,humanoid,rootPart
 
 -- =========================================================================
@@ -242,10 +241,6 @@ local walkTrack
 local walkAnimCache
 Pl.CharacterAdded:Connect(function()
     task.wait(.2); RefreshCharacter(); walkTrack = nil; walkAnimCache = nil
-    Cam = workspace.CurrentCamera
-end)
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-    Cam = workspace.CurrentCamera
 end)
 RefreshCharacter()
 
@@ -787,7 +782,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.0"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.1"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -1239,9 +1234,7 @@ local function CreateTAFFSCard(label,value,order,parent,color)
     copy.Font=_GB copy.AutoButtonColor=false copy.Parent=card
     Corner(copy,7) Stroke(copy,_K.StrokeLight,1)
     copy.Activated:Connect(function()
-        if typeof(setclipboard)~="function" then
-            Notify("COPIAR","Sem setclipboard.","Error") return
-        end
+        if typeof(setclipboard)~="function" then Notify("COPIAR","Sem setclipboard.","Error") return end
         local ok=pcall(function() setclipboard(value) end)
         if ok then
             copy.Text="✓" Notify("COPIADO","Informação copiada.","Success")
@@ -1276,9 +1269,7 @@ local function ShowTAFFS()
     simBtn.TextSize=10 simBtn.Font=_GB simBtn.AutoButtonColor=false simBtn.Parent=warningCard
     Corner(simBtn,8)
     simBtn.MouseButton1Click:Connect(function()
-        local ok = pcall(function()
-            loadstring(game:HttpGet("https://pastebin.com/raw/yyp8u4Xt"))()
-        end)
+        local ok = pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/yyp8u4Xt"))() end)
         if ok then Notify("MENU SECUNDÁRIO","TAFFS adicionado!","Success")
         else Notify("ERRO","Falha ao carregar.","Error") end
     end)
@@ -1386,7 +1377,6 @@ local function ShowTowersContent()
     end
 end
 
--- AUTO JJS
 local ShowAutomacaoContent
 do
     local ativo,VELOCIDADE,MAX_CLIQUES,META,META_ATIVA=false,53,2,308,true
@@ -1606,9 +1596,7 @@ local function ShowVolvers()
     simBtn.TextSize=10 simBtn.Font=_GB simBtn.AutoButtonColor=false simBtn.Parent=warningCard
     Corner(simBtn,8)
     simBtn.MouseButton1Click:Connect(function()
-        local ok = pcall(function()
-            loadstring(game:HttpGet("https://pastebin.com/raw/ZrzHAenq"))()
-        end)
+        local ok = pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/ZrzHAenq"))() end)
         if ok then Notify("MENU SECUNDÁRIO","Volver aberto!","Success")
         else Notify("ERRO","Falha ao carregar.","Error") end
     end)
@@ -2063,6 +2051,11 @@ end
 -- =========================================================================
 -- COMBATE
 -- =========================================================================
+local Cam = workspace.CurrentCamera
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    Cam = workspace.CurrentCamera
+end)
+
 local AIM_CONFIG = {
     Ativo=false, MostrarFOV=false, FOV=43, RingTransparency=0.3,
     Cor=Color3.fromRGB(150,80,255), Thickness=2,
@@ -2412,14 +2405,15 @@ end
 local ExtraSubPage = "Visual"
 
 local ExtraState = {
-    -- Visual
-    FullbrightAtivo = false, ZoomUnlocked = false,
+    -- Visual / Shaders
+    FullbrightAtivo = false,
+    ZoomUnlocked = false,
     ZoomMaxOriginal = nil, ZoomMinOriginal = nil,
     LightOriginal = nil,
     ShaderAtual = "Nenhum",
     FPSBoosterAtivo = false,
     -- Movimento
-    DuploPulo = false, PuloAlto = false, PuloAltoValor = 55,
+    DuploPulo = false,
     VelocidadeAtiva = false, VelocidadeValor = 24,
     InfiniteJump = false,
     -- ESP
@@ -2444,7 +2438,7 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- SHADERS
+-- SHADERS (suaves)
 -- =========================================================================
 local ShaderInstancias = {}
 
@@ -2473,49 +2467,54 @@ local function aplicarShader(tipo)
 
     if tipo == "Realista V1" then
         novo("ColorCorrectionEffect", {
-            Saturation = 0.25, Contrast = 0.15, Brightness = 0.02,
-            TintColor = _RGB(255, 250, 240)
+            Saturation = 0.08, Contrast = 0.05, Brightness = 0,
+            TintColor = _RGB(255, 252, 245)
         })
-        novo("BloomEffect", { Intensity = 0.5, Size = 24, Threshold = 1.1 })
-        novo("SunRaysEffect", { Intensity = 0.04, Spread = 0.8 })
+        novo("BloomEffect", { Intensity = 0.25, Size = 16, Threshold = 1.2 })
+        novo("SunRaysEffect", { Intensity = 0.03, Spread = 0.7 })
     elseif tipo == "Cinematográfico V2" then
         novo("ColorCorrectionEffect", {
-            Saturation = 0.15, Contrast = 0.25, Brightness = -0.02,
-            TintColor = _RGB(255, 240, 225)
+            Saturation = 0.05, Contrast = 0.12, Brightness = -0.01,
+            TintColor = _RGB(255, 245, 235)
         })
-        novo("BloomEffect", { Intensity = 1.2, Size = 32, Threshold = 0.9 })
-        novo("BlurEffect", { Size = 3 })
-        novo("SunRaysEffect", { Intensity = 0.08, Spread = 1 })
+        novo("BloomEffect", { Intensity = 0.5, Size = 20, Threshold = 1.05 })
+        novo("BlurEffect", { Size = 2 })
+        novo("SunRaysEffect", { Intensity = 0.05, Spread = 0.9 })
     elseif tipo == "Synthwave V3" then
         novo("ColorCorrectionEffect", {
-            Saturation = 0.8, Contrast = 0.4, Brightness = 0.05,
-            TintColor = _RGB(255, 100, 220)
+            Saturation = 0.35, Contrast = 0.15, Brightness = 0.02,
+            TintColor = _RGB(255, 210, 245)
         })
-        novo("BloomEffect", { Intensity = 2.5, Size = 48, Threshold = 0.7 })
+        novo("BloomEffect", { Intensity = 0.8, Size = 28, Threshold = 0.95 })
     elseif tipo == "Neon V4" then
         novo("ColorCorrectionEffect", {
-            Saturation = 1, Contrast = 0.5, Brightness = 0.1,
-            TintColor = _RGB(150, 255, 255)
+            Saturation = 0.4, Contrast = 0.18, Brightness = 0.05,
+            TintColor = _RGB(210, 245, 255)
         })
-        novo("BloomEffect", { Intensity = 3, Size = 60, Threshold = 0.5 })
+        novo("BloomEffect", { Intensity = 0.9, Size = 32, Threshold = 0.85 })
     elseif tipo == "Anaglyph V5" then
         novo("ColorCorrectionEffect", {
-            Saturation = -0.5, Contrast = 0.3, Brightness = 0,
-            TintColor = _RGB(255, 200, 200)
+            Saturation = -0.25, Contrast = 0.12, Brightness = 0,
+            TintColor = _RGB(255, 240, 240)
         })
-        novo("BloomEffect", { Intensity = 0.8, Size = 20, Threshold = 1 })
+        novo("BloomEffect", { Intensity = 0.4, Size = 18, Threshold = 1.1 })
     elseif tipo == "Frio/Céu" then
         novo("ColorCorrectionEffect", {
-            Saturation = 0.1, Contrast = 0.2, Brightness = 0.03,
-            TintColor = _RGB(200, 230, 255)
+            Saturation = 0.02, Contrast = 0.05, Brightness = 0.01,
+            TintColor = _RGB(230, 242, 255)
         })
-        novo("BloomEffect", { Intensity = 0.6, Size = 20, Threshold = 1 })
+        novo("BloomEffect", { Intensity = 0.3, Size = 18, Threshold = 1.15 })
     elseif tipo == "Quente/Sépia" then
         novo("ColorCorrectionEffect", {
-            Saturation = 0.3, Contrast = 0.25, Brightness = 0.02,
-            TintColor = _RGB(255, 220, 180)
+            Saturation = 0.12, Contrast = 0.06, Brightness = 0.01,
+            TintColor = _RGB(255, 242, 225)
         })
-        novo("BloomEffect", { Intensity = 0.4, Size = 16, Threshold = 1.2 })
+        novo("BloomEffect", { Intensity = 0.25, Size = 14, Threshold = 1.2 })
+    elseif tipo == "Clean/Nítido" then
+        novo("ColorCorrectionEffect", {
+            Saturation = 0.1, Contrast = 0.08, Brightness = 0.02,
+            TintColor = _RGB(255, 255, 255)
+        })
     end
 end
 
@@ -2532,7 +2531,6 @@ local function ativarFPSBooster()
     }
     L.GlobalShadows = false
 
-    -- Desliga efeitos
     for _, ef in ipairs(L:GetChildren()) do
         if ef:IsA("PostEffect") or ef:IsA("Atmosphere") or ef:IsA("Sky") then
             FPSOriginais[ef] = ef.Enabled
@@ -2540,7 +2538,6 @@ local function ativarFPSBooster()
         end
     end
 
-    -- Desliga partículas / trails
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke")
             or obj:IsA("Fire") or obj:IsA("Sparkles") then
@@ -2549,7 +2546,6 @@ local function ativarFPSBooster()
         end
     end
 
-    -- Desliga decals / texturas
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Decal") or obj:IsA("Texture") then
             FPSOriginais[obj] = obj.Transparency
@@ -2624,19 +2620,13 @@ do
     end)
 end
 
--- Velocidade / Pulo Alto (cap moderado para evitar kick)
+-- Velocidade
 task.spawn(function()
     while true do
         task.wait(0.3)
         if RefreshCharacter() then
             if ExtraState.VelocidadeAtiva then
                 pcall(function() humanoid.WalkSpeed = ExtraState.VelocidadeValor end)
-            end
-            if ExtraState.PuloAlto then
-                pcall(function()
-                    humanoid.UseJumpPower = true
-                    humanoid.JumpPower = math.min(ExtraState.PuloAltoValor, 65)
-                end)
             end
         end
     end
@@ -2656,7 +2646,7 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- ESP — usando workspace.CurrentCamera direto, box via Drawing, skeleton via Drawing
+-- ESP - VERSÃO ROBUSTA
 -- =========================================================================
 local ESP_Storage = {}
 local hasDrawing = false
@@ -2676,29 +2666,23 @@ local SKELETON_R6 = {
     {"Torso","Left Leg"},{"Torso","Right Leg"}
 }
 
-local function ESP_DestroySkeleton(d)
-    if not d.Skeleton then return end
-    for _, ln in ipairs(d.Skeleton) do pcall(function() ln:Remove() end) end
-    d.Skeleton = nil
-end
-local function ESP_DestroyBox(d)
-    if not d.Box then return end
-    for _, ln in ipairs(d.Box) do pcall(function() ln:Remove() end) end
-    d.Box = nil
-end
-
 local function ESP_Limpar(player)
     local d = ESP_Storage[player]
     if not d then return end
     if d.Highlight then pcall(function() d.Highlight:Destroy() end) end
     if d.Billboard then pcall(function() d.Billboard:Destroy() end) end
-    ESP_DestroySkeleton(d)
-    ESP_DestroyBox(d)
+    if d.Skeleton then
+        for _, ln in ipairs(d.Skeleton) do pcall(function() ln:Remove() end) end
+    end
+    if d.Box then
+        for _, ln in ipairs(d.Box) do pcall(function() ln:Remove() end) end
+    end
     ESP_Storage[player] = nil
 end
 
 local function ESP_Criar(player)
-    if ESP_Storage[player] or player == Pl then return end
+    if player == Pl then return end
+    ESP_Limpar(player)
     local char = player.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -2717,8 +2701,9 @@ local function ESP_Criar(player)
     local bb = _I("BillboardGui")
     bb.Name = "ZKY_ESP_BB"
     bb.Size = _U2(0, 200, 0, 50)
-    bb.StudsOffset = Vector3.new(0, 3.5, 0)
+    bb.StudsOffset = Vector3.new(0, 3.2, 0)
     bb.AlwaysOnTop = true
+    bb.LightInfluence = 0
     bb.Parent = hrp
 
     local nomeLbl = _I("TextLabel", bb)
@@ -2727,34 +2712,37 @@ local function ESP_Criar(player)
     nomeLbl.BackgroundTransparency = 1
     nomeLbl.Text = player.Name
     nomeLbl.TextColor3 = ExtraState.ESPCor
-    nomeLbl.Font = _GB; nomeLbl.TextSize = 14
+    nomeLbl.Font = _GB
+    nomeLbl.TextSize = 14
     nomeLbl.TextStrokeTransparency = 0
-    nomeLbl.TextStrokeColor3 = _RGB(0,0,0)
+    nomeLbl.TextStrokeColor3 = _RGB(0, 0, 0)
     nomeLbl.TextXAlignment = _XC
 
     local infoLbl = _I("TextLabel", bb)
     infoLbl.Name = "Info"
     infoLbl.Position = _U2(0, 0, 0.5, 0)
     infoLbl.Size = _U2(1, 0, 0.5, 0)
-    infoLbl.BackgroundTransparency = 1; infoLbl.Text = ""
-    infoLbl.TextColor3 = _RGB(255,255,255); infoLbl.Font = _GM
-    infoLbl.TextSize = 12; infoLbl.TextStrokeTransparency = 0
-    infoLbl.TextStrokeColor3 = _RGB(0,0,0); infoLbl.TextXAlignment = _XC
+    infoLbl.BackgroundTransparency = 1
+    infoLbl.Text = ""
+    infoLbl.TextColor3 = _RGB(255, 255, 255)
+    infoLbl.Font = _GM
+    infoLbl.TextSize = 12
+    infoLbl.TextStrokeTransparency = 0
+    infoLbl.TextStrokeColor3 = _RGB(0, 0, 0)
+    infoLbl.TextXAlignment = _XC
 
-    ESP_Storage[player] = { Highlight = hl, Billboard = bb }
+    ESP_Storage[player] = {
+        Highlight = hl,
+        Billboard = bb,
+        Char = char
+    }
 end
 
-local function ESP_CriarEsqueleto(player)
+local function ESP_CriarEsqueleto(d)
     if not hasDrawing then return end
-    local d = ESP_Storage[player]
-    if not d or d.Skeleton then return end
-    local char = player.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    local bones = (hum.RigType == Enum.HumanoidRigType.R15) and SKELETON_R15 or SKELETON_R6
+    if d.Skeleton then return end
     d.Skeleton = {}
-    for i = 1, #bones do
+    for i = 1, 15 do
         local ok, ln = pcall(function() return Drawing.new("Line") end)
         if ok and ln then
             ln.Color = ExtraState.ESPCor
@@ -2762,14 +2750,15 @@ local function ESP_CriarEsqueleto(player)
             ln.Transparency = 1
             ln.Visible = false
             d.Skeleton[i] = ln
+        else
+            break
         end
     end
 end
 
-local function ESP_CriarCaixa(player)
+local function ESP_CriarCaixa(d)
     if not hasDrawing then return end
-    local d = ESP_Storage[player]
-    if not d or d.Box then return end
+    if d.Box then return end
     d.Box = {}
     for i = 1, 4 do
         local ok, ln = pcall(function() return Drawing.new("Line") end)
@@ -2779,145 +2768,152 @@ local function ESP_CriarCaixa(player)
             ln.Transparency = 1
             ln.Visible = false
             d.Box[i] = ln
+        else
+            break
         end
     end
 end
 
-local function ESP_Atualizar()
+local function ESP_AtualizarUm(p)
     local cam = workspace.CurrentCamera
     if not cam then return end
-    for _, p in ipairs(P:GetPlayers()) do
-        if p == Pl then continue end
-        if ExtraState.ESPAtivo and p.Character and p.Character.Parent then
-            if not ESP_Storage[p] then ESP_Criar(p) end
-            local d = ESP_Storage[p]
-            if d then
-                if d.Highlight then
-                    d.Highlight.FillColor = ExtraState.ESPCor
-                    d.Highlight.Visible = ExtraState.ESPHighlight
-                end
-                if d.Billboard then
-                    local nomeLbl = d.Billboard:FindFirstChild("Nome")
-                    local infoLbl = d.Billboard:FindFirstChild("Info")
-                    if nomeLbl then
-                        nomeLbl.Visible = ExtraState.ESPNome
-                        nomeLbl.Text = p.Name
-                        nomeLbl.TextColor3 = ExtraState.ESPCor
-                    end
-                    if infoLbl then
-                        local partes = {}
-                        local myChar = Pl.Character
-                        if ExtraState.ESPDistancia and myChar then
-                            local myHrp = myChar:FindFirstChild("HumanoidRootPart")
-                            local theirHrp = p.Character:FindFirstChild("HumanoidRootPart")
-                            if myHrp and theirHrp then
-                                local dist = (myHrp.Position - theirHrp.Position).Magnitude
-                                table.insert(partes, string.format("%dm", math.floor(dist)))
-                            end
-                        end
-                        if ExtraState.ESPVida then
-                            local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                            if hum then table.insert(partes, string.format("❤ %d", math.floor(hum.Health))) end
-                        end
-                        infoLbl.Text = table.concat(partes, "  •  ")
-                        infoLbl.Visible = #partes > 0
-                    end
-                end
 
-                -- ESQUELETO
-                if ExtraState.ESPEsqueleto and hasDrawing then
-                    if not d.Skeleton then ESP_CriarEsqueleto(p) end
-                    if d.Skeleton then
-                        local char = p.Character
-                        local hum = char and char:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            local bones = (hum.RigType == Enum.HumanoidRigType.R15) and SKELETON_R15 or SKELETON_R6
-                            for i, pair in ipairs(bones) do
-                                local p1 = char:FindFirstChild(pair[1])
-                                local p2 = char:FindFirstChild(pair[2])
-                                local ln = d.Skeleton[i]
-                                if p1 and p2 and ln then
-                                    local v1, on1 = cam:WorldToViewportPoint(p1.Position)
-                                    local v2, on2 = cam:WorldToViewportPoint(p2.Position)
-                                    if on1 and on2 then
-                                        ln.From = Vector2.new(v1.X, v1.Y)
-                                        ln.To = Vector2.new(v2.X, v2.Y)
-                                        ln.Color = ExtraState.ESPCor
-                                        ln.Visible = true
-                                    else
-                                        ln.Visible = false
-                                    end
-                                elseif ln then
-                                    ln.Visible = false
-                                end
-                            end
-                        end
-                    end
-                else
-                    if d.Skeleton then ESP_DestroySkeleton(d) end
-                end
+    local char = p.Character
+    if not char or not char.Parent then
+        if ESP_Storage[p] then ESP_Limpar(p) end
+        return
+    end
 
-                -- CAIXA
-                if ExtraState.ESPCaixa and hasDrawing then
-                    if not d.Box then ESP_CriarCaixa(p) end
-                    if d.Box then
-                        local char = p.Character
-                        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                        local hum = char and char:FindFirstChildOfClass("Humanoid")
-                        if hrp and hum then
-                            local root = hrp.Position
-                            local height = (hum.RigType == Enum.HumanoidRigType.R15) and 3 or 3
-                            local topPos = root + Vector3.new(0, height, 0)
-                            local bottomPos = root - Vector3.new(0, height, 0)
-                            local topV, on1 = cam:WorldToViewportPoint(topPos)
-                            local botV, on2 = cam:WorldToViewportPoint(bottomPos)
-                            if on1 and on2 then
-                                local h = math.abs(topV.Y - botV.Y)
-                                local w = h * 0.55
-                                local x = topV.X
-                                local y = topV.Y
-                                local x1, y1 = x - w/2, y
-                                local x2, y2 = x + w/2, y
-                                local x3, y3 = x + w/2, y + h
-                                local x4, y4 = x - w/2, y + h
-                                if d.Box[1] then d.Box[1].From = Vector2.new(x1,y1); d.Box[1].To = Vector2.new(x2,y2); d.Box[1].Visible = true; d.Box[1].Color = ExtraState.ESPCor end
-                                if d.Box[2] then d.Box[2].From = Vector2.new(x2,y2); d.Box[2].To = Vector2.new(x3,y3); d.Box[2].Visible = true; d.Box[2].Color = ExtraState.ESPCor end
-                                if d.Box[3] then d.Box[3].From = Vector2.new(x3,y3); d.Box[3].To = Vector2.new(x4,y4); d.Box[3].Visible = true; d.Box[3].Color = ExtraState.ESPCor end
-                                if d.Box[4] then d.Box[4].From = Vector2.new(x4,y4); d.Box[4].To = Vector2.new(x1,y1); d.Box[4].Visible = true; d.Box[4].Color = ExtraState.ESPCor end
-                            else
-                                for _, ln in ipairs(d.Box) do ln.Visible = false end
-                            end
-                        end
-                    end
-                else
-                    if d.Box then ESP_DestroyBox(d) end
+    local d = ESP_Storage[p]
+    -- Se o char mudou (respawn), limpa e recria
+    if d and d.Char ~= char then
+        ESP_Limpar(p)
+        d = nil
+    end
+
+    if not d then
+        ESP_Criar(p)
+        d = ESP_Storage[p]
+        if not d then return end
+    end
+
+    -- Highlight
+    if d.Highlight then
+        d.Highlight.FillColor = ExtraState.ESPCor
+        d.Highlight.Visible = ExtraState.ESPHighlight
+    end
+
+    -- Billboard
+    if d.Billboard then
+        local nomeLbl = d.Billboard:FindFirstChild("Nome")
+        local infoLbl = d.Billboard:FindFirstChild("Info")
+        if nomeLbl then
+            nomeLbl.Visible = ExtraState.ESPNome
+            nomeLbl.Text = p.Name
+            nomeLbl.TextColor3 = ExtraState.ESPCor
+        end
+        if infoLbl then
+            local partes = {}
+            local myChar = Pl.Character
+            if ExtraState.ESPDistancia and myChar then
+                local myHrp = myChar:FindFirstChild("HumanoidRootPart")
+                local theirHrp = char:FindFirstChild("HumanoidRootPart")
+                if myHrp and theirHrp then
+                    local dist = (myHrp.Position - theirHrp.Position).Magnitude
+                    table.insert(partes, string.format("%dm", math.floor(dist)))
                 end
             end
-        else
-            ESP_Limpar(p)
+            if ExtraState.ESPVida then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then table.insert(partes, string.format("❤ %d", math.floor(hum.Health))) end
+            end
+            infoLbl.Text = table.concat(partes, "  •  ")
+            infoLbl.Visible = #partes > 0
         end
     end
-    for p in pairs(ESP_Storage) do
-        if not p.Parent or p == Pl then ESP_Limpar(p) end
+
+    -- Esqueleto
+    if ExtraState.ESPEsqueleto and hasDrawing then
+        if not d.Skeleton then ESP_CriarEsqueleto(d) end
+        if d.Skeleton then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local bones = (hum.RigType == Enum.HumanoidRigType.R15) and SKELETON_R15 or SKELETON_R6
+                for i, pair in ipairs(bones) do
+                    local p1 = char:FindFirstChild(pair[1])
+                    local p2 = char:FindFirstChild(pair[2])
+                    local ln = d.Skeleton[i]
+                    if p1 and p2 and ln then
+                        local v1, on1 = cam:WorldToViewportPoint(p1.Position)
+                        local v2, on2 = cam:WorldToViewportPoint(p2.Position)
+                        if on1 and on2 then
+                            ln.From = Vector2.new(v1.X, v1.Y)
+                            ln.To = Vector2.new(v2.X, v2.Y)
+                            ln.Color = ExtraState.ESPCor
+                            ln.Visible = true
+                        else
+                            ln.Visible = false
+                        end
+                    elseif ln then
+                        ln.Visible = false
+                    end
+                end
+            end
+        end
+    else
+        if d.Skeleton then
+            for _, ln in ipairs(d.Skeleton) do pcall(function() ln:Remove() end) end
+            d.Skeleton = nil
+        end
+    end
+
+    -- Caixa
+    if ExtraState.ESPCaixa and hasDrawing then
+        if not d.Box then ESP_CriarCaixa(d) end
+        if d.Box then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local root = hrp.Position
+                local topPos = root + Vector3.new(0, 3, 0)
+                local bottomPos = root - Vector3.new(0, 3, 0)
+                local topV, on1 = cam:WorldToViewportPoint(topPos)
+                local botV, on2 = cam:WorldToViewportPoint(bottomPos)
+                if on1 and on2 then
+                    local h = math.abs(topV.Y - botV.Y)
+                    local w = h * 0.55
+                    local x = topV.X
+                    local y = topV.Y
+                    local x1, y1 = x - w/2, y
+                    local x2, y2 = x + w/2, y
+                    local x3, y3 = x + w/2, y + h
+                    local x4, y4 = x - w/2, y + h
+                    if d.Box[1] then d.Box[1].From = Vector2.new(x1,y1); d.Box[1].To = Vector2.new(x2,y2); d.Box[1].Visible = true; d.Box[1].Color = ExtraState.ESPCor end
+                    if d.Box[2] then d.Box[2].From = Vector2.new(x2,y2); d.Box[2].To = Vector2.new(x3,y3); d.Box[2].Visible = true; d.Box[2].Color = ExtraState.ESPCor end
+                    if d.Box[3] then d.Box[3].From = Vector2.new(x3,y3); d.Box[3].To = Vector2.new(x4,y4); d.Box[3].Visible = true; d.Box[3].Color = ExtraState.ESPCor end
+                    if d.Box[4] then d.Box[4].From = Vector2.new(x4,y4); d.Box[4].To = Vector2.new(x1,y1); d.Box[4].Visible = true; d.Box[4].Color = ExtraState.ESPCor end
+                else
+                    for _, ln in ipairs(d.Box) do ln.Visible = false end
+                end
+            end
+        end
+    else
+        if d.Box then
+            for _, ln in ipairs(d.Box) do pcall(function() ln:Remove() end) end
+            d.Box = nil
+        end
     end
 end
 
-P.PlayerRemoving:Connect(function(p) ESP_Limpar(p) end)
-P.PlayerAdded:Connect(function(p)
-    p.CharacterAdded:Connect(function()
-        if ExtraState.ESPAtivo then ESP_Limpar(p) end
-    end)
-end)
-
--- Loop rodando sempre (com pcall para não quebrar)
-task.spawn(function()
-    while true do
-        R.RenderStepped:Wait()
-        if ExtraState.ESPAtivo then
-            pcall(ESP_Atualizar)
+R.RenderStepped:Connect(function()
+    if not ExtraState.ESPAtivo then return end
+    for _, p in ipairs(P:GetPlayers()) do
+        if p ~= Pl then
+            pcall(ESP_AtualizarUm, p)
         end
     end
 end)
+
+P.PlayerRemoving:Connect(function(p) ESP_Limpar(p) end)
 
 -- =========================================================================
 -- PANIC MODE
@@ -2930,12 +2926,10 @@ local function PanicMode()
     for p in pairs(ESP_Storage) do ESP_Limpar(p) end
 
     ExtraState.DuploPulo = false
-    ExtraState.PuloAlto = false
     ExtraState.VelocidadeAtiva = false
     ExtraState.InfiniteJump = false
     ExtraState.AntiAFK = false
 
-    -- Restaura Lighting
     if ExtraState.LightOriginal then
         pcall(function()
             local L = game:GetService("Lighting")
@@ -2959,7 +2953,6 @@ local function PanicMode()
     end
     ExtraState.ZoomUnlocked = false
 
-    -- Shaders + FPS Booster
     limparShaders()
     ExtraState.ShaderAtual = "Nenhum"
     if ExtraState.FPSBoosterAtivo then
@@ -2967,7 +2960,6 @@ local function PanicMode()
         ExtraState.FPSBoosterAtivo = false
     end
 
-    -- Reset personagem
     if RefreshCharacter() then
         pcall(function() humanoid.Health = 0 end)
     end
@@ -2976,7 +2968,7 @@ local function PanicMode()
 end
 
 -- =========================================================================
--- SUB-ABA: VISUAL (Fullbright + Zoom + Shaders + FPS Booster)
+-- SUB-ABA: VISUAL (Zoom + Shaders + FPS Booster — Fullbright foi pros Shaders)
 -- =========================================================================
 local function extraSalvarLighting()
     if ExtraState.LightOriginal then return end
@@ -2988,7 +2980,39 @@ end
 local function ShowExtraVisualContent()
     local card = UI.Card(_CH, 1, "👁️ Visual")
 
-    UI.Toggle(card, 1, "Fullbright (dia/claro)", ExtraState.FullbrightAtivo, function(v)
+    UI.Toggle(card, 1, "Unlock Zoom (Sem Limite)", ExtraState.ZoomUnlocked, function(v)
+        ExtraState.ZoomUnlocked = v
+        if not ExtraState.ZoomMaxOriginal then
+            ExtraState.ZoomMaxOriginal = Pl.CameraMaxZoomDistance
+            ExtraState.ZoomMinOriginal = Pl.CameraMinZoomDistance
+        end
+        if v then
+            pcall(function()
+                Pl.CameraMaxZoomDistance = math.huge
+                Pl.CameraMinZoomDistance = 0.5
+            end)
+            Notify("EXTRA", "Zoom desbloqueado!", "Success")
+        else
+            pcall(function()
+                Pl.CameraMaxZoomDistance = ExtraState.ZoomMaxOriginal
+                Pl.CameraMinZoomDistance = ExtraState.ZoomMinOriginal
+            end)
+            Notify("EXTRA", "Zoom restaurado.", "Orange")
+        end
+    end)
+
+    -- Card de Shaders (agora com Fullbright aqui dentro)
+    local shaderCard = UI.Card(_CH, 2, "🎨 Shaders / Efeitos Visuais")
+
+    local shaderDesc = _I("TextLabel", shaderCard)
+    shaderDesc.Size = _U2(1, 0, 0, 0); shaderDesc.AutomaticSize = Enum.AutomaticSize.Y
+    shaderDesc.BackgroundTransparency = 1
+    shaderDesc.Text = "Efeitos visuais de cor, brilho e contraste. Clique em 'Nenhum' para desativar."
+    shaderDesc.TextColor3 = _K.Gray; shaderDesc.Font = _GM
+    shaderDesc.TextSize = 10; shaderDesc.TextWrapped = true
+    shaderDesc.TextXAlignment = _XL; shaderDesc.LayoutOrder = 1
+
+    UI.Toggle(shaderCard, 2, "Fullbright (dia/claro)", ExtraState.FullbrightAtivo, function(v)
         ExtraState.FullbrightAtivo = v
         if v then
             extraSalvarLighting()
@@ -3013,43 +3037,11 @@ local function ShowExtraVisualContent()
         end
     end)
 
-    UI.Toggle(card, 2, "Unlock Zoom (Sem Limite)", ExtraState.ZoomUnlocked, function(v)
-        ExtraState.ZoomUnlocked = v
-        if not ExtraState.ZoomMaxOriginal then
-            ExtraState.ZoomMaxOriginal = Pl.CameraMaxZoomDistance
-            ExtraState.ZoomMinOriginal = Pl.CameraMinZoomDistance
-        end
-        if v then
-            pcall(function()
-                Pl.CameraMaxZoomDistance = math.huge
-                Pl.CameraMinZoomDistance = 0.5
-            end)
-            Notify("EXTRA", "Zoom desbloqueado!", "Success")
-        else
-            pcall(function()
-                Pl.CameraMaxZoomDistance = ExtraState.ZoomMaxOriginal
-                Pl.CameraMinZoomDistance = ExtraState.ZoomMinOriginal
-            end)
-            Notify("EXTRA", "Zoom restaurado.", "Orange")
-        end
-    end)
-
-    -- Card de Shaders
-    local shaderCard = UI.Card(_CH, 2, "🎨 Shaders / Efeitos Visuais")
-
-    local shaderDesc = _I("TextLabel", shaderCard)
-    shaderDesc.Size = _U2(1, 0, 0, 0); shaderDesc.AutomaticSize = Enum.AutomaticSize.Y
-    shaderDesc.BackgroundTransparency = 1
-    shaderDesc.Text = "Aplica efeitos visuais de cor, brilho e contraste. Clique em 'Nenhum' para desativar."
-    shaderDesc.TextColor3 = _K.Gray; shaderDesc.Font = _GM
-    shaderDesc.TextSize = 10; shaderDesc.TextWrapped = true
-    shaderDesc.TextXAlignment = _XL; shaderDesc.LayoutOrder = 1
-
     local shaderOpcoes = {
         "Nenhum", "Realista V1", "Cinematográfico V2", "Synthwave V3",
-        "Neon V4", "Anaglyph V5", "Frio/Céu", "Quente/Sépia"
+        "Neon V4", "Anaglyph V5", "Frio/Céu", "Quente/Sépia", "Clean/Nítido"
     }
-    UI.Dropdown(shaderCard, 2, "Shader Ativo", shaderOpcoes, ExtraState.ShaderAtual, function(op)
+    UI.Dropdown(shaderCard, 3, "Shader Ativo", shaderOpcoes, ExtraState.ShaderAtual, function(op)
         aplicarShader(op)
         if op == "Nenhum" then
             Notify("SHADER", "Shader desativado.", "Orange")
@@ -3064,7 +3056,7 @@ local function ShowExtraVisualContent()
     local fpsDesc = _I("TextLabel", fpsCard)
     fpsDesc.Size = _U2(1, 0, 0, 0); fpsDesc.AutomaticSize = Enum.AutomaticSize.Y
     fpsDesc.BackgroundTransparency = 1
-    fpsDesc.Text = "Remove partículas, efeitos, decals e texturas. Aumenta muito o FPS. Pode deixar o mapa sem detalhes — desative para restaurar tudo."
+    fpsDesc.Text = "Remove partículas, efeitos, decals e texturas. Aumenta muito o FPS. Desative para restaurar tudo."
     fpsDesc.TextColor3 = _K.Gray; fpsDesc.Font = _GM
     fpsDesc.TextSize = 10; fpsDesc.TextWrapped = true
     fpsDesc.TextXAlignment = _XL; fpsDesc.LayoutOrder = 1
@@ -3083,7 +3075,7 @@ local function ShowExtraVisualContent()
 end
 
 -- =========================================================================
--- SUB-ABA: MOVIMENTO
+-- SUB-ABA: MOVIMENTO (sem pulo alto)
 -- =========================================================================
 local function ShowExtraMovimentoContent()
     local card = UI.Card(_CH, 1, "🏃 Movimento")
@@ -3098,41 +3090,23 @@ local function ShowExtraMovimentoContent()
         Notify("EXTRA", v and "Pulo infinito ativado." or "Pulo infinito desativado.", v and "Success" or "Orange")
     end)
 
-    UI.Toggle(card, 3, "Pulo Alto (cap 65 - seguro)", ExtraState.PuloAlto, function(v)
-        ExtraState.PuloAlto = v
-        if not v and RefreshCharacter() then pcall(function() humanoid.JumpPower = 50 end) end
-        Notify("EXTRA", v and "Pulo alto ativado." or "Pulo alto desativado.", v and "Success" or "Orange")
-    end)
-
-    UI.Slider(card, 4, "Força do Pulo (50-65)", ExtraState.PuloAltoValor, 50, 65, false, function(v)
-        ExtraState.PuloAltoValor = v
-    end)
-
-    local dica1 = _I("TextLabel", card)
-    dica1.Size = _U2(1, 0, 0, 0); dica1.AutomaticSize = Enum.AutomaticSize.Y
-    dica1.BackgroundTransparency = 1
-    dica1.Text = "⚠️ Valores acima de 65 tendem a dar kick por anti-cheat. Se der, desative e use o Duplo Pulo."
-    dica1.TextColor3 = _K.Orange; dica1.Font = _GM
-    dica1.TextSize = 9; dica1.TextWrapped = true
-    dica1.TextXAlignment = _XL; dica1.LayoutOrder = 5
-
-    UI.Toggle(card, 6, "Velocidade Customizada", ExtraState.VelocidadeAtiva, function(v)
+    UI.Toggle(card, 3, "Velocidade Customizada", ExtraState.VelocidadeAtiva, function(v)
         ExtraState.VelocidadeAtiva = v
         if not v and RefreshCharacter() then pcall(function() humanoid.WalkSpeed = 16 end) end
         Notify("EXTRA", v and ("Velocidade: "..ExtraState.VelocidadeValor) or "Velocidade padrão.", v and "Success" or "Orange")
     end)
 
-    UI.Slider(card, 7, "Velocidade (WalkSpeed)", ExtraState.VelocidadeValor, 16, 100, false, function(v)
+    UI.Slider(card, 4, "Velocidade (WalkSpeed)", ExtraState.VelocidadeValor, 16, 100, false, function(v)
         ExtraState.VelocidadeValor = v
     end)
 
-    local dica2 = _I("TextLabel", card)
-    dica2.Size = _U2(1, 0, 0, 0); dica2.AutomaticSize = Enum.AutomaticSize.Y
-    dica2.BackgroundTransparency = 1
-    dica2.Text = "⚡ Recomendado: até 40. Valores altos podem dar kick."
-    dica2.TextColor3 = _K.DarkGray; dica2.Font = _GM
-    dica2.TextSize = 9; dica2.TextWrapped = true
-    dica2.TextXAlignment = _XL; dica2.LayoutOrder = 8
+    local dica = _I("TextLabel", card)
+    dica.Size = _U2(1, 0, 0, 0); dica.AutomaticSize = Enum.AutomaticSize.Y
+    dica.BackgroundTransparency = 1
+    dica.Text = "⚡ Recomendado: até 40. Valores altos podem dar kick."
+    dica.TextColor3 = _K.DarkGray; dica.Font = _GM
+    dica.TextSize = 9; dica.TextWrapped = true
+    dica.TextXAlignment = _XL; dica.LayoutOrder = 5
 end
 
 -- =========================================================================
@@ -3143,11 +3117,15 @@ local function ShowExtraESPContent()
 
     UI.Toggle(card, 1, "Ativar ESP", ExtraState.ESPAtivo, function(v)
         ExtraState.ESPAtivo = v
-        if not v then for p in pairs(ESP_Storage) do ESP_Limpar(p) end end
+        if not v then
+            for p in pairs(ESP_Storage) do ESP_Limpar(p) end
+        end
         Notify("ESP", v and "ESP ativado." or "ESP desativado.", v and "Success" or "Orange")
     end)
 
-    UI.Toggle(card, 2, "Highlight (brilho no corpo)", ExtraState.ESPHighlight, function(v) ExtraState.ESPHighlight = v end)
+    UI.Toggle(card, 2, "Highlight (brilho no corpo)", ExtraState.ESPHighlight, function(v)
+        ExtraState.ESPHighlight = v
+    end)
     UI.Toggle(card, 3, "Nome", ExtraState.ESPNome, function(v) ExtraState.ESPNome = v end)
     UI.Toggle(card, 4, "Distância (m)", ExtraState.ESPDistancia, function(v) ExtraState.ESPDistancia = v end)
     UI.Toggle(card, 5, "Vida (❤)", ExtraState.ESPVida, function(v) ExtraState.ESPVida = v end)
@@ -3158,7 +3136,7 @@ local function ShowExtraESPContent()
         local aviso = _I("TextLabel", card)
         aviso.Size = _U2(1, 0, 0, 0); aviso.AutomaticSize = Enum.AutomaticSize.Y
         aviso.BackgroundTransparency = 1
-        aviso.Text = "⚠️ Seu executor não suporta Drawing API. 'Caixa' e 'Esqueleto' não vão funcionar."
+        aviso.Text = "⚠️ Executor sem Drawing API. 'Caixa' e 'Esqueleto' não vão funcionar."
         aviso.TextColor3 = _K.Orange; aviso.Font = _GM
         aviso.TextSize = 9; aviso.TextWrapped = true
         aviso.TextXAlignment = _XL; aviso.LayoutOrder = 8
@@ -3966,4 +3944,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.0 carregado!")
+print("AKIRA MENU V2.3.1 carregado!")
