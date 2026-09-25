@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.5 — Transparência Real + FPS Booster Agressivo
+-- AKIRA MENU V2.3.6 — Sem Menus Secundários
 -- =========================================================================
 
 -- =========================================================================
@@ -543,7 +543,7 @@ local function StopPlayback(reason)
 end
 
 -- =========================================================================
--- INICIAR EXECUÇÃO (animação igual à reprodução)
+-- INICIAR EXECUÇÃO
 -- =========================================================================
 local function IniciarExecucao(name)
     if not Playback.Running then return end
@@ -899,7 +899,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.5"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.6"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -1410,36 +1410,9 @@ end
 local function ShowTAFFS()
     CurrentPage="TAFFS"
     ClearContent()
-    local warningCard=_I("Frame")
-    warningCard.Size=_U2(1,0,0,70) warningCard.BackgroundColor3=_RGB(45,35,20)
-    warningCard.BorderSizePixel=0 warningCard.LayoutOrder=0 warningCard.Parent=_CH
-    Corner(warningCard,8) Stroke(warningCard,_K.Orange,1.5)
-    local warnIcon=_I("TextLabel")
-    warnIcon.BackgroundTransparency=1 warnIcon.Position=_UO(12,8) warnIcon.Size=_UO(30,30)
-    warnIcon.Text="⚠️" warnIcon.TextSize=20 warnIcon.TextColor3=_K.White
-    warnIcon.Font=_GB warnIcon.TextXAlignment=_XC
-    warnIcon.TextYAlignment=Enum.TextYAlignment.Center warnIcon.Parent=warningCard
-    local warnText=_I("TextLabel")
-    warnText.BackgroundTransparency=1 warnText.Position=_UO(48,8)
-    warnText.Size=_U2(1,-130,0,35)
-    warnText.Text="Deseja adicionar as informações TAFFS em um menu secundário?"
-    warnText.TextColor3=_K.White warnText.TextSize=10 warnText.Font=_GB
-    warnText.TextWrapped=true warnText.TextXAlignment=_XL
-    warnText.TextYAlignment=Enum.TextYAlignment.Top warnText.Parent=warningCard
-    local simBtn=_I("TextButton")
-    simBtn.AnchorPoint=_V2(1,.5) simBtn.Position=_U2(1,-12,.5,0)
-    simBtn.Size=_UO(70,34) simBtn.BackgroundColor3=_K.Success
-    simBtn.BorderSizePixel=0 simBtn.Text="▶ SIM" simBtn.TextColor3=_K.White
-    simBtn.TextSize=10 simBtn.Font=_GB simBtn.AutoButtonColor=false simBtn.Parent=warningCard
-    Corner(simBtn,8)
-    simBtn.MouseButton1Click:Connect(function()
-        local ok = pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/yyp8u4Xt"))() end)
-        if ok then Notify("MENU SECUNDÁRIO","TAFFS adicionado!","Success")
-        else Notify("ERRO","Falha ao carregar.","Error") end
-    end)
     local header=_I("Frame")
     header.Size=_U2(1,0,0,58) header.BackgroundColor3=_K.Card header.BorderSizePixel=0
-    header.LayoutOrder=1 header.Parent=_CH Corner(header,9) Stroke(header,_K.StrokeLight,1)
+    header.LayoutOrder=0 header.Parent=_CH Corner(header,9) Stroke(header,_K.StrokeLight,1)
     local title=_I("TextLabel")
     title.BackgroundTransparency=1 title.Position=_UO(12,7) title.Size=_U2(1,-24,0,25)
     title.Text="📝 TAFFS" title.TextColor3=_K.White title.TextSize=16
@@ -1452,7 +1425,7 @@ local function ShowTAFFS()
         local section=_I("Frame")
         section.Size=_U2(1,0,0,0) section.AutomaticSize=Enum.AutomaticSize.Y
         section.BackgroundColor3=_K.Card section.BorderSizePixel=0
-        section.LayoutOrder=idx+1 section.Parent=_CH
+        section.LayoutOrder=idx section.Parent=_CH
         Corner(section,8) Stroke(section,div.Color,2)
         local sectionLayout=_I("UIListLayout")
         sectionLayout.FillDirection=Enum.FillDirection.Vertical
@@ -1739,33 +1712,6 @@ local function ShowVolvers()
     sub.BackgroundTransparency=1 sub.Position=_UO(13,34) sub.Size=_U2(1,-26,0,15)
     sub.Text="Comandos de formação – ZAYK VOLVERS V2" sub.TextColor3=_K.DarkGray
     sub.TextSize=9 sub.Font=_GM sub.TextXAlignment=_XL sub.Parent=header
-    local warningCard=_I("Frame")
-    warningCard.Size=_U2(1,0,0,70) warningCard.BackgroundColor3=_RGB(45,35,20)
-    warningCard.BorderSizePixel=0 warningCard.LayoutOrder=1 warningCard.Parent=_CH
-    Corner(warningCard,8) Stroke(warningCard,_K.Orange,1.5)
-    local warnIcon=_I("TextLabel")
-    warnIcon.BackgroundTransparency=1 warnIcon.Position=_UO(12,8) warnIcon.Size=_UO(30,30)
-    warnIcon.Text="⚠️" warnIcon.TextSize=20 warnIcon.TextColor3=_K.White
-    warnIcon.Font=_GB warnIcon.TextXAlignment=_XC
-    warnIcon.TextYAlignment=Enum.TextYAlignment.Center warnIcon.Parent=warningCard
-    local warnText=_I("TextLabel")
-    warnText.BackgroundTransparency=1 warnText.Position=_UO(48,8)
-    warnText.Size=_U2(1,-130,0,35)
-    warnText.Text="Deseja executar os comandos Volvers em um menu secundário?"
-    warnText.TextColor3=_K.White warnText.TextSize=10 warnText.Font=_GB
-    warnText.TextWrapped=true warnText.TextXAlignment=_XL
-    warnText.TextYAlignment=Enum.TextYAlignment.Top warnText.Parent=warningCard
-    local simBtn=_I("TextButton")
-    simBtn.AnchorPoint=_V2(1,.5) simBtn.Position=_U2(1,-12,.5,0)
-    simBtn.Size=_UO(70,34) simBtn.BackgroundColor3=_K.Success
-    simBtn.BorderSizePixel=0 simBtn.Text="▶ SIM" simBtn.TextColor3=_K.White
-    simBtn.TextSize=10 simBtn.Font=_GB simBtn.AutoButtonColor=false simBtn.Parent=warningCard
-    Corner(simBtn,8)
-    simBtn.MouseButton1Click:Connect(function()
-        local ok = pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/ZrzHAenq"))() end)
-        if ok then Notify("MENU SECUNDÁRIO","Volver aberto!","Success")
-        else Notify("ERRO","Falha ao carregar.","Error") end
-    end)
     local commands={
         { name="◆ SALVAR POSIÇÃO", desc="Salva somente para onde o personagem está olhando.", highlight=true, action=SaveDirection },
         { name="DIREITA VOLVER!", desc="Gira 90° para a direita.", highlight=false, action=function() Turn("DIREITA") end },
@@ -1777,7 +1723,7 @@ local function ShowVolvers()
         local card=_I("Frame")
         card.Size=_U2(1,0,0,55)
         card.BackgroundColor3=cmd.highlight and _RGB(38,38,38) or _K.Card
-        card.BorderSizePixel=0 card.LayoutOrder=i+2 card.Parent=_CH
+        card.BorderSizePixel=0 card.LayoutOrder=i card.Parent=_CH
         Corner(card,8)
         Stroke(card, cmd.highlight and _K.Primary or _K.Stroke, cmd.highlight and 1.7 or 1)
         local nameLabel=_I("TextLabel")
@@ -4095,4 +4041,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.5 carregado!")
+print("AKIRA MENU V2.3.6 carregado!")
