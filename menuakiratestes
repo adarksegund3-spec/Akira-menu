@@ -1,8 +1,8 @@
 -- =========================================================================
--- AKIRA MENU V2.2.3 — Persistência + Posições com atualização AO VIVO
---  • Salva API Key + Posições em arquivo (Akira_Config.json)
---  • Aba Posições: adicionar / editar / excluir / salvar / ir (até 15)
---  • Fix: tudo atualiza AO VIVO na UI (sem re-render do menu)
+-- AKIRA MENU V2.2.4 — Gravar Rota + Persistência
+--  • Aba "Gravar Rota": gravar movimentos, reproduzir, salvar em arquivo
+--  • Visual igual ao HAVAC (2 colunas: Gravação + Config Motor)
+--  • Persistência: Akira_Config.json
 -- =========================================================================
 
 -- =========================================================================
@@ -93,6 +93,7 @@ local SUPORTA_SALVAR = (type(writefile)=="function") and (type(readfile)=="funct
 local Persist = {
     ia_key = "",
     posicoes = {},
+    rotas_salvas = {}, -- {{nome, frames}, ...}
     limite_posicoes = 15
 }
 
@@ -125,6 +126,30 @@ local function persistCarregar()
             end
         end
         Persist.posicoes = limpos
+    end
+    if type(dados.rotas_salvas) == "table" then
+        local limpas = {}
+        for _, r in ipairs(dados.rotas_salvas) do
+            if type(r) == "table" and type(r.nome) == "string" and type(r.frames) == "table" then
+                local framesValidos = {}
+                for _, f in ipairs(r.frames) do
+                    if type(f) == "table" and type(f.t) == "number"
+                        and type(f.x) == "number" and type(f.y) == "number" and type(f.z) == "number" then
+                        table.insert(framesValidos, {
+                            t = f.t,
+                            x = f.x, y = f.y, z = f.z,
+                            rx = tonumber(f.rx) or 0,
+                            ry = tonumber(f.ry) or 0,
+                            rz = tonumber(f.rz) or 0
+                        })
+                    end
+                end
+                if #framesValidos >= 2 then
+                    table.insert(limpas, { nome = r.nome, frames = framesValidos })
+                end
+            end
+        end
+        Persist.rotas_salvas = limpas
     end
 end
 
@@ -879,7 +904,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.3"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.2.4"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -912,16 +937,17 @@ local function SideButton(text,selected)
     return b
 end
 
-local creditosButton = SideButton("👑 CRÉDITOS", false)
-local ebDeltaButton  = SideButton("🚀 EB DELTA", true)
-local taffsButton    = SideButton("📝 TAFFS")
-local volversButton  = SideButton("↪ VOLVERS", false)
-local iaButton       = SideButton("🤖 INTELIGÊNCIA", false)
-local combateButton  = SideButton("🎯 COMBATE", false)
-local textosButton   = SideButton("📚 TEXTOS PRONTOS", false)
-local lojaButton     = SideButton("🔫 LOJA", false)
-local extraButton    = SideButton("⚡ EXTRA", false)
-local selectedButton = ebDeltaButton
+local creditosButton    = SideButton("👑 CRÉDITOS", false)
+local ebDeltaButton     = SideButton("🚀 EB DELTA", true)
+local gravarRotaButton  = SideButton("⏺️ GRAVAR ROTA", false)
+local taffsButton       = SideButton("📝 TAFFS")
+local volversButton     = SideButton("↪ VOLVERS", false)
+local iaButton          = SideButton("🤖 INTELIGÊNCIA", false)
+local combateButton     = SideButton("🎯 COMBATE", false)
+local textosButton      = SideButton("📚 TEXTOS PRONTOS", false)
+local lojaButton        = SideButton("🔫 LOJA", false)
+local extraButton       = SideButton("⚡ EXTRA", false)
+local selectedButton    = ebDeltaButton
 
 local Content=_I("ScrollingFrame")
 Content.Size=_U2(1,-134,1,-78) Content.Position=_U2(0,126,0,70)
@@ -1336,7 +1362,7 @@ local function CreateTwoColumns(parent, ordem)
     lay.Parent = container
 
     local col1 = _I("Frame", container)
-    col1.Size = _U2(0.5, -5, 0, 0)
+    col1.Size = _U2(0.55, -5, 0, 0)
     col1.AutomaticSize = Enum.AutomaticSize.Y
     col1.BackgroundTransparency = 1
     col1.LayoutOrder = 1
@@ -1346,7 +1372,7 @@ local function CreateTwoColumns(parent, ordem)
     c1lay.Parent = col1
 
     local col2 = _I("Frame", container)
-    col2.Size = _U2(0.5, -5, 0, 0)
+    col2.Size = _U2(0.45, -5, 0, 0)
     col2.AutomaticSize = Enum.AutomaticSize.Y
     col2.BackgroundTransparency = 1
     col2.LayoutOrder = 2
@@ -1359,9 +1385,9 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
--- MODAL: EDITAR NOME
+-- MODAL: EDITAR NOME (genérico)
 -- =========================================================================
-local function abrirModalEditarNome(nomeAtual, aoConfirmar)
+local function abrirModalEditarNome(titulo, nomeAtual, aoConfirmar)
     local modal = _I("Frame", Gui)
     modal.Size = _UO(320, 160)
     modal.Position = UDim2.fromScale(0.5, 0.5)
@@ -1375,7 +1401,7 @@ local function abrirModalEditarNome(nomeAtual, aoConfirmar)
     local t = _I("TextLabel", modal)
     t.Size = _U2(1, 0, 0, 36)
     t.BackgroundTransparency = 1
-    t.Text = "✏️ Editar nome da posição"
+    t.Text = titulo or "✏️ Editar nome"
     t.TextColor3 = _K.White
     t.Font = _GB
     t.TextSize = 13
@@ -1385,7 +1411,7 @@ local function abrirModalEditarNome(nomeAtual, aoConfirmar)
     box.Size = _U2(1, -30, 0, 34)
     box.BackgroundColor3 = _RGB(18,18,24)
     box.BorderSizePixel = 0
-    box.Text = nomeAtual
+    box.Text = nomeAtual or ""
     box.PlaceholderText = "Digite o nome..."
     box.PlaceholderColor3 = _K.DarkGray
     box.TextColor3 = _K.White
@@ -1426,7 +1452,7 @@ local function abrirModalEditarNome(nomeAtual, aoConfirmar)
     btnOk.MouseButton1Click:Connect(function()
         local novo = box.Text:gsub("^%s+",""):gsub("%s+$","")
         if novo == "" then
-            Notify("POSIÇÃO","⚠️ Nome não pode ser vazio.","Error")
+            Notify("NOME","⚠️ Nome não pode ser vazio.","Error")
             return
         end
         modal:Destroy()
@@ -1434,6 +1460,554 @@ local function abrirModalEditarNome(nomeAtual, aoConfirmar)
     end)
 
     box:CaptureFocus()
+end
+
+-- =========================================================================
+-- SISTEMA DE GRAVAÇÃO DE ROTA
+-- =========================================================================
+local Gravacao = {
+    Ativa = false,
+    Reproduzindo = false,
+    Frames = {},
+    StartGravacao = 0,
+    UltimoFrame = -math.huge,
+    Velocidade = 10, -- Hz
+    MostrarRota = true,
+    MoveTo = false,
+    GravConn = nil,
+    RepConn = nil,
+    LinhasFolder = nil,
+    RotaSelecionada = nil,
+    MAX_FRAMES = 5000,
+    MAX_SEGUNDOS = 300
+}
+
+-- Pasta de linhas própria (não conflita com o parkour)
+local function gravClearLines()
+    if not Gravacao.LinhasFolder then return end
+    for _, o in ipairs(Gravacao.LinhasFolder:GetChildren()) do
+        o:Destroy()
+    end
+end
+
+local function gravCreateLine(a, b)
+    if not a or not b then return end
+    local d = b - a
+    local dist = d.Magnitude
+    if dist < .01 then return end
+    if not Gravacao.LinhasFolder then
+        Gravacao.LinhasFolder = _I("Folder")
+        Gravacao.LinhasFolder.Name = "ZKY_GravacaoLines"
+        Gravacao.LinhasFolder.Parent = workspace
+    end
+    local l = _I("Part")
+    l.Name = "GravSeg"
+    l.Anchored = true
+    l.CanCollide = false
+    l.CanTouch = false
+    l.CanQuery = false
+    l.CastShadow = false
+    l.Material = Enum.Material.Neon
+    l.Color = _RGB(150, 110, 240)
+    l.Transparency = 0.2
+    l.Size = Vector3.new(.15, .15, dist)
+    l.CFrame = CFrame.lookAt((a + b) / 2, b)
+    l.Parent = Gravacao.LinhasFolder
+end
+
+local function gravMostrarLinhas(frames, mostrar)
+    gravClearLines()
+    if not mostrar then return end
+    if not frames or #frames < 2 then return end
+    local last = nil
+    for _, f in ipairs(frames) do
+        local p = Vector3.new(f.x, f.y, f.z)
+        if last then gravCreateLine(last, p) end
+        last = p
+    end
+end
+
+local function gravIniciar()
+    if Gravacao.Ativa then return end
+    if not RefreshCharacter() then
+        Notify("GRAVAÇÃO", "Personagem não encontrado.", "Error")
+        return
+    end
+    Gravacao.Frames = {}
+    Gravacao.StartGravacao = os.clock()
+    Gravacao.UltimoFrame = -math.huge
+    Gravacao.Ativa = true
+    Notify("GRAVAÇÃO", "⏺️ Gravando... faça seus movimentos!", "Success")
+
+    Gravacao.GravConn = R.Heartbeat:Connect(function()
+        if not Gravacao.Ativa then return end
+        if not RefreshCharacter() then return end
+        if #Gravacao.Frames >= Gravacao.MAX_FRAMES then
+            Gravacao.Ativa = false
+            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
+            Notify("GRAVAÇÃO", "Limite de "..Gravacao.MAX_FRAMES.." frames atingido. Parado.", "Orange")
+            return
+        end
+        local agora = os.clock()
+        if agora - Gravacao.StartGravacao > Gravacao.MAX_SEGUNDOS then
+            Gravacao.Ativa = false
+            if Gravacao.GravConn then Gravacao.GravConn:Disconnect(); Gravacao.GravConn = nil end
+            Notify("GRAVAÇÃO", "Tempo máximo ("..Gravacao.MAX_SEGUNDOS.."s) atingido. Parado.", "Orange")
+            return
+        end
+        if agora - Gravacao.UltimoFrame < (1 / Gravacao.Velocidade) then return end
+        Gravacao.UltimoFrame = agora
+        local cf = rootPart.CFrame
+        local rx, ry, rz = cf:ToEulerAnglesXYZ()
+        table.insert(Gravacao.Frames, {
+            t = agora - Gravacao.StartGravacao,
+            x = cf.Position.X,
+            y = cf.Position.Y,
+            z = cf.Position.Z,
+            rx = rx, ry = ry, rz = rz
+        })
+    end)
+end
+
+local function gravParar()
+    if not Gravacao.Ativa then return end
+    Gravacao.Ativa = false
+    if Gravacao.GravConn then
+        Gravacao.GravConn:Disconnect()
+        Gravacao.GravConn = nil
+    end
+    if #Gravacao.Frames > 0 then
+        local ultimo = Gravacao.Frames[#Gravacao.Frames]
+        Notify("GRAVAÇÃO", "⏹️ Parado! "..#Gravacao.Frames.." frames ("..string.format("%.1f", ultimo.t).."s)", "Success")
+    else
+        Notify("GRAVAÇÃO", "Nada foi gravado.", "Orange")
+    end
+end
+
+local function gravPararReproducao(silencioso)
+    if not Gravacao.Reproduzindo then return end
+    Gravacao.Reproduzindo = false
+    if Gravacao.RepConn then
+        Gravacao.RepConn:Disconnect()
+        Gravacao.RepConn = nil
+    end
+    if RefreshCharacter() then
+        humanoid:Move(Vector3.zero, false)
+        pcall(function() humanoid.AutoRotate = true end)
+    end
+    if not silencioso then
+        Notify("REPRODUÇÃO", "⏹️ Reprodução parada.", "Orange")
+    end
+end
+
+local function gravReproduzir(frames)
+    if Gravacao.Reproduzindo then return end
+    if Playback.Running then
+        Notify("REPRODUÇÃO", "Pare o Auto Parkour antes de reproduzir.", "Error")
+        return
+    end
+    if not frames or #frames < 2 then
+        Notify("REPRODUÇÃO", "Sem frames suficientes pra reproduzir.", "Error")
+        return
+    end
+    if not RefreshCharacter() then
+        Notify("REPRODUÇÃO", "Personagem não encontrado.", "Error")
+        return
+    end
+
+    Gravacao.Reproduzindo = true
+    pcall(function() humanoid.AutoRotate = false end)
+    Notify("REPRODUÇÃO", "▶️ Reproduzindo "..#frames.." frames...", "Success")
+
+    local t0 = os.clock()
+    local idx = 1
+    local maxT = frames[#frames].t
+
+    Gravacao.RepConn = R.Heartbeat:Connect(function()
+        if not Gravacao.Reproduzindo then return end
+        if not RefreshCharacter() then gravPararReproducao(true); return end
+
+        local elapsed = os.clock() - t0
+        if elapsed >= maxT then
+            local f = frames[#frames]
+            ApplyPosition(Vector3.new(f.x, f.y, f.z), CFrame.Angles(f.rx, f.ry, f.rz))
+            gravPararReproducao(true)
+            Notify("REPRODUÇÃO", "✅ Rota finalizada!", "Success")
+            return
+        end
+
+        while idx < #frames - 1 and elapsed > frames[idx + 1].t do
+            idx = idx + 1
+        end
+
+        local a = frames[idx]
+        local b = frames[idx + 1] or a
+        local d = b.t - a.t
+        local alpha = d > 0 and math.clamp((elapsed - a.t) / d, 0, 1) or 0
+
+        local pa = Vector3.new(a.x, a.y, a.z)
+        local pb = Vector3.new(b.x, b.y, b.z)
+        local pos = pa:Lerp(pb, alpha)
+
+        local ra = CFrame.Angles(a.rx or 0, a.ry or 0, a.rz or 0)
+        local rb = CFrame.Angles(b.rx or 0, b.ry or 0, b.rz or 0)
+        local rot = ra:Lerp(rb, alpha)
+
+        if Gravacao.MoveTo then
+            -- MoveTo: mais natural, menos preciso
+            if rootPart then
+                pcall(function() humanoid:MoveTo(pos) end)
+            end
+        else
+            ApplyPosition(pos, rot)
+        end
+    end)
+end
+
+-- =========================================================================
+-- ABA: GRAVAR ROTA (visual HAVAC)
+-- =========================================================================
+local GravarRotaAbaAtiva = false
+
+local function ShowGravarRota()
+    CurrentPage = "GravarRota"
+    GravarRotaAbaAtiva = true
+    ClearContent()
+
+    local col1, col2 = CreateTwoColumns(_CH, 0)
+
+    -- ============================================================
+    -- COLUNA ESQUERDA: Gravação & Execução
+    -- ============================================================
+    local cardPrincipal = UI.Card(col1, 1, "🎬 Gravação & Execução")
+
+    -- -------- Sub-seção: Rotas Temporárias --------
+    local subTemp = _I("Frame", cardPrincipal)
+    subTemp.Size = _U2(1, 0, 0, 0)
+    subTemp.AutomaticSize = Enum.AutomaticSize.Y
+    subTemp.BackgroundColor3 = _RGB(18, 18, 24)
+    subTemp.BorderSizePixel = 0
+    subTemp.LayoutOrder = 1
+    Corner(subTemp, 6)
+    Stroke(subTemp, _K.Stroke, 1)
+    Padding(subTemp, 10, 10, 10, 10)
+
+    local layTemp = _I("UIListLayout", subTemp)
+    layTemp.Padding = _UD(0, 8)
+    layTemp.SortOrder = Enum.SortOrder.LayoutOrder
+    layTemp.Parent = subTemp
+
+    local tempTitle = _I("TextLabel", subTemp)
+    tempTitle.Size = _U2(1, 0, 0, 14)
+    tempTitle.BackgroundTransparency = 1
+    tempTitle.Text = "Rotas Temporárias"
+    tempTitle.TextColor3 = _K.PurpleLight
+    tempTitle.Font = _GB
+    tempTitle.TextSize = 11
+    tempTitle.TextXAlignment = _XL
+    tempTitle.LayoutOrder = 0
+
+    -- Toggle Gravar
+    UI.Toggle(subTemp, 1, "Gravar", Gravacao.Ativa, function(v)
+        if v then gravIniciar() else gravParar() end
+    end)
+
+    -- Toggle Mostrar Rota
+    UI.Toggle(subTemp, 2, "Mostrar Rota", Gravacao.MostrarRota, function(v)
+        Gravacao.MostrarRota = v
+        gravMostrarLinhas(Gravacao.Frames, v)
+    end)
+
+    -- Botão Reproduzir / Parar
+    local btnRep = UI.ActionButton(subTemp, 3,
+        Gravacao.Reproduzindo and "⏹️ Parar" or "▶️ Reproduzir / Parar",
+        Gravacao.Reproduzindo and _K.Error or _RGB(40, 40, 55),
+        function()
+            if Gravacao.Reproduzindo then
+                gravPararReproducao()
+            else
+                if #Gravacao.Frames < 2 then
+                    Notify("REPRODUÇÃO", "Grave algo primeiro!", "Error")
+                    return
+                end
+                gravReproduzir(Gravacao.Frames)
+            end
+        end)
+
+    -- TextBox nome da rota
+    local nomeBox = UI.TextBox(subTemp, 4, "Nome da Rota", "Vazio = Automático", "", function() end)
+
+    -- Botão Salvar Rota
+    UI.ActionButton(subTemp, 5, "💾 Salvar Rota", _K.Success, function()
+        if #Gravacao.Frames < 2 then
+            Notify("SALVAR", "Grave algo primeiro!", "Error")
+            return
+        end
+        if #Persist.rotas_salvas >= 30 then
+            Notify("SALVAR", "Limite de 30 rotas salvas atingido.", "Error")
+            return
+        end
+        local nome = nomeBox.Text:gsub("^%s+",""):gsub("%s+$","")
+        if nome == "" then
+            nome = "Rota "..(#Persist.rotas_salvas + 1)
+        end
+        -- Verifica se já existe com mesmo nome
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == nome then
+                Notify("SALVAR", "Já existe uma rota chamada '"..nome.."'.", "Error")
+                return
+            end
+        end
+        -- Cópia dos frames (evita referência compartilhada)
+        local copia = {}
+        for i, f in ipairs(Gravacao.Frames) do
+            copia[i] = { t = f.t, x = f.x, y = f.y, z = f.z,
+                rx = f.rx or 0, ry = f.ry or 0, rz = f.rz or 0 }
+        end
+        table.insert(Persist.rotas_salvas, { nome = nome, frames = copia })
+        persistSalvar()
+        nomeBox.Text = ""
+        Notify("SALVAR", "✅ Rota '"..nome.."' salva! ("..#copia.." frames)", "Success")
+        task.defer(function()
+            task.wait(0.1)
+            ShowGravarRota()
+        end)
+    end)
+
+    -- -------- Sub-seção: Rotas Salvas --------
+    local subSalvas = _I("Frame", cardPrincipal)
+    subSalvas.Size = _U2(1, 0, 0, 0)
+    subSalvas.AutomaticSize = Enum.AutomaticSize.Y
+    subSalvas.BackgroundColor3 = _RGB(18, 18, 24)
+    subSalvas.BorderSizePixel = 0
+    subSalvas.LayoutOrder = 2
+    Corner(subSalvas, 6)
+    Stroke(subSalvas, _K.Stroke, 1)
+    Padding(subSalvas, 10, 10, 10, 10)
+
+    local laySalvas = _I("UIListLayout", subSalvas)
+    laySalvas.Padding = _UD(0, 8)
+    laySalvas.SortOrder = Enum.SortOrder.LayoutOrder
+    laySalvas.Parent = subSalvas
+
+    local salvasTitle = _I("TextLabel", subSalvas)
+    salvasTitle.Size = _U2(1, 0, 0, 14)
+    salvasTitle.BackgroundTransparency = 1
+    salvasTitle.Text = "Rotas Salvas"
+    salvasTitle.TextColor3 = _K.PurpleLight
+    salvasTitle.Font = _GB
+    salvasTitle.TextSize = 11
+    salvasTitle.TextXAlignment = _XL
+    salvasTitle.LayoutOrder = 0
+
+    -- Dropdown de rotas
+    local nomes = {}
+    for _, r in ipairs(Persist.rotas_salvas) do
+        table.insert(nomes, r.nome)
+    end
+    if #nomes == 0 then table.insert(nomes, "(Nenhuma)") end
+
+    local selecionadoAtual = Gravacao.RotaSelecionada or nomes[1]
+    UI.Dropdown(subSalvas, 1, "Selecionar Rota", nomes, selecionadoAtual, function(op)
+        if op == "(Nenhuma)" then
+            Gravacao.RotaSelecionada = nil
+            return
+        end
+        Gravacao.RotaSelecionada = op
+    end)
+
+    -- Botão Iniciar / Parar
+    local btnExec = UI.ActionButton(subSalvas, 2,
+        Gravacao.Reproduzindo and "⏹️ Parar" or "▶️ Iniciar / Parar",
+        Gravacao.Reproduzindo and _K.Error or _K.Purple,
+        function()
+            if Gravacao.Reproduzindo then
+                gravPararReproducao()
+                return
+            end
+            local sel = Gravacao.RotaSelecionada
+            if not sel then
+                Notify("EXECUTAR", "Selecione uma rota primeiro.", "Error")
+                return
+            end
+            local rotaEncontrada = nil
+            for _, r in ipairs(Persist.rotas_salvas) do
+                if r.nome == sel then
+                    rotaEncontrada = r
+                    break
+                end
+            end
+            if not rotaEncontrada then
+                Notify("EXECUTAR", "Rota não encontrada.", "Error")
+                return
+            end
+            gravReproduzir(rotaEncontrada.frames)
+        end)
+
+    -- Toggle Ver Rota (mostra as linhas da rota selecionada)
+    UI.Toggle(subSalvas, 3, "Ver Rota", false, function(v)
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            if v then Notify("VER ROTA", "Selecione uma rota primeiro.", "Error") end
+            return
+        end
+        local rotaEncontrada = nil
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == sel then rotaEncontrada = r break end
+        end
+        if not rotaEncontrada then return end
+        gravMostrarLinhas(rotaEncontrada.frames, v)
+    end)
+
+    -- TextBox Renomear
+    local renomeBox = UI.TextBox(subSalvas, 4, "Renomear Rota", "Novo nome...", "", function() end)
+
+    -- Botão Aplicar Renomear
+    UI.ActionButton(subSalvas, 5, "✏️ Renomear", _RGB(50, 60, 90), function()
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            Notify("RENOMEAR", "Selecione uma rota primeiro.", "Error")
+            return
+        end
+        local novo = renomeBox.Text:gsub("^%s+",""):gsub("%s+$","")
+        if novo == "" then
+            Notify("RENOMEAR", "Digite o novo nome primeiro.", "Error")
+            return
+        end
+        -- Verifica duplicata
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == novo and r.nome ~= sel then
+                Notify("RENOMEAR", "Já existe uma rota com esse nome.", "Error")
+                return
+            end
+        end
+        for _, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == sel then
+                r.nome = novo
+                break
+            end
+        end
+        Gravacao.RotaSelecionada = novo
+        persistSalvar()
+        renomeBox.Text = ""
+        Notify("RENOMEAR", "✅ Renomeada para '"..novo.."'", "Success")
+        task.defer(function()
+            task.wait(0.1)
+            ShowGravarRota()
+        end)
+    end)
+
+    -- Botão Excluir
+    UI.ActionButton(subSalvas, 6, "🗑️ Excluir Rota", _RGB(150, 40, 40), function()
+        local sel = Gravacao.RotaSelecionada
+        if not sel then
+            Notify("EXCLUIR", "Selecione uma rota primeiro.", "Error")
+            return
+        end
+        for i, r in ipairs(Persist.rotas_salvas) do
+            if r.nome == sel then
+                table.remove(Persist.rotas_salvas, i)
+                break
+            end
+        end
+        Gravacao.RotaSelecionada = nil
+        persistSalvar()
+        Notify("EXCLUIR", "🗑️ Rota '"..sel.."' excluída.", "Orange")
+        task.defer(function()
+            task.wait(0.1)
+            ShowGravarRota()
+        end)
+    end)
+
+    -- ============================================================
+    -- COLUNA DIREITA: Configurações do Motor
+    -- ============================================================
+    local cardMotor = UI.Card(col2, 1, "⚙️ Configurações do Motor")
+
+    UI.Slider(cardMotor, 1, "Velocidade de Gravação (Hz)", Gravacao.Velocidade, 1, 30, false, function(v)
+        Gravacao.Velocidade = v
+    end)
+
+    UI.Toggle(cardMotor, 2, "MoveTo (movimento natural)", Gravacao.MoveTo, function(v)
+        Gravacao.MoveTo = v
+    end)
+
+    -- Info
+    local infoCard = _I("Frame", cardMotor)
+    infoCard.Size = _U2(1, 0, 0, 0)
+    infoCard.AutomaticSize = Enum.AutomaticSize.Y
+    infoCard.BackgroundColor3 = _RGB(15, 15, 20)
+    infoCard.BorderSizePixel = 0
+    infoCard.LayoutOrder = 3
+    Corner(infoCard, 6)
+    Stroke(infoCard, _K.Stroke, 1)
+    Padding(infoCard, 8, 8, 8, 8)
+
+    local infoLbl = _I("TextLabel", infoCard)
+    infoLbl.Size = _U2(1, 0, 0, 0)
+    infoLbl.AutomaticSize = Enum.AutomaticSize.Y
+    infoLbl.BackgroundTransparency = 1
+    infoLbl.Text = "ℹ️ Como usar:\n1. Ative 'Gravar'\n2. Faça seus movimentos no jogo\n3. Desative 'Gravar'\n4. Dê um nome e clique em 'Salvar Rota'\n\n💡 Rotas salvas ficam no arquivo Akira_Config.json"
+    infoLbl.TextColor3 = _K.DarkGray
+    infoLbl.Font = _GM
+    infoLbl.TextSize = 9
+    infoLbl.TextWrapped = true
+    infoLbl.TextXAlignment = _XL
+    infoLbl.TextYAlignment = Enum.TextYAlignment.Top
+
+    -- Status de gravação (atualiza ao vivo)
+    local statusCard = _I("Frame", cardMotor)
+    statusCard.Size = _U2(1, 0, 0, 40)
+    statusCard.BackgroundColor3 = _RGB(15, 15, 20)
+    statusCard.BorderSizePixel = 0
+    statusCard.LayoutOrder = 4
+    Corner(statusCard, 6)
+    Stroke(statusCard, Gravacao.Ativa and _K.Error or _K.Stroke, 1)
+
+    local statusDot = _I("Frame", statusCard)
+    statusDot.Size = _UO(10, 10)
+    statusDot.Position = _UO(12, 15)
+    statusDot.BackgroundColor3 = Gravacao.Ativa and _K.Error or _K.DarkGray
+    statusDot.BorderSizePixel = 0
+    Corner(statusDot, 5)
+
+    local statusLbl = _I("TextLabel", statusCard)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Position = _UO(30, 0)
+    statusLbl.Size = _U2(1, -40, 1, 0)
+    statusLbl.Text = Gravacao.Ativa and "⏺️ GRAVANDO..." or "⏹️ Parado"
+    statusLbl.TextColor3 = Gravacao.Ativa and _K.Error or _K.Gray
+    statusLbl.Font = _GB
+    statusLbl.TextSize = 11
+    statusLbl.TextXAlignment = _XL
+    statusLbl.TextYAlignment = Enum.TextYAlignment.Center
+
+    -- Loop de atualização ao vivo do status
+    task.spawn(function()
+        while GravarRotaAbaAtiva and statusCard.Parent do
+            task.wait(0.15)
+            if statusLbl.Parent and statusDot.Parent then
+                if Gravacao.Ativa then
+                    local n = #Gravacao.Frames
+                    local tempo = n > 0 and Gravacao.Frames[n].t or 0
+                    statusLbl.Text = string.format("⏺️ GRAVANDO  •  %d frames  •  %.1fs", n, tempo)
+                    statusLbl.TextColor3 = _K.Error
+                    statusDot.BackgroundColor3 = _K.Error
+                elseif Gravacao.Reproduzindo then
+                    statusLbl.Text = "▶️ REPRODUZINDO..."
+                    statusLbl.TextColor3 = _K.PurpleLight
+                    statusDot.BackgroundColor3 = _K.PurpleLight
+                else
+                    local n = #Gravacao.Frames
+                    statusLbl.Text = "⏹️ Parado  •  "..n.." frames gravados"
+                    statusLbl.TextColor3 = _K.Gray
+                    statusDot.BackgroundColor3 = _K.DarkGray
+                end
+            end
+        end
+    end)
+
+    Content.CanvasPosition = _V2()
 end
 
 -- =========================================================================
@@ -1564,6 +2138,7 @@ end
 
 local function ShowTAFFS()
     CurrentPage="TAFFS"
+    GravarRotaAbaAtiva = false
     ClearContent()
     local warningCard=_I("Frame")
     warningCard.Size=_U2(1,0,0,70) warningCard.BackgroundColor3=_RGB(45,35,20)
@@ -1890,6 +2465,7 @@ end
 
 function ShowEBDelta()
     CurrentPage = "EBDelta"
+    GravarRotaAbaAtiva = false
     ClearContent()
     local hotbar = _I("Frame", _CH)
     hotbar.Size = _U2(1,0,0,30)
@@ -1943,6 +2519,7 @@ end
 -- =========================================================================
 local function ShowVolvers()
     CurrentPage="Volvers"
+    GravarRotaAbaAtiva = false
     ClearContent()
     local header=_I("Frame")
     header.Size=_U2(1,0,0,58) header.BackgroundColor3=_K.Card header.BorderSizePixel=0
@@ -2293,6 +2870,7 @@ end
 
 local function ShowIA()
     CurrentPage = "IA"
+    GravarRotaAbaAtiva = false
     ClearContent()
     local hotbar = _I("Frame", _CH)
     hotbar.Size = _U2(1,0,0,30)
@@ -2344,6 +2922,7 @@ end
 -- =========================================================================
 local function ShowCreditos()
     CurrentPage = "Creditos"
+    GravarRotaAbaAtiva = false
     ClearContent()
     local link = "https://discord.gg/NY2RfC7Kx"
     local header = _I("Frame", _CH)
@@ -2623,6 +3202,7 @@ do
     end
     function ShowTextosProntos()
         CurrentPage = "TextosProntos"
+        GravarRotaAbaAtiva = false
         ClearContent()
         local header = _I("Frame", _CH)
         header.Size = _U2(1, 0, 0, 58)
@@ -2813,6 +3393,7 @@ end)
 
 function ShowCombate()
     CurrentPage = "Combate"
+    GravarRotaAbaAtiva = false
     ClearContent()
     Content.ScrollingEnabled = true
     local col1, col2 = CreateTwoColumns(_CH, 0)
@@ -3076,6 +3657,7 @@ do
     end
     ShowLoja=function()
         CurrentPage="Loja"
+        GravarRotaAbaAtiva = false
         ClearContent()
         local card = UI.Card(_CH, 0, "🔫 Loja de Armas")
         local lbl = _I("TextLabel", card)
@@ -3263,7 +3845,6 @@ local function ShowExtraPosicoesContent()
     containerLay.SortOrder = Enum.SortOrder.LayoutOrder
     containerLay.Parent = container
 
-    -- Placeholder "vazio"
     local placeholder = nil
     local function atualizarPlaceholder()
         if #Persist.posicoes == 0 then
@@ -3294,7 +3875,6 @@ local function ShowExtraPosicoesContent()
         end
     end
 
-    -- Função auxiliar
     local function acharIndice(alvo)
         for j, p in ipairs(Persist.posicoes) do
             if p == alvo then return j end
@@ -3302,7 +3882,6 @@ local function ShowExtraPosicoesContent()
         return nil
     end
 
-    -- Cria card pra uma posição
     local function criarCardPosicao(pos, layoutOrder)
         local card = _I("Frame", container)
         card.Size = _U2(1, 0, 0, 94)
@@ -3384,9 +3963,8 @@ local function ShowExtraPosicoesContent()
         btnIr.AutoButtonColor = false
         Corner(btnIr, 6)
 
-        -- Handlers com atualização DIRETA (ao vivo)
         btnEdit.MouseButton1Click:Connect(function()
-            abrirModalEditarNome(pos.nome, function(novoNome)
+            abrirModalEditarNome("✏️ Editar nome da posição", pos.nome, function(novoNome)
                 pos.nome = novoNome
                 nomeLbl.Text = "📍 "..novoNome
                 persistSalvar()
@@ -3438,7 +4016,6 @@ local function ShowExtraPosicoesContent()
         return card
     end
 
-    -- Handler do botão adicionar
     btnAdd.MouseButton1Click:Connect(function()
         if #Persist.posicoes >= Persist.limite_posicoes then
             Notify("POSIÇÃO", "Limite de "..Persist.limite_posicoes.." posições atingido.", "Error")
@@ -3466,7 +4043,6 @@ local function ShowExtraPosicoesContent()
         Notify("POSIÇÃO", "📍 Posição "..n.." adicionada!", "Success")
     end)
 
-    -- Renderiza as existentes
     for i, pos in ipairs(Persist.posicoes) do
         criarCardPosicao(pos, i)
     end
@@ -3475,6 +4051,7 @@ end
 
 local function ShowExtra()
     CurrentPage = "Extra"
+    GravarRotaAbaAtiva = false
     ClearContent()
 
     local hotbar = _I("Frame", _CH)
@@ -3545,6 +4122,9 @@ end
 
 ebDeltaButton.MouseButton1Click:Connect(function()
     SelectButton(ebDeltaButton) ShowEBDelta()
+end)
+gravarRotaButton.MouseButton1Click:Connect(function()
+    SelectButton(gravarRotaButton) ShowGravarRota()
 end)
 taffsButton.MouseButton1Click:Connect(function()
     SelectButton(taffsButton) ShowTAFFS()
@@ -3651,11 +4231,11 @@ task.defer(function()
 
     if SUPORTA_SALVAR then
         task.wait(0.5)
-        Notify("PERSISTÊNCIA","💾 Dados carregados ("..#Persist.posicoes.." posições salvas)","Success")
+        Notify("PERSISTÊNCIA","💾 Carregado: "..#Persist.posicoes.." posições • "..#Persist.rotas_salvas.." rotas","Success")
     else
         task.wait(0.5)
         Notify("PERSISTÊNCIA","⚠️ Executor não suporta salvar dados.","Orange")
     end
 end)
 
-print("AKIRA MENU V2.2.3 carregado com sucesso!")
+print("AKIRA MENU V2.2.4 carregado com sucesso!")
