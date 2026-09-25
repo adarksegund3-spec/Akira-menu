@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.4 — Auto Parkour com Animação + Transparência Real
+-- AKIRA MENU V2.3.5 — Transparência Real + FPS Booster Agressivo
 -- =========================================================================
 
 -- =========================================================================
@@ -506,7 +506,7 @@ end
 RemoverDummy=function() if DummyObj then pcall(function() DummyObj:Destroy() end) DummyObj=nil end end
 
 -- =========================================================================
--- STOP PLAYBACK (com restauração completa)
+-- STOP PLAYBACK
 -- =========================================================================
 local function StopPlayback(reason)
     if Playback.Connection then Playback.Connection:Disconnect(); Playback.Connection=nil end
@@ -550,7 +550,6 @@ local function IniciarExecucao(name)
     Playback.WalkingToStart = false
     if not RefreshCharacter() then StopPlayback("error"); return end
 
-    -- Salva estados originais
     local rootAnchoredOrig = rootPart.Anchored
     local autoRotateOrig = humanoid.AutoRotate
     local walkSpeedOrig = humanoid.WalkSpeed
@@ -558,11 +557,9 @@ local function IniciarExecucao(name)
 
     humanoid:Move(Vector3.zero, false)
 
-    -- Desativa Animate pra ele não tocar animação de pulo/queda
     local animateScript = character:FindFirstChild("Animate")
     if animateScript then pcall(function() animateScript.Disabled = true end) end
 
-    -- Para todas as animações tocando
     local animator = humanoid:FindFirstChildOfClass("Animator")
     if not animator then animator = _I("Animator"); animator.Parent = humanoid end
     pcall(function()
@@ -571,7 +568,6 @@ local function IniciarExecucao(name)
         end
     end)
 
-    -- Carrega animação de andar manualmente
     local isR15 = humanoid.RigType == Enum.HumanoidRigType.R15
     local walkAnimId = isR15 and "rbxassetid://507777826" or "rbxassetid://180426354"
     local walkAnim = _I("Animation")
@@ -580,13 +576,11 @@ local function IniciarExecucao(name)
     walkPlaybackTrack.Looped = true
     walkPlaybackTrack.Priority = Enum.AnimationPriority.Movement
 
-    -- Ancora pra desligar física
     pcall(function() rootPart.Anchored = true end)
     pcall(function() humanoid.AutoRotate = false end)
     humanoid.WalkSpeed = 0
     humanoid.JumpPower = 0
 
-    -- Bloqueia estados que causam braço levantado
     for _, estado in ipairs({
         Enum.HumanoidStateType.Freefall,
         Enum.HumanoidStateType.FallingDown,
@@ -603,7 +597,6 @@ local function IniciarExecucao(name)
     pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
     pcall(function() walkPlaybackTrack:Play(0.1) end)
 
-    -- Loop que mantém Running ativo
     local estadoLoopAtivo = true
     task.spawn(function()
         while estadoLoopAtivo and Playback.Running do
@@ -680,7 +673,6 @@ local function IniciarExecucao(name)
             ApplyPosition(pos, rot)
             HandleJump(a, elapsed)
 
-            -- Detecta se está parado pra pausar animação
             if ultimaPos then
                 local delta = (pos - ultimaPos).Magnitude
                 local movendo = delta > 0.005
@@ -907,7 +899,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.4"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.5"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -1207,49 +1199,49 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
--- SISTEMA DE TRANSPARÊNCIA GLOBAL (CORRIGIDO)
+-- SISTEMA DE TRANSPARÊNCIA GLOBAL
 -- =========================================================================
-local TranspState = { ativo = false, originais = {} }
-
-local function Transp_Objeto(obj)
-    return obj:IsA("GuiObject") and obj.BackgroundTransparency < 0.99
-end
+local TranspState = { ativo = false }
 
 local function Transp_AplicarEm(obj)
-    if TranspState.originais[obj] == nil then
-        TranspState.originais[obj] = obj.BackgroundTransparency
+    if not obj:IsA("GuiObject") then return end
+    local bt = obj.BackgroundTransparency
+    if bt >= 0.9 then return end
+    if obj:GetAttribute("ZKY_OrigBT") == nil then
+        obj:SetAttribute("ZKY_OrigBT", bt)
     end
-    local orig = TranspState.originais[obj]
-    pcall(function()
-        obj.BackgroundTransparency = math.min(0.92, orig + 0.45)
-    end)
+    obj.BackgroundTransparency = math.min(0.92, bt + 0.55)
+end
+
+local function Transp_RestaurarEm(obj)
+    if not obj:IsA("GuiObject") then return end
+    local orig = obj:GetAttribute("ZKY_OrigBT")
+    if orig ~= nil then
+        obj.BackgroundTransparency = orig
+        obj:SetAttribute("ZKY_OrigBT", nil)
+    end
 end
 
 local function Transp_Aplicar(ativar)
+    TranspState.ativo = ativar
     if ativar then
+        Main.BackgroundTransparency = 0.4
         for _, obj in ipairs(Main:GetDescendants()) do
-            if Transp_Objeto(obj) then
-                Transp_AplicarEm(obj)
-            end
+            Transp_AplicarEm(obj)
         end
-        TranspState.ativo = true
     else
-        for obj, orig in pairs(TranspState.originais) do
-            if obj and obj.Parent then
-                pcall(function() obj.BackgroundTransparency = orig end)
-            end
+        Main.BackgroundTransparency = 0
+        for _, obj in ipairs(Main:GetDescendants()) do
+            Transp_RestaurarEm(obj)
         end
-        TranspState.originais = {}
-        TranspState.ativo = false
     end
 end
 
 local function Transp_Reaplicar()
     if not TranspState.ativo then return end
+    Main.BackgroundTransparency = 0.4
     for _, obj in ipairs(Main:GetDescendants()) do
-        if Transp_Objeto(obj) and TranspState.originais[obj] == nil then
-            Transp_AplicarEm(obj)
-        end
+        Transp_AplicarEm(obj)
     end
 end
 
@@ -2664,31 +2656,68 @@ local function aplicarShader(tipo)
     end
 end
 
+-- =========================================================================
+-- FPS BOOSTER AGRESSIVO
+-- =========================================================================
 local FPSOriginais = {}
+
 local function ativarFPSBooster()
+    FPSOriginais = {}
     local L = game:GetService("Lighting")
-    FPSOriginais.Lighting = { GlobalShadows = L.GlobalShadows, Brightness = L.Brightness, Ambient = L.Ambient, OutdoorAmbient = L.OutdoorAmbient }
-    L.GlobalShadows = false
+
+    FPSOriginais.Lighting = {
+        GlobalShadows = L.GlobalShadows,
+        Brightness = L.Brightness,
+        Ambient = L.Ambient,
+        OutdoorAmbient = L.OutdoorAmbient,
+        EnvironmentDiffuseScale = L.EnvironmentDiffuseScale,
+        EnvironmentSpecularScale = L.EnvironmentSpecularScale,
+        FogEnd = L.FogEnd,
+        FogStart = L.FogStart,
+        FogColor = L.FogColor
+    }
+
+    pcall(function()
+        L.GlobalShadows = false
+        L.EnvironmentDiffuseScale = 0
+        L.EnvironmentSpecularScale = 0
+        L.FogEnd = 1000000
+        L.FogStart = 1000000
+    end)
+
     for _, ef in ipairs(L:GetChildren()) do
-        if ef:IsA("PostEffect") or ef:IsA("Atmosphere") or ef:IsA("Sky") then
+        if ef:IsA("PostEffect") or ef:IsA("Atmosphere") or ef:IsA("Sky") or ef:IsA("Clouds") then
             FPSOriginais[ef] = ef.Enabled
             pcall(function() ef.Enabled = false end)
         end
     end
+
+    local count = 0
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        local cls = obj.ClassName
+        if cls == "ParticleEmitter" or cls == "Trail" or cls == "Smoke"
+            or cls == "Fire" or cls == "Sparkles" or cls == "Beam" then
             FPSOriginais[obj] = obj.Enabled
             pcall(function() obj.Enabled = false end)
-        end
-    end
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Decal") or obj:IsA("Texture") then
+            count = count + 1
+        elseif cls == "Decal" or cls == "Texture" then
             FPSOriginais[obj] = obj.Transparency
             pcall(function() obj.Transparency = 1 end)
+            count = count + 1
+        elseif cls == "PointLight" or cls == "SpotLight" or cls == "SurfaceLight" then
+            FPSOriginais[obj] = obj.Enabled
+            pcall(function() obj.Enabled = false end)
+            count = count + 1
         end
     end
-    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
+
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+
+    return count
 end
+
 local function desativarFPSBooster()
     local L = game:GetService("Lighting")
     if FPSOriginais.Lighting then
@@ -2697,17 +2726,26 @@ local function desativarFPSBooster()
             L.Brightness = FPSOriginais.Lighting.Brightness
             L.Ambient = FPSOriginais.Lighting.Ambient
             L.OutdoorAmbient = FPSOriginais.Lighting.OutdoorAmbient
+            L.EnvironmentDiffuseScale = FPSOriginais.Lighting.EnvironmentDiffuseScale
+            L.EnvironmentSpecularScale = FPSOriginais.Lighting.EnvironmentSpecularScale
+            L.FogEnd = FPSOriginais.Lighting.FogEnd
+            L.FogStart = FPSOriginais.Lighting.FogStart
+            L.FogColor = FPSOriginais.Lighting.FogColor
         end)
     end
     for obj, val in pairs(FPSOriginais) do
         if obj ~= "Lighting" and typeof(obj) == "Instance" then
             pcall(function()
-                if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") then
+                if not obj.Parent then return end
+                if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") or obj:IsA("Clouds") then
                     obj.Enabled = val
-                elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke")
+                    or obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("Beam") then
                     obj.Enabled = val
                 elseif obj:IsA("Decal") or obj:IsA("Texture") then
                     obj.Transparency = val
+                elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                    obj.Enabled = val
                 end
             end)
         end
@@ -2716,6 +2754,9 @@ local function desativarFPSBooster()
     pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
 end
 
+-- =========================================================================
+-- DUPLO PULO + INFINITE JUMP
+-- =========================================================================
 do
     local canDouble = false
     local usedDouble = false
@@ -3111,18 +3152,17 @@ local function ShowExtraVisualContent()
     local fpsDesc = _I("TextLabel", fpsCard)
     fpsDesc.Size = _U2(1, 0, 0, 0); fpsDesc.AutomaticSize = Enum.AutomaticSize.Y
     fpsDesc.BackgroundTransparency = 1
-    fpsDesc.Text = "Remove partículas, efeitos, decals e texturas. Aumenta muito o FPS."
+    fpsDesc.Text = "Remove partículas, efeitos, decals, luzes e texturas. Aumenta muito o FPS."
     fpsDesc.TextColor3 = _K.Gray; fpsDesc.Font = _GM
     fpsDesc.TextSize = 10; fpsDesc.TextWrapped = true
     fpsDesc.TextXAlignment = _XL; fpsDesc.LayoutOrder = 1
     UI.Toggle(fpsCard, 2, "Ativar FPS Booster", ExtraState.FPSBoosterAtivo, function(v)
         ExtraState.FPSBoosterAtivo = v
         if v then
-            local ok, err = pcall(ativarFPSBooster)
-            if ok then Notify("FPS", "FPS Booster ativado!", "Success")
-            else Notify("FPS", "Erro: "..tostring(err), "Error") end
+            local count = ativarFPSBooster()
+            Notify("FPS", "✅ Ativado! "..count.." objetos otimizados.", "Success")
         else
-            pcall(desativarFPSBooster)
+            desativarFPSBooster()
             Notify("FPS", "FPS Booster desativado.", "Orange")
         end
     end)
@@ -4055,4 +4095,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.4 carregado!")
+print("AKIRA MENU V2.3.5 carregado!")
