@@ -2903,288 +2903,246 @@ do
 end
 
 -- =========================================================================
--- EXTRA
+-- EXTRA (Hotbar igual EB Delta — só funções seguras)
 -- =========================================================================
-local ShowExtra
-do
-    -- Estado interno (persiste entre trocas de aba)
-    local EXTRA = {
-        ZoomUnlocked=false, ZoomMaxOriginal=nil, ZoomMinOriginal=nil,
-        SpeedAtivo=false, SpeedValor=32, SpeedOriginal=16,
-        JumpAtivo=false, JumpValor=100, JumpOriginal=50,
-        AntiAfkAtivo=false, AntiAfkConn=nil,
-        FullbrightAtivo=false,
-        FogAtivo=false, FogOriginal=nil,
-        Posicoes={nil, nil, nil}
+local ExtraSubPage = "Visual"
+
+local ExtraState = {
+    FullbrightAtivo = false,
+    FogAtivo = false,
+    ZoomUnlocked = false,
+    ZoomMaxOriginal = nil,
+    ZoomMinOriginal = nil,
+    FogOriginal = nil,
+    LightOriginal = nil,
+    Posicoes = {nil, nil, nil}
+}
+
+local function extraSalvarLighting()
+    if ExtraState.LightOriginal then return end
+    local L = game:GetService("Lighting")
+    ExtraState.LightOriginal = {
+        Brightness = L.Brightness,
+        ClockTime = L.ClockTime,
+        GlobalShadows = L.GlobalShadows,
+        Ambient = L.Ambient,
+        OutdoorAmbient = L.OutdoorAmbient
     }
+end
 
-    local LIGHT_ORIGINAL = nil
-    local function salvarLighting()
-        if LIGHT_ORIGINAL then return end
-        local L = game:GetService("Lighting")
-        LIGHT_ORIGINAL = {
-            Brightness = L.Brightness,
-            ClockTime = L.ClockTime,
-            GlobalShadows = L.GlobalShadows,
-            Ambient = L.Ambient,
-            OutdoorAmbient = L.OutdoorAmbient
-        }
-    end
+local function extraSalvarFog()
+    if ExtraState.FogOriginal then return end
+    local L = game:GetService("Lighting")
+    ExtraState.FogOriginal = {
+        FogEnd = L.FogEnd,
+        FogStart = L.FogStart,
+        FogColor = L.FogColor
+    }
+end
 
-    local function capturarZoom()
-        if not EXTRA.ZoomMaxOriginal then
-            EXTRA.ZoomMaxOriginal = Pl.CameraMaxZoomDistance
-            EXTRA.ZoomMinOriginal = Pl.CameraMinZoomDistance
-        end
-    end
+local function ShowExtraVisualContent()
+    local card = UI.Card(_CH, 1, "👁️ Visual")
 
-    local function aplicarMovimento()
-        if RefreshCharacter() then
+    UI.Toggle(card, 1, "Fullbright (dia/claro)", ExtraState.FullbrightAtivo, function(v)
+        ExtraState.FullbrightAtivo = v
+        if v then
+            extraSalvarLighting()
             pcall(function()
-                humanoid.UseJumpPower = true
-                humanoid.WalkSpeed = EXTRA.SpeedAtivo and EXTRA.SpeedValor or EXTRA.SpeedOriginal
-                humanoid.JumpPower = EXTRA.JumpAtivo and EXTRA.JumpValor or EXTRA.JumpOriginal
+                local L = game:GetService("Lighting")
+                L.Brightness = 3
+                L.ClockTime = 14
+                L.GlobalShadows = false
+                L.Ambient = _RGB(200,200,200)
+                L.OutdoorAmbient = _RGB(200,200,200)
             end)
+            Notify("EXTRA", "Fullbright ativado.", "Success")
+        else
+            if ExtraState.LightOriginal then
+                pcall(function()
+                    local L = game:GetService("Lighting")
+                    L.Brightness = ExtraState.LightOriginal.Brightness
+                    L.ClockTime = ExtraState.LightOriginal.ClockTime
+                    L.GlobalShadows = ExtraState.LightOriginal.GlobalShadows
+                    L.Ambient = ExtraState.LightOriginal.Ambient
+                    L.OutdoorAmbient = ExtraState.LightOriginal.OutdoorAmbient
+                end)
+            end
+            Notify("EXTRA", "Fullbright desativado.", "Orange")
         end
-    end
-
-    Pl.CharacterAdded:Connect(function()
-        task.wait(1)
-        aplicarMovimento()
     end)
 
-    local function ligarAntiAfk()
-        if EXTRA.AntiAfkConn then return end
-        EXTRA.AntiAfkConn = Pl.Idled:Connect(function()
+    UI.Toggle(card, 2, "Remover Névoa", ExtraState.FogAtivo, function(v)
+        ExtraState.FogAtivo = v
+        if v then
+            extraSalvarFog()
             pcall(function()
-                local VU = game:GetService("VirtualUser")
-                VU:Button2Down(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
-                task.wait(1)
-                VU:Button2Up(Vector2.new(0,0), workspace.CurrentCamera.CFrame)
+                local L = game:GetService("Lighting")
+                L.FogEnd = 100000
+                L.FogStart = 0
             end)
-        end)
-    end
-    local function desligarAntiAfk()
-        if EXTRA.AntiAfkConn then
-            EXTRA.AntiAfkConn:Disconnect()
-            EXTRA.AntiAfkConn = nil
-        end
-    end
-
-    local function ligarFullbright()
-        salvarLighting()
-        pcall(function()
-            local L = game:GetService("Lighting")
-            L.Brightness = 3
-            L.ClockTime = 14
-            L.GlobalShadows = false
-            L.Ambient = Color3.fromRGB(200,200,200)
-            L.OutdoorAmbient = Color3.fromRGB(200,200,200)
-        end)
-    end
-    local function desligarFullbright()
-        if not LIGHT_ORIGINAL then return end
-        pcall(function()
-            local L = game:GetService("Lighting")
-            L.Brightness = LIGHT_ORIGINAL.Brightness
-            L.ClockTime = LIGHT_ORIGINAL.ClockTime
-            L.GlobalShadows = LIGHT_ORIGINAL.GlobalShadows
-            L.Ambient = LIGHT_ORIGINAL.Ambient
-            L.OutdoorAmbient = LIGHT_ORIGINAL.OutdoorAmbient
-        end)
-    end
-
-    local function ligarSemFog()
-        pcall(function()
-            local L = game:GetService("Lighting")
-            if not EXTRA.FogOriginal then
-                EXTRA.FogOriginal = {FogEnd=L.FogEnd, FogStart=L.FogStart, FogColor=L.FogColor}
-            end
-            L.FogEnd = 100000
-            L.FogStart = 0
-        end)
-    end
-    local function desligarSemFog()
-        if not EXTRA.FogOriginal then return end
-        pcall(function()
-            local L = game:GetService("Lighting")
-            L.FogEnd = EXTRA.FogOriginal.FogEnd
-            L.FogStart = EXTRA.FogOriginal.FogStart
-            L.FogColor = EXTRA.FogOriginal.FogColor
-        end)
-    end
-
-    ShowExtra = function()
-        CurrentPage = "Extra"
-        ClearContent()
-        Content.ScrollingEnabled = true
-
-        capturarZoom()
-
-        -- ---------- MOVIMENTO ----------
-        local movCard = UI.Card(_CH, 1, "🏃 Movimento")
-
-        UI.Toggle(movCard, 1, "Ativar WalkSpeed", EXTRA.SpeedAtivo, function(v)
-            EXTRA.SpeedAtivo = v
-            aplicarMovimento()
-            Notify("EXTRA", v and ("WalkSpeed ON ("..EXTRA.SpeedValor..")") or "WalkSpeed restaurado.", v and "Success" or "Orange")
-        end)
-        UI.Slider(movCard, 2, "WalkSpeed", EXTRA.SpeedValor, 16, 200, false, function(v)
-            EXTRA.SpeedValor = v
-            if EXTRA.SpeedAtivo then aplicarMovimento() end
-        end)
-        UI.Toggle(movCard, 3, "Ativar JumpPower", EXTRA.JumpAtivo, function(v)
-            EXTRA.JumpAtivo = v
-            aplicarMovimento()
-            Notify("EXTRA", v and ("JumpPower ON ("..EXTRA.JumpValor..")") or "JumpPower restaurado.", v and "Success" or "Orange")
-        end)
-        UI.Slider(movCard, 4, "JumpPower", EXTRA.JumpValor, 50, 500, false, function(v)
-            EXTRA.JumpValor = v
-            if EXTRA.JumpAtivo then aplicarMovimento() end
-        end)
-
-        -- ---------- VISUAL ----------
-        local visCard = UI.Card(_CH, 2, "👁️ Visual")
-
-        UI.Toggle(visCard, 1, "Fullbright (dia/claro)", EXTRA.FullbrightAtivo, function(v)
-            EXTRA.FullbrightAtivo = v
-            if v then ligarFullbright() else desligarFullbright() end
-            Notify("EXTRA", v and "Fullbright ativado." or "Fullbright desativado.", v and "Success" or "Orange")
-        end)
-        UI.Toggle(visCard, 2, "Remover Névoa", EXTRA.FogAtivo, function(v)
-            EXTRA.FogAtivo = v
-            if v then ligarSemFog() else desligarSemFog() end
-            Notify("EXTRA", v and "Névoa removida." or "Névoa restaurada.", v and "Success" or "Orange")
-        end)
-
-        -- ---------- UTILIDADES ----------
-        local utilCard = UI.Card(_CH, 3, "🎯 Utilidades")
-
-        UI.Toggle(utilCard, 1, "Anti-AFK", EXTRA.AntiAfkAtivo, function(v)
-            EXTRA.AntiAfkAtivo = v
-            if v then ligarAntiAfk() else desligarAntiAfk() end
-            Notify("EXTRA", v and "Anti-AFK ativado." or "Anti-AFK desativado.", v and "Success" or "Orange")
-        end)
-        UI.Toggle(utilCard, 2, "Unlock Zoom (Sem Limite)", EXTRA.ZoomUnlocked, function(v)
-            EXTRA.ZoomUnlocked = v
-            if v then
+            Notify("EXTRA", "Névoa removida.", "Success")
+        else
+            if ExtraState.FogOriginal then
                 pcall(function()
-                    Pl.CameraMaxZoomDistance = math.huge
-                    Pl.CameraMinZoomDistance = 0.5
+                    local L = game:GetService("Lighting")
+                    L.FogEnd = ExtraState.FogOriginal.FogEnd
+                    L.FogStart = ExtraState.FogOriginal.FogStart
+                    L.FogColor = ExtraState.FogOriginal.FogColor
                 end)
-                Notify("EXTRA", "Zoom desbloqueado!", "Success")
-            else
-                pcall(function()
-                    Pl.CameraMaxZoomDistance = EXTRA.ZoomMaxOriginal
-                    Pl.CameraMinZoomDistance = EXTRA.ZoomMinOriginal
-                end)
-                Notify("EXTRA", "Zoom restaurado.", "Orange")
             end
-        end)
-
-        -- ---------- POSIÇÕES ----------
-        local posCard = UI.Card(_CH, 4, "📍 Posições Salvas")
-
-        local posRow = _I("Frame", posCard)
-        posRow.Size = _U2(1,0,0,0)
-        posRow.AutomaticSize = Enum.AutomaticSize.Y
-        posRow.BackgroundTransparency = 1
-        posRow.LayoutOrder = 1
-        local posLay = _I("UIListLayout", posRow)
-        posLay.Padding = _UD(0,6)
-        posLay.SortOrder = Enum.SortOrder.LayoutOrder
-        posLay.Parent = posRow
-
-        for i=1,3 do
-            local row = _I("Frame", posRow)
-            row.Size = _U2(1,0,0,30)
-            row.BackgroundColor3 = _RGB(18,18,24)
-            row.BorderSizePixel = 0
-            row.LayoutOrder = i
-            Corner(row,6) Stroke(row,_K.Stroke,1)
-
-            local nomeLbl = _I("TextLabel", row)
-            nomeLbl.BackgroundTransparency = 1
-            nomeLbl.Position = _UO(10,0)
-            nomeLbl.Size = _U2(0.3,0,1,0)
-            nomeLbl.Text = "Slot "..i
-            nomeLbl.TextColor3 = _K.Gray
-            nomeLbl.Font = _GM
-            nomeLbl.TextSize = 10
-            nomeLbl.TextXAlignment = _XL
-
-            local salvarBtn = _I("TextButton", row)
-            salvarBtn.AnchorPoint = _V2(1,0.5)
-            salvarBtn.Position = _U2(0.72, 0, 0.5, 0)
-            salvarBtn.Size = _UO(60, 24)
-            salvarBtn.BackgroundColor3 = _K.Success
-            salvarBtn.BorderSizePixel = 0
-            salvarBtn.Text = "Salvar"
-            salvarBtn.TextColor3 = _K.White
-            salvarBtn.Font = _GB
-            salvarBtn.TextSize = 10
-            salvarBtn.AutoButtonColor = false
-            Corner(salvarBtn, 6)
-
-            local irBtn = _I("TextButton", row)
-            irBtn.AnchorPoint = _V2(1,0.5)
-            irBtn.Position = _U2(1, -10, 0.5, 0)
-            irBtn.Size = _UO(60, 24)
-            irBtn.BackgroundColor3 = _K.Purple
-            irBtn.BorderSizePixel = 0
-            irBtn.Text = "Ir"
-            irBtn.TextColor3 = _K.White
-            irBtn.Font = _GB
-            irBtn.TextSize = 10
-            irBtn.AutoButtonColor = false
-            Corner(irBtn, 6)
-
-            salvarBtn.MouseButton1Click:Connect(function()
-                if not RefreshCharacter() then
-                    Notify("EXTRA", "Personagem não encontrado.", "Error")
-                    return
-                end
-                EXTRA.Posicoes[i] = rootPart.CFrame
-                Notify("EXTRA", "📍 Slot "..i.." salvo!", "Success")
-            end)
-
-            irBtn.MouseButton1Click:Connect(function()
-                if not EXTRA.Posicoes[i] then
-                    Notify("EXTRA", "Slot "..i.." vazio. Salve primeiro.", "Error")
-                    return
-                end
-                if not RefreshCharacter() then
-                    Notify("EXTRA", "Personagem não encontrado.", "Error")
-                    return
-                end
-                pcall(function() character:PivotTo(EXTRA.Posicoes[i]) end)
-                Notify("EXTRA", "📌 Teleportado pro slot "..i, "Success")
-            end)
+            Notify("EXTRA", "Névoa restaurada.", "Orange")
         end
+    end)
 
-        -- ---------- SESSÃO ----------
-        local sessCard = UI.Card(_CH, 5, "⚙️ Sessão")
-
-        UI.ActionButton(sessCard, 1, "🛑 BOTÃO DE PÂNICO (Resetar Tudo)", _RGB(180,40,40), function()
-            EXTRA.SpeedAtivo = false
-            EXTRA.JumpAtivo = false
-            EXTRA.AntiAfkAtivo = false
-            EXTRA.FullbrightAtivo = false
-            EXTRA.FogAtivo = false
-            EXTRA.ZoomUnlocked = false
-            desligarAntiAfk()
-            desligarFullbright()
-            desligarSemFog()
+    UI.Toggle(card, 3, "Unlock Zoom (Sem Limite)", ExtraState.ZoomUnlocked, function(v)
+        ExtraState.ZoomUnlocked = v
+        if not ExtraState.ZoomMaxOriginal then
+            ExtraState.ZoomMaxOriginal = Pl.CameraMaxZoomDistance
+            ExtraState.ZoomMinOriginal = Pl.CameraMinZoomDistance
+        end
+        if v then
             pcall(function()
-                Pl.CameraMaxZoomDistance = EXTRA.ZoomMaxOriginal
-                Pl.CameraMinZoomDistance = EXTRA.ZoomMinOriginal
+                Pl.CameraMaxZoomDistance = math.huge
+                Pl.CameraMinZoomDistance = 0.5
             end)
-            aplicarMovimento()
-            Notify("EXTRA", "🛑 Tudo resetado ao padrão!", "Success")
-            task.wait(0.3)
+            Notify("EXTRA", "Zoom desbloqueado!", "Success")
+        else
+            pcall(function()
+                Pl.CameraMaxZoomDistance = ExtraState.ZoomMaxOriginal
+                Pl.CameraMinZoomDistance = ExtraState.ZoomMinOriginal
+            end)
+            Notify("EXTRA", "Zoom restaurado.", "Orange")
+        end
+    end)
+end
+
+local function ShowExtraPosicoesContent()
+    local card = UI.Card(_CH, 1, "📍 Posições Salvas")
+
+    for i = 1, 3 do
+        local row = _I("Frame", card)
+        row.Size = _U2(1, 0, 0, 30)
+        row.BackgroundColor3 = _RGB(18, 18, 24)
+        row.BorderSizePixel = 0
+        row.LayoutOrder = i
+        Corner(row, 6)
+        Stroke(row, _K.Stroke, 1)
+
+        local nomeLbl = _I("TextLabel", row)
+        nomeLbl.BackgroundTransparency = 1
+        nomeLbl.Position = _UO(10, 0)
+        nomeLbl.Size = _U2(0.3, 0, 1, 0)
+        nomeLbl.Text = "Slot " .. i
+        nomeLbl.TextColor3 = _K.Gray
+        nomeLbl.Font = _GM
+        nomeLbl.TextSize = 10
+        nomeLbl.TextXAlignment = _XL
+
+        local salvarBtn = _I("TextButton", row)
+        salvarBtn.AnchorPoint = _V2(1, 0.5)
+        salvarBtn.Position = _U2(0.75, 0, 0.5, 0)
+        salvarBtn.Size = _UO(60, 24)
+        salvarBtn.BackgroundColor3 = _K.Success
+        salvarBtn.BorderSizePixel = 0
+        salvarBtn.Text = "Salvar"
+        salvarBtn.TextColor3 = _K.White
+        salvarBtn.Font = _GB
+        salvarBtn.TextSize = 10
+        salvarBtn.AutoButtonColor = false
+        Corner(salvarBtn, 6)
+
+        local irBtn = _I("TextButton", row)
+        irBtn.AnchorPoint = _V2(1, 0.5)
+        irBtn.Position = _U2(1, -10, 0.5, 0)
+        irBtn.Size = _UO(60, 24)
+        irBtn.BackgroundColor3 = _K.Purple
+        irBtn.BorderSizePixel = 0
+        irBtn.Text = "Ir"
+        irBtn.TextColor3 = _K.White
+        irBtn.Font = _GB
+        irBtn.TextSize = 10
+        irBtn.AutoButtonColor = false
+        Corner(irBtn, 6)
+
+        salvarBtn.MouseButton1Click:Connect(function()
+            if not RefreshCharacter() then
+                Notify("EXTRA", "Personagem não encontrado.", "Error")
+                return
+            end
+            ExtraState.Posicoes[i] = rootPart.CFrame
+            Notify("EXTRA", "📍 Slot " .. i .. " salvo!", "Success")
+        end)
+
+        irBtn.MouseButton1Click:Connect(function()
+            if not ExtraState.Posicoes[i] then
+                Notify("EXTRA", "Slot " .. i .. " vazio.", "Error")
+                return
+            end
+            if not RefreshCharacter() then
+                Notify("EXTRA", "Personagem não encontrado.", "Error")
+                return
+            end
+            pcall(function() character:PivotTo(ExtraState.Posicoes[i]) end)
+            Notify("EXTRA", "📌 Teleportado pro slot " .. i, "Success")
+        end)
+    end
+end
+
+local function ShowExtra()
+    CurrentPage = "Extra"
+    ClearContent()
+
+    local hotbar = _I("Frame", _CH)
+    hotbar.Size = _U2(1, 0, 0, 30)
+    hotbar.BackgroundTransparency = 1
+    hotbar.LayoutOrder = 0
+
+    local hbLay = _I("UIListLayout", hotbar)
+    hbLay.FillDirection = Enum.FillDirection.Horizontal
+    hbLay.Padding = _UD(0, 18)
+    hbLay.VerticalAlignment = Enum.VerticalAlignment.Center
+    hbLay.Parent = hotbar
+
+    local tabs = {
+        {Nome = "Visual", Id = "Visual"},
+        {Nome = "Posições", Id = "Posicoes"}
+    }
+
+    for _, tab in ipairs(tabs) do
+        local sel = ExtraSubPage == tab.Id
+        local b = _I("TextButton", hotbar)
+        b.Size = _UO(110, 28)
+        b.BackgroundTransparency = 1
+        b.Text = tab.Nome
+        b.TextColor3 = sel and _K.White or _K.DarkGray
+        b.Font = _GB
+        b.TextSize = 12
+        b.AutoButtonColor = false
+        b.TextXAlignment = Enum.TextXAlignment.Center
+
+        b.MouseButton1Click:Connect(function()
+            ExtraSubPage = tab.Id
             ShowExtra()
         end)
+
+        if sel then
+            local line = _I("Frame", b)
+            line.AnchorPoint = _V2(0.5, 1)
+            line.Position = _U2(0.5, 0, 1, -2)
+            line.Size = _U2(0.6, 0, 0, 2)
+            line.BackgroundColor3 = _K.Purple
+            line.BorderSizePixel = 0
+            Corner(line, 1)
+        end
     end
+
+    if ExtraSubPage == "Posicoes" then
+        ShowExtraPosicoesContent()
+    else
+        ShowExtraVisualContent()
+    end
+
+    Content.CanvasPosition = _V2()
 end
 
 -- =========================================================================
