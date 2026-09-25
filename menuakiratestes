@@ -1,5 +1,5 @@
 -- =========================================================================
--- AKIRA MENU V2.3.2 — ESP Corrigido + Reprodução Sem Tremelique
+-- AKIRA MENU V2.3.3 — Animação Corrigida + Créditos Padrão + Transparência Total
 -- =========================================================================
 
 -- =========================================================================
@@ -40,9 +40,6 @@ local Pl = P.LocalPlayer
 local PG = Pl:WaitForChild("PlayerGui")
 local character,humanoid,rootPart
 
--- =========================================================================
--- CONFIGURAÇÃO
--- =========================================================================
 local CONFIG = {
     LineThickness = .15, LineTransparency = .2, LineColor = _RGB(255,145,45),
     JumpCooldown = .28, PlaybackSpeed = 1, WalkToSpeed = 16, GroundOffset = 1.66
@@ -64,12 +61,8 @@ local IA_TEXTOS = {
 local LINK_PEGAR_KEY = "https://console.groq.com/keys"
 local httpRequest = request or (syn and syn.request) or (http and http.request) or http_request
 
--- =========================================================================
--- PERSISTÊNCIA
--- =========================================================================
 local ARQ_CONFIG = "Akira_Config.json"
 local SUPORTA_SALVAR = (type(writefile)=="function") and (type(readfile)=="function") and (type(isfile)=="function")
-
 local Persist = { ia_key = "", posicoes = {}, rotas_salvas = {}, limite_posicoes = 15 }
 
 local function persistCarregar()
@@ -122,9 +115,6 @@ local function persistSalvar()
 end
 persistCarregar()
 
--- =========================================================================
--- PASTEBINS
--- =========================================================================
 local Pastebins = {
     Lento = "https://pastebin.com/raw/M7DvRgTc",
     ["Rápido"] = "https://pastebin.com/raw/pBk8vYXE",
@@ -147,7 +137,7 @@ local towerRoutes = {["Torre 1"]={},["Torre 2"]={Frente={},["Atrás"]={},Esquerd
 local selectedCategory = {}
 for i=1,4 do selectedCategory[i]="Lento" end
 local selectedTower2Route = "Frente"
-local CurrentPage = "EBDelta"
+local CurrentPage = "Creditos"
 local lineFolder
 local linesVisible = true
 local mostrarLinhas = true
@@ -781,7 +771,7 @@ Subtitle.TextSize=9 Subtitle.Font=_GM Subtitle.TextXAlignment=_XL Subtitle.ZInde
 
 local Version=_I("TextLabel")
 Version.BackgroundColor3=_K.Card Version.AnchorPoint=_V2(.5,.5)
-Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.2"
+Version.Position=_U2(.5,0,.5,0) Version.Size=_UO(55,25) Version.Text="V2.3.3"
 Version.TextColor3=_K.Gray Version.TextSize=10 Version.Font=_GB
 Version.ZIndex=22 Version.Parent=Header Corner(Version,8) Stroke(Version,_K.Stroke)
 
@@ -814,17 +804,18 @@ local function SideButton(text,selected)
     return b
 end
 
-local creditosButton    = SideButton("👑 CRÉDITOS", false)
-local ebDeltaButton     = SideButton("🚀 EB DELTA", true)
+-- ⚠️ Créditos como padrão
+local creditosButton    = SideButton("👑 CRÉDITOS", true)
+local ebDeltaButton     = SideButton("🚀 EB DELTA", false)
 local gravarRotaButton  = SideButton("⏺️ GRAVAR ROTA", false)
-local taffsButton       = SideButton("📝 TAFFS")
+local taffsButton       = SideButton("📝 TAFFS", false)
 local volversButton     = SideButton("↪ VOLVERS", false)
 local iaButton          = SideButton("🤖 INTELIGÊNCIA", false)
 local combateButton     = SideButton("🎯 COMBATE", false)
 local textosButton      = SideButton("📚 TEXTOS PRONTOS", false)
 local lojaButton        = SideButton("🔫 LOJA", false)
 local extraButton       = SideButton("⚡ EXTRA", false)
-local selectedButton    = ebDeltaButton
+local selectedButton    = creditosButton
 
 local Content=_I("ScrollingFrame")
 Content.Size=_U2(1,-134,1,-78) Content.Position=_U2(0,126,0,70)
@@ -1081,6 +1072,62 @@ local function CreateTwoColumns(parent, ordem)
 end
 
 -- =========================================================================
+-- SISTEMA DE TRANSPARÊNCIA GLOBAL
+-- =========================================================================
+local TranspState = { ativo = false, originais = {} }
+
+local function Transp_Capturar()
+    TranspState.originais = {}
+    for _, obj in ipairs(Main:GetDescendants()) do
+        if obj:IsA("GuiObject") and obj.BackgroundTransparency < 1 then
+            table.insert(TranspState.originais, { obj = obj, t = obj.BackgroundTransparency })
+        end
+    end
+end
+
+local function Transp_Aplicar(ativar)
+    if ativar then
+        if not TranspState.ativo then
+            Transp_Capturar()
+            TranspState.ativo = true
+        end
+        for _, item in ipairs(TranspState.originais) do
+            pcall(function()
+                if item.obj and item.obj.Parent then
+                    item.obj.BackgroundTransparency = math.min(0.85, item.t + 0.35)
+                end
+            end)
+        end
+    else
+        for _, item in ipairs(TranspState.originais) do
+            pcall(function()
+                if item.obj and item.obj.Parent then
+                    item.obj.BackgroundTransparency = item.t
+                end
+            end)
+        end
+        TranspState.originais = {}
+        TranspState.ativo = false
+    end
+end
+
+-- Exposto para novas telas (chamar sempre que trocar de aba)
+local function Transp_Reaplicar()
+    if TranspState.ativo then
+        TranspState.ativo = false
+        Transp_Capturar()
+        TranspState.ativo = true
+        for _, item in ipairs(TranspState.originais) do
+            pcall(function()
+                if item.obj and item.obj.Parent then
+                    item.obj.BackgroundTransparency = math.min(0.85, item.t + 0.35)
+                end
+            end)
+        end
+    end
+end
+
+-- =========================================================================
 -- MODAL EDITAR NOME
 -- =========================================================================
 local function abrirModalEditarNome(titulo, nomeAtual, aoConfirmar)
@@ -1309,6 +1356,7 @@ local function ShowTAFFS()
         end
     end
     Content.CanvasPosition=_V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -1553,6 +1601,7 @@ function ShowEBDelta()
     elseif EBDeltaSubPage=="Automacao" then ShowAutomacaoContent()
     else ShowConfiguracaoContent() end
     Content.CanvasPosition=_V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -1633,6 +1682,7 @@ local function ShowVolvers()
         execBtn.MouseButton1Click:Connect(function() cmd.action() end)
     end
     Content.CanvasPosition=_V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -1829,6 +1879,7 @@ local function ShowIA()
     elseif IASubPage == "Gerar" then ShowIAGerarSub()
     else ShowIAKeySub() end
     Content.CanvasPosition = _V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -1906,24 +1957,26 @@ local function ShowCreditos()
     uiBol.Size = _UO(14,14); uiBol.Position = _UO(3,3)
     uiBol.BackgroundColor3 = _RGB(120,120,130); uiBol.BorderSizePixel = 0
     Corner(uiBol, 7)
-    local transpAtivo = false
-    local function aplicarTransp(v)
-        local t = v and 0.35 or 0
-        Main.BackgroundTransparency = t; Sidebar.BackgroundTransparency = t
-        Content.BackgroundTransparency = t; Header.BackgroundTransparency = t
-        if v then
-            uiToggle.BackgroundColor3 = _K.Purple; uiBol.Position = _UO(21,3)
-            uiBol.BackgroundColor3 = _RGB(255,255,255)
+
+    local function atualizarToggleVisual(ativo)
+        if ativo then
+            uiToggle.BackgroundColor3 = _K.Purple
+            uiBol.Position = _UO(21,3); uiBol.BackgroundColor3 = _RGB(255,255,255)
         else
-            uiToggle.BackgroundColor3 = _RGB(40,40,50); uiBol.Position = _UO(3,3)
-            uiBol.BackgroundColor3 = _RGB(120,120,130)
+            uiToggle.BackgroundColor3 = _RGB(40,40,50)
+            uiBol.Position = _UO(3,3); uiBol.BackgroundColor3 = _RGB(120,120,130)
         end
     end
+    atualizarToggleVisual(TranspState.ativo)
     uiToggle.MouseButton1Click:Connect(function()
-        transpAtivo = not transpAtivo; aplicarTransp(transpAtivo)
-        Notify("UI CONFIG", transpAtivo and "Transparência ativada." or "Transparência desativada.",
-            transpAtivo and "Success" or "Orange")
+        local novoEstado = not TranspState.ativo
+        Transp_Aplicar(novoEstado)
+        atualizarToggleVisual(novoEstado)
+        Notify("UI CONFIG",
+            novoEstado and "Transparência ativada." or "Transparência desativada.",
+            novoEstado and "Success" or "Orange")
     end)
+
     local discordCard = _I("Frame", _CH)
     discordCard.Size = _U2(1,0,0,55); discordCard.BackgroundColor3 = _RGB(88,101,242)
     discordCard.BorderSizePixel = 0; discordCard.LayoutOrder = 10
@@ -1947,6 +2000,7 @@ local function ShowCreditos()
         Notify("DISCORD","Link copiado!","Success")
     end)
     Content.CanvasPosition = _V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -2044,6 +2098,7 @@ do
             criarCard(tema, i, CARD_COLORS[corIndex])
         end
         Content.CanvasPosition = _V2()
+        Transp_Reaplicar()
     end
 end
 
@@ -2285,6 +2340,7 @@ function ShowCombate()
         b.MouseButton1Click:Connect(function() AIM_CONFIG.Cor = cor end)
     end
     Content.CanvasPosition = _V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -2395,11 +2451,12 @@ do
         lbl.TextYAlignment = Enum.TextYAlignment.Top; lbl.LayoutOrder = 1
         UI.ActionButton(card, 2, "▶ Abrir Loja", _RGB(30,30,40), abrirLoja)
         Content.CanvasPosition=_V2()
+        Transp_Reaplicar()
     end
 end
 
 -- =========================================================================
--- EXTRA — Visual / Movimento / ESP / Utilidades / Posições
+-- EXTRA
 -- =========================================================================
 local ExtraSubPage = "Visual"
 
@@ -2430,11 +2487,7 @@ task.spawn(function()
     end
 end)
 
--- =========================================================================
--- SHADERS (suaves)
--- =========================================================================
 local ShaderInstancias = {}
-
 local function limparShaders()
     for _, inst in ipairs(ShaderInstancias) do
         pcall(function() inst:Destroy() end)
@@ -2447,7 +2500,6 @@ local function aplicarShader(tipo)
     ExtraState.ShaderAtual = tipo
     if tipo == "Nenhum" or not tipo then return end
     local L = game:GetService("Lighting")
-
     local function novo(cls, props)
         local inst = _I(cls, L)
         inst.Name = "ZKY_Shader"
@@ -2457,100 +2509,60 @@ local function aplicarShader(tipo)
         table.insert(ShaderInstancias, inst)
         return inst
     end
-
     if tipo == "Realista V1" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.08, Contrast = 0.05, Brightness = 0,
-            TintColor = _RGB(255, 252, 245)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.08, Contrast = 0.05, Brightness = 0, TintColor = _RGB(255, 252, 245) })
         novo("BloomEffect", { Intensity = 0.25, Size = 16, Threshold = 1.2 })
         novo("SunRaysEffect", { Intensity = 0.03, Spread = 0.7 })
     elseif tipo == "Cinematográfico V2" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.05, Contrast = 0.12, Brightness = -0.01,
-            TintColor = _RGB(255, 245, 235)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.05, Contrast = 0.12, Brightness = -0.01, TintColor = _RGB(255, 245, 235) })
         novo("BloomEffect", { Intensity = 0.5, Size = 20, Threshold = 1.05 })
         novo("BlurEffect", { Size = 2 })
         novo("SunRaysEffect", { Intensity = 0.05, Spread = 0.9 })
     elseif tipo == "Synthwave V3" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.35, Contrast = 0.15, Brightness = 0.02,
-            TintColor = _RGB(255, 210, 245)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.35, Contrast = 0.15, Brightness = 0.02, TintColor = _RGB(255, 210, 245) })
         novo("BloomEffect", { Intensity = 0.8, Size = 28, Threshold = 0.95 })
     elseif tipo == "Neon V4" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.4, Contrast = 0.18, Brightness = 0.05,
-            TintColor = _RGB(210, 245, 255)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.4, Contrast = 0.18, Brightness = 0.05, TintColor = _RGB(210, 245, 255) })
         novo("BloomEffect", { Intensity = 0.9, Size = 32, Threshold = 0.85 })
     elseif tipo == "Anaglyph V5" then
-        novo("ColorCorrectionEffect", {
-            Saturation = -0.25, Contrast = 0.12, Brightness = 0,
-            TintColor = _RGB(255, 240, 240)
-        })
+        novo("ColorCorrectionEffect", { Saturation = -0.25, Contrast = 0.12, Brightness = 0, TintColor = _RGB(255, 240, 240) })
         novo("BloomEffect", { Intensity = 0.4, Size = 18, Threshold = 1.1 })
     elseif tipo == "Frio/Céu" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.02, Contrast = 0.05, Brightness = 0.01,
-            TintColor = _RGB(230, 242, 255)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.02, Contrast = 0.05, Brightness = 0.01, TintColor = _RGB(230, 242, 255) })
         novo("BloomEffect", { Intensity = 0.3, Size = 18, Threshold = 1.15 })
     elseif tipo == "Quente/Sépia" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.12, Contrast = 0.06, Brightness = 0.01,
-            TintColor = _RGB(255, 242, 225)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.12, Contrast = 0.06, Brightness = 0.01, TintColor = _RGB(255, 242, 225) })
         novo("BloomEffect", { Intensity = 0.25, Size = 14, Threshold = 1.2 })
     elseif tipo == "Clean/Nítido" then
-        novo("ColorCorrectionEffect", {
-            Saturation = 0.1, Contrast = 0.08, Brightness = 0.02,
-            TintColor = _RGB(255, 255, 255)
-        })
+        novo("ColorCorrectionEffect", { Saturation = 0.1, Contrast = 0.08, Brightness = 0.02, TintColor = _RGB(255, 255, 255) })
     end
 end
 
--- =========================================================================
--- FPS BOOSTER
--- =========================================================================
 local FPSOriginais = {}
-
 local function ativarFPSBooster()
     local L = game:GetService("Lighting")
-    FPSOriginais.Lighting = {
-        GlobalShadows = L.GlobalShadows, Brightness = L.Brightness,
-        Ambient = L.Ambient, OutdoorAmbient = L.OutdoorAmbient
-    }
+    FPSOriginais.Lighting = { GlobalShadows = L.GlobalShadows, Brightness = L.Brightness, Ambient = L.Ambient, OutdoorAmbient = L.OutdoorAmbient }
     L.GlobalShadows = false
-
     for _, ef in ipairs(L:GetChildren()) do
         if ef:IsA("PostEffect") or ef:IsA("Atmosphere") or ef:IsA("Sky") then
             FPSOriginais[ef] = ef.Enabled
             pcall(function() ef.Enabled = false end)
         end
     end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke")
-            or obj:IsA("Fire") or obj:IsA("Sparkles") then
+        if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
             FPSOriginais[obj] = obj.Enabled
             pcall(function() obj.Enabled = false end)
         end
     end
-
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Decal") or obj:IsA("Texture") then
             FPSOriginais[obj] = obj.Transparency
             pcall(function() obj.Transparency = 1 end)
         end
     end
-
-    pcall(function()
-        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-    end)
+    pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Level01 end)
 end
-
 local function desativarFPSBooster()
     local L = game:GetService("Lighting")
     if FPSOriginais.Lighting then
@@ -2566,8 +2578,7 @@ local function desativarFPSBooster()
             pcall(function()
                 if obj:IsA("PostEffect") or obj:IsA("Atmosphere") or obj:IsA("Sky") then
                     obj.Enabled = val
-                elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke")
-                    or obj:IsA("Fire") or obj:IsA("Sparkles") then
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") then
                     obj.Enabled = val
                 elseif obj:IsA("Decal") or obj:IsA("Texture") then
                     obj.Transparency = val
@@ -2579,9 +2590,6 @@ local function desativarFPSBooster()
     pcall(function() settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic end)
 end
 
--- =========================================================================
--- DUPLO PULO + INFINITE JUMP
--- =========================================================================
 do
     local canDouble = false
     local usedDouble = false
@@ -2590,8 +2598,7 @@ do
             task.wait(0.06)
             if not RefreshCharacter() then continue end
             if humanoid.FloorMaterial ~= Enum.Material.Air then
-                canDouble = false
-                usedDouble = false
+                canDouble = false; usedDouble = false
             elseif not usedDouble and ExtraState.DuploPulo then
                 canDouble = true
             end
@@ -2613,7 +2620,6 @@ do
     end)
 end
 
--- Velocidade
 task.spawn(function()
     while true do
         task.wait(0.3)
@@ -2625,7 +2631,6 @@ task.spawn(function()
     end
 end)
 
--- Anti-AFK
 task.spawn(function()
     while true do
         task.wait(60)
@@ -2639,7 +2644,7 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- ESP — versão baseada no script do Psygen (funciona!)
+-- ESP
 -- =========================================================================
 local ESP_Storage = {}
 local hasDrawing = false
@@ -2679,16 +2684,11 @@ local function ESP_Criar(player)
     if not char or not char.Parent then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-
-    -- Limpa resquícios antigos (caso o char tenha sido respawnado)
     local antigoHL = char:FindFirstChild("ZKY_ESP_HL")
     local antigoBB = char:FindFirstChild("ZKY_ESP_BB")
     if antigoHL then antigoHL:Destroy() end
     if antigoBB then antigoBB:Destroy() end
-
     local corEsp = ExtraState.ESPCor
-
-    -- HIGHLIGHT (anexado no Character + Adornee explícito)
     local hl = _I("Highlight")
     hl.Name = "ZKY_ESP_HL"
     hl.Adornee = char
@@ -2700,8 +2700,6 @@ local function ESP_Criar(player)
     hl.OutlineColor = _RGB(255, 255, 255)
     hl.OutlineTransparency = 0
     hl.Parent = char
-
-    -- BILLBOARD GUI (anexado no Character)
     local bb = _I("BillboardGui")
     bb.Name = "ZKY_ESP_BB"
     bb.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -2711,7 +2709,6 @@ local function ESP_Criar(player)
     bb.LightInfluence = 1
     bb.Size = _U2(0, 800, 0, 50)
     bb.Parent = char
-
     local nomeLbl = _I("TextLabel", bb)
     nomeLbl.Name = "Nome"
     nomeLbl.BackgroundTransparency = 1
@@ -2723,7 +2720,6 @@ local function ESP_Criar(player)
     nomeLbl.TextStrokeColor3 = _RGB(0, 0, 0)
     nomeLbl.Text = player.Name
     nomeLbl.TextWrapped = true
-
     local infoLbl = _I("TextLabel", bb)
     infoLbl.Name = "Info"
     infoLbl.BackgroundTransparency = 1
@@ -2736,42 +2732,28 @@ local function ESP_Criar(player)
     infoLbl.TextStrokeColor3 = _RGB(0, 0, 0)
     infoLbl.Text = ""
     infoLbl.TextWrapped = true
-
-    ESP_Storage[player] = {
-        Highlight = hl,
-        Billboard = bb,
-        Char = char
-    }
+    ESP_Storage[player] = { Highlight = hl, Billboard = bb, Char = char }
 end
 
 local function ESP_Atualizar()
     if not ExtraState.ESPAtivo then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
-
     for _, p in ipairs(P:GetPlayers()) do
         if p ~= Pl then
             local char = p.Character
             local d = ESP_Storage[p]
-
             if not char or not char.Parent then
                 if d then ESP_Limpar(p) end
             else
-                -- Respawn detectado ou player novo → recria
                 if not d or d.Char ~= char then
-                    ESP_Limpar(p)
-                    ESP_Criar(p)
-                    d = ESP_Storage[p]
+                    ESP_Limpar(p); ESP_Criar(p); d = ESP_Storage[p]
                 end
-
                 if d then
-                    -- Highlight
                     if d.Highlight then
                         d.Highlight.Enabled = ExtraState.ESPHighlight
                         d.Highlight.FillColor = ExtraState.ESPCor
                     end
-
-                    -- Billboard: nome + info
                     if d.Billboard then
                         local nomeLbl = d.Billboard:FindFirstChild("Nome")
                         local infoLbl = d.Billboard:FindFirstChild("Info")
@@ -2788,26 +2770,20 @@ local function ESP_Atualizar()
                             end
                             if ExtraState.ESPVida then
                                 local hum = char:FindFirstChildOfClass("Humanoid")
-                                if hum then
-                                    table.insert(partes, "❤ "..math.floor(hum.Health))
-                                end
+                                if hum then table.insert(partes, "❤ "..math.floor(hum.Health)) end
                             end
                             infoLbl.Text = table.concat(partes, "  •  ")
                             infoLbl.Visible = #partes > 0
                         end
                     end
-
-                    -- ESQUELETO via Drawing
                     if ExtraState.ESPEsqueleto and hasDrawing then
                         if not d.Skeleton then
                             d.Skeleton = {}
                             for i = 1, 15 do
                                 local ok, ln = pcall(function() return Drawing.new("Line") end)
                                 if ok and ln then
-                                    ln.Color = ExtraState.ESPCor
-                                    ln.Thickness = 1.5
-                                    ln.Transparency = 1
-                                    ln.Visible = false
+                                    ln.Color = ExtraState.ESPCor; ln.Thickness = 1.5
+                                    ln.Transparency = 1; ln.Visible = false
                                     d.Skeleton[i] = ln
                                 else break end
                             end
@@ -2824,16 +2800,10 @@ local function ESP_Atualizar()
                                         local v1, on1 = cam:WorldToViewportPoint(p1.Position)
                                         local v2, on2 = cam:WorldToViewportPoint(p2.Position)
                                         if on1 and on2 then
-                                            ln.From = Vector2.new(v1.X, v1.Y)
-                                            ln.To = Vector2.new(v2.X, v2.Y)
-                                            ln.Color = ExtraState.ESPCor
-                                            ln.Visible = true
-                                        else
-                                            ln.Visible = false
-                                        end
-                                    elseif ln then
-                                        ln.Visible = false
-                                    end
+                                            ln.From = Vector2.new(v1.X, v1.Y); ln.To = Vector2.new(v2.X, v2.Y)
+                                            ln.Color = ExtraState.ESPCor; ln.Visible = true
+                                        else ln.Visible = false end
+                                    elseif ln then ln.Visible = false end
                                 end
                             end
                         end
@@ -2843,18 +2813,14 @@ local function ESP_Atualizar()
                             d.Skeleton = nil
                         end
                     end
-
-                    -- CAIXA via Drawing
                     if ExtraState.ESPCaixa and hasDrawing then
                         if not d.Box then
                             d.Box = {}
                             for i = 1, 4 do
                                 local ok, ln = pcall(function() return Drawing.new("Line") end)
                                 if ok and ln then
-                                    ln.Color = ExtraState.ESPCor
-                                    ln.Thickness = 1.5
-                                    ln.Transparency = 1
-                                    ln.Visible = false
+                                    ln.Color = ExtraState.ESPCor; ln.Thickness = 1.5
+                                    ln.Transparency = 1; ln.Visible = false
                                     d.Box[i] = ln
                                 else break end
                             end
@@ -2867,8 +2833,7 @@ local function ESP_Atualizar()
                                 local topV, on1 = cam:WorldToViewportPoint(topPos)
                                 local botV, on2 = cam:WorldToViewportPoint(botPos)
                                 if on1 and on2 then
-                                    local h = math.abs(topV.Y - botV.Y)
-                                    local w = h * 0.55
+                                    local h = math.abs(topV.Y - botV.Y); local w = h * 0.55
                                     local x, y = topV.X, topV.Y
                                     local x1, y1 = x - w/2, y
                                     local x2, y2 = x + w/2, y
@@ -2893,25 +2858,18 @@ local function ESP_Atualizar()
             end
         end
     end
-
-    -- Limpa players que saíram
     for p in pairs(ESP_Storage) do
         if not p.Parent or p == Pl then ESP_Limpar(p) end
     end
 end
 
--- Loop principal de ESP
 task.spawn(function()
     while true do
         task.wait(0.1)
-        if ExtraState.ESPAtivo then
-            pcall(ESP_Atualizar)
-        else
-            for p in pairs(ESP_Storage) do ESP_Limpar(p) end
-        end
+        if ExtraState.ESPAtivo then pcall(ESP_Atualizar)
+        else for p in pairs(ESP_Storage) do ESP_Limpar(p) end end
     end
 end)
-
 P.PlayerRemoving:Connect(function(p) ESP_Limpar(p) end)
 
 -- =========================================================================
@@ -2923,12 +2881,10 @@ local function PanicMode()
     ExtraState.ESPEsqueleto = false
     ExtraState.ESPHighlight = false
     for p in pairs(ESP_Storage) do ESP_Limpar(p) end
-
     ExtraState.DuploPulo = false
     ExtraState.VelocidadeAtiva = false
     ExtraState.InfiniteJump = false
     ExtraState.AntiAFK = false
-
     if ExtraState.LightOriginal then
         pcall(function()
             local L = game:GetService("Lighting")
@@ -2941,33 +2897,22 @@ local function PanicMode()
         ExtraState.LightOriginal = nil
     end
     ExtraState.FullbrightAtivo = false
-
     if ExtraState.ZoomMaxOriginal then
         pcall(function()
             Pl.CameraMaxZoomDistance = ExtraState.ZoomMaxOriginal
             Pl.CameraMinZoomDistance = ExtraState.ZoomMinOriginal
         end)
-        ExtraState.ZoomMaxOriginal = nil
-        ExtraState.ZoomMinOriginal = nil
+        ExtraState.ZoomMaxOriginal = nil; ExtraState.ZoomMinOriginal = nil
     end
     ExtraState.ZoomUnlocked = false
-
-    limparShaders()
-    ExtraState.ShaderAtual = "Nenhum"
-    if ExtraState.FPSBoosterAtivo then
-        desativarFPSBooster()
-        ExtraState.FPSBoosterAtivo = false
-    end
-
-    if RefreshCharacter() then
-        pcall(function() humanoid.Health = 0 end)
-    end
-
+    limparShaders(); ExtraState.ShaderAtual = "Nenhum"
+    if ExtraState.FPSBoosterAtivo then desativarFPSBooster(); ExtraState.FPSBoosterAtivo = false end
+    if RefreshCharacter() then pcall(function() humanoid.Health = 0 end) end
     Notify("PANIC", "Tudo desativado + personagem resetado.", "Error")
 end
 
 -- =========================================================================
--- SUB-ABA: VISUAL
+-- SUB-ABAS DO EXTRA
 -- =========================================================================
 local function extraSalvarLighting()
     if ExtraState.LightOriginal then return end
@@ -2978,7 +2923,6 @@ end
 
 local function ShowExtraVisualContent()
     local card = UI.Card(_CH, 1, "👁️ Visual")
-
     UI.Toggle(card, 1, "Unlock Zoom (Sem Limite)", ExtraState.ZoomUnlocked, function(v)
         ExtraState.ZoomUnlocked = v
         if not ExtraState.ZoomMaxOriginal then
@@ -2999,17 +2943,14 @@ local function ShowExtraVisualContent()
             Notify("EXTRA", "Zoom restaurado.", "Orange")
         end
     end)
-
     local shaderCard = UI.Card(_CH, 2, "🎨 Shaders / Efeitos Visuais")
-
     local shaderDesc = _I("TextLabel", shaderCard)
     shaderDesc.Size = _U2(1, 0, 0, 0); shaderDesc.AutomaticSize = Enum.AutomaticSize.Y
     shaderDesc.BackgroundTransparency = 1
-    shaderDesc.Text = "Efeitos visuais de cor, brilho e contraste. Clique em 'Nenhum' para desativar."
+    shaderDesc.Text = "Efeitos visuais. Clique em 'Nenhum' para desativar."
     shaderDesc.TextColor3 = _K.Gray; shaderDesc.Font = _GM
     shaderDesc.TextSize = 10; shaderDesc.TextWrapped = true
     shaderDesc.TextXAlignment = _XL; shaderDesc.LayoutOrder = 1
-
     UI.Toggle(shaderCard, 2, "Fullbright (dia/claro)", ExtraState.FullbrightAtivo, function(v)
         ExtraState.FullbrightAtivo = v
         if v then
@@ -3034,30 +2975,20 @@ local function ShowExtraVisualContent()
             Notify("EXTRA", "Fullbright desativado.", "Orange")
         end
     end)
-
-    local shaderOpcoes = {
-        "Nenhum", "Realista V1", "Cinematográfico V2", "Synthwave V3",
-        "Neon V4", "Anaglyph V5", "Frio/Céu", "Quente/Sépia", "Clean/Nítido"
-    }
+    local shaderOpcoes = { "Nenhum", "Realista V1", "Cinematográfico V2", "Synthwave V3",
+        "Neon V4", "Anaglyph V5", "Frio/Céu", "Quente/Sépia", "Clean/Nítido" }
     UI.Dropdown(shaderCard, 3, "Shader Ativo", shaderOpcoes, ExtraState.ShaderAtual, function(op)
         aplicarShader(op)
-        if op == "Nenhum" then
-            Notify("SHADER", "Shader desativado.", "Orange")
-        else
-            Notify("SHADER", "Shader '"..op.."' ativado.", "Success")
-        end
+        Notify("SHADER", op == "Nenhum" and "Shader desativado." or ("Shader '"..op.."' ativado."), op == "Nenhum" and "Orange" or "Success")
     end)
-
     local fpsCard = UI.Card(_CH, 3, "⚡ FPS Booster")
-
     local fpsDesc = _I("TextLabel", fpsCard)
     fpsDesc.Size = _U2(1, 0, 0, 0); fpsDesc.AutomaticSize = Enum.AutomaticSize.Y
     fpsDesc.BackgroundTransparency = 1
-    fpsDesc.Text = "Remove partículas, efeitos, decals e texturas. Aumenta muito o FPS. Desative para restaurar tudo."
+    fpsDesc.Text = "Remove partículas, efeitos, decals e texturas. Aumenta muito o FPS."
     fpsDesc.TextColor3 = _K.Gray; fpsDesc.Font = _GM
     fpsDesc.TextSize = 10; fpsDesc.TextWrapped = true
     fpsDesc.TextXAlignment = _XL; fpsDesc.LayoutOrder = 1
-
     UI.Toggle(fpsCard, 2, "Ativar FPS Booster", ExtraState.FPSBoosterAtivo, function(v)
         ExtraState.FPSBoosterAtivo = v
         if v then
@@ -3071,32 +3002,24 @@ local function ShowExtraVisualContent()
     end)
 end
 
--- =========================================================================
--- SUB-ABA: MOVIMENTO
--- =========================================================================
 local function ShowExtraMovimentoContent()
     local card = UI.Card(_CH, 1, "🏃 Movimento")
-
     UI.Toggle(card, 1, "Duplo Pulo (aperte 2x no ar)", ExtraState.DuploPulo, function(v)
         ExtraState.DuploPulo = v
         Notify("EXTRA", v and "Duplo pulo ativado." or "Duplo pulo desativado.", v and "Success" or "Orange")
     end)
-
     UI.Toggle(card, 2, "Pulo Infinito (Inf. Jump)", ExtraState.InfiniteJump, function(v)
         ExtraState.InfiniteJump = v
         Notify("EXTRA", v and "Pulo infinito ativado." or "Pulo infinito desativado.", v and "Success" or "Orange")
     end)
-
     UI.Toggle(card, 3, "Velocidade Customizada", ExtraState.VelocidadeAtiva, function(v)
         ExtraState.VelocidadeAtiva = v
         if not v and RefreshCharacter() then pcall(function() humanoid.WalkSpeed = 16 end) end
         Notify("EXTRA", v and ("Velocidade: "..ExtraState.VelocidadeValor) or "Velocidade padrão.", v and "Success" or "Orange")
     end)
-
     UI.Slider(card, 4, "Velocidade (WalkSpeed)", ExtraState.VelocidadeValor, 16, 100, false, function(v)
         ExtraState.VelocidadeValor = v
     end)
-
     local dica = _I("TextLabel", card)
     dica.Size = _U2(1, 0, 0, 0); dica.AutomaticSize = Enum.AutomaticSize.Y
     dica.BackgroundTransparency = 1
@@ -3106,29 +3029,19 @@ local function ShowExtraMovimentoContent()
     dica.TextXAlignment = _XL; dica.LayoutOrder = 5
 end
 
--- =========================================================================
--- SUB-ABA: ESP
--- =========================================================================
 local function ShowExtraESPContent()
     local card = UI.Card(_CH, 1, "👁️ ESP (Jogadores)")
-
     UI.Toggle(card, 1, "Ativar ESP", ExtraState.ESPAtivo, function(v)
         ExtraState.ESPAtivo = v
-        if not v then
-            for p in pairs(ESP_Storage) do ESP_Limpar(p) end
-        end
+        if not v then for p in pairs(ESP_Storage) do ESP_Limpar(p) end end
         Notify("ESP", v and "ESP ativado." or "ESP desativado.", v and "Success" or "Orange")
     end)
-
-    UI.Toggle(card, 2, "Highlight (brilho no corpo)", ExtraState.ESPHighlight, function(v)
-        ExtraState.ESPHighlight = v
-    end)
+    UI.Toggle(card, 2, "Highlight (brilho no corpo)", ExtraState.ESPHighlight, function(v) ExtraState.ESPHighlight = v end)
     UI.Toggle(card, 3, "Nome", ExtraState.ESPNome, function(v) ExtraState.ESPNome = v end)
     UI.Toggle(card, 4, "Distância (m)", ExtraState.ESPDistancia, function(v) ExtraState.ESPDistancia = v end)
     UI.Toggle(card, 5, "Vida (❤)", ExtraState.ESPVida, function(v) ExtraState.ESPVida = v end)
     UI.Toggle(card, 6, "Caixa (Box)", ExtraState.ESPCaixa, function(v) ExtraState.ESPCaixa = v end)
     UI.Toggle(card, 7, "Esqueleto (Skeleton)", ExtraState.ESPEsqueleto, function(v) ExtraState.ESPEsqueleto = v end)
-
     if not hasDrawing then
         local aviso = _I("TextLabel", card)
         aviso.Size = _U2(1, 0, 0, 0); aviso.AutomaticSize = Enum.AutomaticSize.Y
@@ -3138,28 +3051,21 @@ local function ShowExtraESPContent()
         aviso.TextSize = 9; aviso.TextWrapped = true
         aviso.TextXAlignment = _XL; aviso.LayoutOrder = 8
     end
-
     local coresWrap = _I("Frame", card)
-    coresWrap.Size = _U2(1, 0, 0, 44); coresWrap.BackgroundTransparency = 1
-    coresWrap.LayoutOrder = 9
-
+    coresWrap.Size = _U2(1, 0, 0, 44); coresWrap.BackgroundTransparency = 1; coresWrap.LayoutOrder = 9
     local lbl = _I("TextLabel", coresWrap)
     lbl.BackgroundTransparency = 1; lbl.Position = _UO(0, 0)
     lbl.Size = _U2(1, 0, 0, 14); lbl.Text = "Cor do ESP"
     lbl.TextColor3 = _K.Gray; lbl.Font = _GM
     lbl.TextSize = 10; lbl.TextXAlignment = _XL
-
     local coresInner = _I("Frame", coresWrap)
     coresInner.Position = _UO(0, 20); coresInner.Size = _U2(1, 0, 0, 22)
     coresInner.BackgroundTransparency = 1
     local cil = _I("UIListLayout", coresInner)
     cil.FillDirection = Enum.FillDirection.Horizontal
     cil.Padding = _UD(0, 6); cil.Parent = coresInner
-
-    local cores = {
-        _RGB(255, 80, 80), _RGB(80, 255, 120), _RGB(80, 160, 255),
-        _RGB(255, 200, 60), _RGB(200, 80, 255), _RGB(255, 255, 255)
-    }
+    local cores = { _RGB(255, 80, 80), _RGB(80, 255, 120), _RGB(80, 160, 255),
+        _RGB(255, 200, 60), _RGB(200, 80, 255), _RGB(255, 255, 255) }
     for _, cor in ipairs(cores) do
         local b = _I("TextButton", coresInner)
         b.Size = _UO(20, 20); b.BackgroundColor3 = cor
@@ -3169,60 +3075,47 @@ local function ShowExtraESPContent()
     end
 end
 
--- =========================================================================
--- SUB-ABA: UTILIDADES
--- =========================================================================
 local function ShowExtraUtilidadesContent()
     local card = UI.Card(_CH, 1, "🛠️ Utilidades")
-
     UI.Toggle(card, 1, "Anti-AFK (não kicka por inatividade)", ExtraState.AntiAFK, function(v)
         ExtraState.AntiAFK = v
         Notify("EXTRA", v and "Anti-AFK ativado." or "Anti-AFK desativado.", v and "Success" or "Orange")
     end)
-
     UI.ActionButton(card, 2, "💀 Resetar Personagem", _RGB(80, 40, 40), function()
         if RefreshCharacter() then
             pcall(function() humanoid.Health = 0 end)
             Notify("EXTRA", "Personagem resetado.", "Success")
         else Notify("EXTRA", "Personagem não encontrado.", "Error") end
     end)
-
     local panicCard = UI.Card(_CH, 2, "🚨 Modo Pânico")
-
     local panicDesc = _I("TextLabel", panicCard)
     panicDesc.Size = _U2(1, 0, 0, 0); panicDesc.AutomaticSize = Enum.AutomaticSize.Y
     panicDesc.BackgroundTransparency = 1
-    panicDesc.Text = "Desativa TODAS as funções (ESP, movimento, visual, shaders, FPS booster) e reseta o personagem de uma vez. Use quando quiser esconder tudo rapidamente."
+    panicDesc.Text = "Desativa TODAS as funções e reseta o personagem de uma vez."
     panicDesc.TextColor3 = _K.Gray; panicDesc.Font = _GM
     panicDesc.TextSize = 10; panicDesc.TextWrapped = true
     panicDesc.TextXAlignment = _XL; panicDesc.TextYAlignment = Enum.TextYAlignment.Top
     panicDesc.LineHeight = 1.4; panicDesc.LayoutOrder = 1
-
     local panicBtn = UI.ActionButton(panicCard, 2, "🚨 ATIVAR MODO PÂNICO", _RGB(180, 40, 40), function()
         PanicMode()
     end)
     panicBtn.TextSize = 12
 end
 
--- =========================================================================
--- SUB-ABA: POSIÇÕES
--- =========================================================================
 local function ShowExtraPosicoesContent()
     local descCard = _I("Frame", _CH)
     descCard.Size = _U2(1, 0, 0, 78); descCard.BackgroundColor3 = _RGB(25, 22, 35)
     descCard.BorderSizePixel = 0; descCard.LayoutOrder = 1
     Corner(descCard, 8); Stroke(descCard, _K.Purple, 1.5)
-
     local descIcon = _I("TextLabel", descCard)
     descIcon.BackgroundTransparency = 1; descIcon.Position = _UO(12, 8)
     descIcon.Size = _UO(30, 30); descIcon.Text = "📍"
     descIcon.TextSize = 20; descIcon.Font = _GB
     descIcon.TextXAlignment = _XC; descIcon.TextYAlignment = Enum.TextYAlignment.Center
-
     local descText = _I("TextLabel", descCard)
     descText.BackgroundTransparency = 1; descText.Position = _UO(48, 8)
     descText.Size = _U2(1, -60, 0, 62)
-    descText.Text = "Salve posições específicas para teleportar rapidamente. Ex: moita do STS, pontos de spawn de civis, etc."
+    descText.Text = "Salve posições específicas para teleportar rapidamente."
     descText.TextColor3 = _K.White; descText.TextSize = 10
     descText.Font = _GM; descText.TextWrapped = true
     descText.TextXAlignment = _XL; descText.TextYAlignment = Enum.TextYAlignment.Top
@@ -3256,7 +3149,7 @@ local function ShowExtraPosicoesContent()
                 Corner(placeholder, 8); Stroke(placeholder, _K.Stroke, 1)
                 local lbl = _I("TextLabel", placeholder)
                 lbl.BackgroundTransparency = 1; lbl.Size = _U2(1, 1, 1, 0)
-                lbl.Text = "Nenhuma posição salva ainda.\nClique em '➕ Adicionar Posição' acima."
+                lbl.Text = "Nenhuma posição salva ainda."
                 lbl.TextColor3 = _K.DarkGray; lbl.Font = _GM
                 lbl.TextSize = 10; lbl.TextWrapped = true
                 lbl.TextXAlignment = _XC; lbl.TextYAlignment = Enum.TextYAlignment.Center
@@ -3278,56 +3171,47 @@ local function ShowExtraPosicoesContent()
         card.Size = _U2(1, 0, 0, 94); card.BackgroundColor3 = _RGB(18, 18, 24)
         card.BorderSizePixel = 0; card.LayoutOrder = layoutOrder or 1
         Corner(card, 8); Stroke(card, _K.Stroke, 1)
-
         local nomeLbl = _I("TextLabel", card)
         nomeLbl.BackgroundTransparency = 1; nomeLbl.Position = _UO(12, 8)
         nomeLbl.Size = _U2(1, -100, 0, 20); nomeLbl.Text = "📍 "..pos.nome
         nomeLbl.TextColor3 = _K.White; nomeLbl.Font = _GB
         nomeLbl.TextSize = 12; nomeLbl.TextXAlignment = _XL
-
         local btnEdit = _I("TextButton", card)
         btnEdit.AnchorPoint = _V2(1, 0); btnEdit.Position = _U2(1, -44, 0, 8)
         btnEdit.Size = _UO(30, 26); btnEdit.BackgroundColor3 = _RGB(50, 60, 90)
         btnEdit.BorderSizePixel = 0; btnEdit.Text = "✏️"
         btnEdit.TextColor3 = _K.White; btnEdit.Font = _GB
         btnEdit.TextSize = 13; btnEdit.AutoButtonColor = false; Corner(btnEdit, 6)
-
         local btnDel = _I("TextButton", card)
         btnDel.AnchorPoint = _V2(1, 0); btnDel.Position = _U2(1, -10, 0, 8)
         btnDel.Size = _UO(30, 26); btnDel.BackgroundColor3 = _RGB(120, 40, 40)
         btnDel.BorderSizePixel = 0; btnDel.Text = "🗑️"
         btnDel.TextColor3 = _K.White; btnDel.Font = _GB
         btnDel.TextSize = 13; btnDel.AutoButtonColor = false; Corner(btnDel, 6)
-
         local coordLbl = _I("TextLabel", card)
         coordLbl.BackgroundTransparency = 1; coordLbl.Position = _UO(12, 32)
         coordLbl.Size = _U2(1, -24, 0, 16)
         coordLbl.Text = string.format("X: %.0f   Y: %.0f   Z: %.0f", pos.x, pos.y, pos.z)
         coordLbl.TextColor3 = _K.DarkGray; coordLbl.Font = _GM
         coordLbl.TextSize = 9; coordLbl.TextXAlignment = _XL
-
         local btnSave = _I("TextButton", card)
         btnSave.AnchorPoint = _V2(1, 1); btnSave.Position = _U2(0.5, -5, 1, -10)
         btnSave.Size = _U2(0.5, -20, 0, 32); btnSave.BackgroundColor3 = _K.Success
         btnSave.BorderSizePixel = 0; btnSave.Text = "💾 Salvar"
         btnSave.TextColor3 = _K.White; btnSave.Font = _GB
         btnSave.TextSize = 10; btnSave.AutoButtonColor = false; Corner(btnSave, 6)
-
         local btnIr = _I("TextButton", card)
         btnIr.AnchorPoint = _V2(1, 1); btnIr.Position = _U2(1, -12, 1, -10)
         btnIr.Size = _U2(0.5, -20, 0, 32); btnIr.BackgroundColor3 = _K.Purple
         btnIr.BorderSizePixel = 0; btnIr.Text = "📌 Ir"
         btnIr.TextColor3 = _K.White; btnIr.Font = _GB
         btnIr.TextSize = 10; btnIr.AutoButtonColor = false; Corner(btnIr, 6)
-
         btnEdit.MouseButton1Click:Connect(function()
             abrirModalEditarNome("✏️ Editar nome da posição", pos.nome, function(novoNome)
                 pos.nome = novoNome; nomeLbl.Text = "📍 "..novoNome
-                persistSalvar()
-                Notify("POSIÇÃO", "Nome atualizado: "..novoNome, "Success")
+                persistSalvar(); Notify("POSIÇÃO", "Nome atualizado: "..novoNome, "Success")
             end)
         end)
-
         btnDel.MouseButton1Click:Connect(function()
             local idxAtual = acharIndice(pos)
             if not idxAtual then Notify("POSIÇÃO","Já removida.","Orange"); return end
@@ -3337,7 +3221,6 @@ local function ShowExtraPosicoesContent()
             atualizarPlaceholder(); atualizarBotaoAdd()
             Notify("POSIÇÃO", "🗑️ '"..nomeRemovido.."' excluída!", "Orange")
         end)
-
         btnSave.MouseButton1Click:Connect(function()
             if not RefreshCharacter() then Notify("POSIÇÃO","Sem personagem.","Error"); return end
             local cf = rootPart.CFrame
@@ -3348,7 +3231,6 @@ local function ShowExtraPosicoesContent()
             persistSalvar()
             Notify("POSIÇÃO", "💾 '"..pos.nome.."' atualizada!", "Success")
         end)
-
         btnIr.MouseButton1Click:Connect(function()
             if not RefreshCharacter() then Notify("POSIÇÃO","Sem personagem.","Error"); return end
             local cf = CFrame.new(pos.x, pos.y, pos.z) * CFrame.Angles(pos.rx or 0, pos.ry or 0, pos.rz or 0)
@@ -3360,7 +3242,7 @@ local function ShowExtraPosicoesContent()
 
     btnAdd.MouseButton1Click:Connect(function()
         if #Persist.posicoes >= Persist.limite_posicoes then
-            Notify("POSIÇÃO", "Limite de "..Persist.limite_posicoes.." atingido.", "Error"); return
+            Notify("POSIÇÃO", "Limite atingido.", "Error"); return
         end
         if not RefreshCharacter() then Notify("POSIÇÃO","Sem personagem.","Error"); return end
         local n = #Persist.posicoes + 1
@@ -3372,14 +3254,10 @@ local function ShowExtraPosicoesContent()
         criarCardPosicao(nova, n); atualizarPlaceholder(); atualizarBotaoAdd()
         Notify("POSIÇÃO", "📍 Posição "..n.." adicionada!", "Success")
     end)
-
     for i, pos in ipairs(Persist.posicoes) do criarCardPosicao(pos, i) end
     atualizarPlaceholder()
 end
 
--- =========================================================================
--- FUNÇÃO PRINCIPAL DO EXTRA
--- =========================================================================
 local function ShowExtra()
     CurrentPage = "Extra"
     ClearContent()
@@ -3391,10 +3269,8 @@ local function ShowExtra()
     hbLay.VerticalAlignment = Enum.VerticalAlignment.Center
     hbLay.Parent = hotbar
     local tabs = {
-        {Nome = "Visual", Id = "Visual"},
-        {Nome = "Movimento", Id = "Movimento"},
-        {Nome = "ESP", Id = "ESP"},
-        {Nome = "Utilidades", Id = "Utilidades"},
+        {Nome = "Visual", Id = "Visual"}, {Nome = "Movimento", Id = "Movimento"},
+        {Nome = "ESP", Id = "ESP"}, {Nome = "Utilidades", Id = "Utilidades"},
         {Nome = "Posições", Id = "Posicoes"}
     }
     for _, tab in ipairs(tabs) do
@@ -3418,6 +3294,7 @@ local function ShowExtra()
     elseif ExtraSubPage == "Utilidades" then ShowExtraUtilidadesContent()
     else ShowExtraVisualContent() end
     Content.CanvasPosition = _V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -3518,6 +3395,9 @@ local function gravParar()
     gravNotificarMudanca()
 end
 
+-- =========================================================================
+-- REPRODUÇÃO COM ANIMAÇÃO CORRIGIDA
+-- =========================================================================
 local function gravPararReproducao(silencioso)
     if Gravacao.Estado ~= "reproduzindo" then return end
     Gravacao.Estado = "idle"
@@ -3528,10 +3408,18 @@ local function gravPararReproducao(silencioso)
         humanoid.WalkSpeed = 16
         humanoid.JumpPower = 50
         pcall(function() humanoid.AutoRotate = true end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true) end)
         pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, true) end)
+        pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true) end)
+        -- Restaura o Animate script
+        local animateScript = character and character:FindFirstChild("Animate")
+        if animateScript then
+            pcall(function() animateScript.Disabled = false end)
+        end
     end
     pararAnimacaoAndar()
     if not silencioso then Notify("REPRODUÇÃO", "⏹️ Reprodução parada.", "Orange") end
@@ -3547,21 +3435,77 @@ local function gravReproduzir(frames, nome)
 
     Gravacao.Estado = "reproduzindo"
 
-    -- ✅ SALVA ESTADOS ORIGINAIS
+    -- ✅ Salva estados originais
     local rootAnchoredOriginal = rootPart.Anchored
     local autoRotateOriginal = humanoid.AutoRotate
     local walkSpeedOriginal = humanoid.WalkSpeed
     local jumpPowerOriginal = humanoid.JumpPower
 
-    -- ✅ DESLIGA FÍSICA — elimina tremelique
+    -- ✅ DESATIVA o Animate script pra ele não tocar animação de pulo/queda sozinho
+    local animateScript = character:FindFirstChild("Animate")
+    if animateScript then
+        pcall(function() animateScript.Disabled = true end)
+    end
+
+    -- ✅ Para TODAS as animações tocando
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = _I("Animator")
+        animator.Parent = humanoid
+    end
+    pcall(function()
+        for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+            track:Stop(0)
+        end
+    end)
+
+    -- ✅ Carrega a animação de andar manualmente
+    local isR15 = humanoid.RigType == Enum.HumanoidRigType.R15
+    local walkAnimId = isR15 and "rbxassetid://507777826" or "rbxassetid://180426354"
+    local walkAnim = _I("Animation")
+    walkAnim.AnimationId = walkAnimId
+    local walkPlaybackTrack = animator:LoadAnimation(walkAnim)
+    walkPlaybackTrack.Looped = true
+    walkPlaybackTrack.Priority = Enum.AnimationPriority.Movement
+
+    -- ✅ Ancora pra desligar física (elimina tremelique)
     pcall(function() rootPart.Anchored = true end)
     pcall(function() humanoid.AutoRotate = false end)
     humanoid.WalkSpeed = 0
     humanoid.JumpPower = 0
-    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false) end)
-    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false) end)
-    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false) end)
-    pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, false) end)
+
+    -- ✅ Bloqueia estados que causam braço levantado
+    for _, estado in ipairs({
+        Enum.HumanoidStateType.Freefall,
+        Enum.HumanoidStateType.FallingDown,
+        Enum.HumanoidStateType.Ragdoll,
+        Enum.HumanoidStateType.Climbing,
+        Enum.HumanoidStateType.Swimming,
+        Enum.HumanoidStateType.PlatformStanding,
+        Enum.HumanoidStateType.Jumping,
+    }) do
+        pcall(function() humanoid:SetStateEnabled(estado, false) end)
+    end
+
+    -- ✅ Força o estado Running pra tocar a animação de andar
+    task.wait(0.05)
+    pcall(function() humanoid:ChangeState(Enum.HumanoidStateType.Running) end)
+
+    -- ✅ Toca a animação de andar manualmente
+    pcall(function() walkPlaybackTrack:Play(0.1) end)
+
+    -- ✅ Loop que força o estado Running constantemente
+    local estadoLoopAtivo = true
+    task.spawn(function()
+        while estadoLoopAtivo and Gravacao.Estado == "reproduzindo" do
+            pcall(function()
+                if humanoid:GetState() ~= Enum.HumanoidStateType.Running then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                end
+            end)
+            task.wait(0.15)
+        end
+    end)
 
     Notify("REPRODUÇÃO", "▶️ "..(nome or (#frames.." frames")), "Success")
     gravNotificarMudanca()
@@ -3570,7 +3514,7 @@ local function gravReproduzir(frames, nome)
     local idx = 1
     local maxT = frames[#frames].t
     local ultimaPos = Vector3.new(frames[1].x, frames[1].y, frames[1].z)
-    local animando = false
+    local parado = false
 
     Gravacao.RepConn = R.RenderStepped:Connect(function()
         if Gravacao.Estado ~= "reproduzindo" then return end
@@ -3579,20 +3523,35 @@ local function gravReproduzir(frames, nome)
                 rootPart = character.HumanoidRootPart
                 pcall(function() rootPart.Anchored = true end)
             else
+                estadoLoopAtivo = false
                 gravPararReproducao(true); return
             end
         end
 
         local elapsed = os.clock() - t0
         if elapsed >= maxT then
+            estadoLoopAtivo = false
+            -- ✅ Para a animação de andar
+            pcall(function() walkPlaybackTrack:Stop(0.1) end)
+            -- ✅ Restaura tudo
             pcall(function() rootPart.Anchored = rootAnchoredOriginal end)
             pcall(function() humanoid.AutoRotate = autoRotateOriginal end)
             humanoid.WalkSpeed = walkSpeedOriginal
             humanoid.JumpPower = jumpPowerOriginal
-            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) end)
-            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true) end)
-            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true) end)
-            pcall(function() humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true) end)
+            for _, estado in ipairs({
+                Enum.HumanoidStateType.Freefall,
+                Enum.HumanoidStateType.FallingDown,
+                Enum.HumanoidStateType.Ragdoll,
+                Enum.HumanoidStateType.Climbing,
+                Enum.HumanoidStateType.Swimming,
+                Enum.HumanoidStateType.PlatformStanding,
+                Enum.HumanoidStateType.Jumping,
+            }) do
+                pcall(function() humanoid:SetStateEnabled(estado, true) end)
+            end
+            -- ✅ Restaura o Animate
+            local anim = character and character:FindFirstChild("Animate")
+            if anim then pcall(function() anim.Disabled = false end) end
             Gravacao.Estado = "idle"
             if Gravacao.RepConn then Gravacao.RepConn:Disconnect(); Gravacao.RepConn = nil end
             pararAnimacaoAndar()
@@ -3618,11 +3577,15 @@ local function gravReproduzir(frames, nome)
         local cf = CFrame.new(posAtual + Vector3.new(0, CONFIG.GroundOffset, 0)) * rotAtual
         pcall(function() character:PivotTo(cf) end)
 
+        -- ✅ Detecta se está parado pra parar a animação de andar
         local delta = (posAtual - ultimaPos).Magnitude
-        if delta > 0.005 then
-            if not animando then iniciarAnimacaoAndar(); animando = true end
-        else
-            if animando then pararAnimacaoAndar(); animando = false end
+        local movendo = delta > 0.005
+        if not movendo and not parado then
+            parado = true
+            pcall(function() walkPlaybackTrack:Stop(0.1) end)
+        elseif movendo and parado then
+            parado = false
+            pcall(function() walkPlaybackTrack:Play(0.1) end)
         end
 
         ultimaPos = posAtual
@@ -3864,12 +3827,13 @@ local function ShowGravarRota()
     local passos = _I("TextLabel", cardAjuda)
     passos.Size = _U2(1, 0, 0, 0); passos.AutomaticSize = Enum.AutomaticSize.Y
     passos.BackgroundTransparency = 1
-    passos.Text = "1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n5. Selecione a rota e clique em Reproduzir\n\n⚡ A reprodução usa Ancored (física desligada) — sem tremelique e sem lag."
+    passos.Text = "1. Clique em INICIAR GRAVAÇÃO\n2. Ande, pule, corra pelo mapa\n3. Clique em PARAR GRAVAÇÃO\n4. Dê um nome e clique em Salvar\n5. Selecione a rota e clique em Reproduzir\n\n⚡ A reprodução usa Anchored (física desligada) — sem tremelique, sem lag, com animação de andar normal."
     passos.TextColor3 = _K.Gray; passos.Font = _GM
     passos.TextSize = 10; passos.TextWrapped = true
     passos.TextXAlignment = _XL; passos.TextYAlignment = Enum.TextYAlignment.Top
     passos.LineHeight = 1.4
     Content.CanvasPosition = _V2()
+    Transp_Reaplicar()
 end
 
 -- =========================================================================
@@ -3958,7 +3922,7 @@ end)
 Close.MouseButton1Click:Connect(CloseMenu)
 
 -- =========================================================================
--- CARREGAR ROTAS
+-- CARREGAR ROTAS + ABRIR CRÉDITOS COMO PADRÃO
 -- =========================================================================
 task.defer(function()
     local loaded=0
@@ -3970,7 +3934,8 @@ task.defer(function()
     for _,rn in ipairs(Tower2RouteOrder) do
         if LoadTowerRoute("Torre 2",rn) then lt2+=1 end
     end
-    ShowEBDelta()
+    -- ✅ Abre CRÉDITOS como aba padrão
+    ShowCreditos()
     Notify("ZKY PARKOUR",loaded.."/4 parkours • Torre 1: "..(lt1 and "OK" or "ERRO").." • Torre 2: "..lt2.."/4",
         loaded==4 and lt1 and lt2==4 and "Success" or "Error")
 
@@ -3983,4 +3948,4 @@ task.defer(function()
     end
 end)
 
-print("AKIRA MENU V2.3.2 carregado!")
+print("AKIRA MENU V2.3.3 carregado!")
