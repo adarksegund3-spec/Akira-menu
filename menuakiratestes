@@ -1,7 +1,8 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.5
-   Farm Teleporte anti-kick (em passos) + Farm Físico (noclip + auto-unstick)
+   AKZ MENU mm2  —  v9.6
+   Farm Teleporte: só cabeça toca + passos menores + under-ground
+   Farm Físico: noclip + anti-travamento
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -62,13 +63,12 @@ local Config = {
 
 local TranspState = { ativo = false }
 
---════════════ Farm Teleporte (anti-kick) ════════════
-local FARM_DELAY_ENTRE_MOEDAS = 1.2
-local FARM_FALL_TIME          = 0.3
-local FARM_VERIFY_TIMEOUT     = 1.5
-local FARM_TELEPORT_Y_OFFSET  = 3
-local FARM_TELEPORT_STEP      = 15    -- studs por passo (anti-kick)
-local FARM_TELEPORT_STEP_WAIT = 0.08  -- espera entre passos
+--════════════ Farm Teleporte (anti-kick v3) ════════════
+local FARM_DELAY_ENTRE_MOEDAS = 0.6
+local FARM_VERIFY_TIMEOUT     = 0.8
+local FARM_TELEPORT_STEP      = 10      -- studs por passo
+local FARM_TELEPORT_STEP_WAIT = 0.05    -- espera entre passos
+local FARM_HEAD_Y_OFFSET      = 1.5     -- distância cabeça → HRP (R6/R15)
 
 local FarmConfig = {
     Ativo=false, Modo="Teleporte", Coletadas=0, PosInicial=nil, Rodando=false,
@@ -998,7 +998,7 @@ local function AntiAFK_Set(ativo)
     end
 end
 
---════════════ Farm Teleporte (ANTI-KICK v2) ════════════
+--════════════ Farm Teleporte v3 (só cabeça + under-ground) ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1031,7 +1031,7 @@ local function Farm_ListarMoedas()
     return lista
 end
 
--- 🔥 Teleporta em passos pequenos — engana o anti-cheat
+-- 📏 Teleporta em passos pequenos até chegar perto
 local function Farm_MoverPara(destinoPos)
     local char = LocalPlayer.Character
     if not char then return false end
@@ -1040,7 +1040,7 @@ local function Farm_MoverPara(destinoPos)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
 
-    local MAX_ITER = 120
+    local MAX_ITER = 150
     for i = 1, MAX_ITER do
         hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
@@ -1059,53 +1059,75 @@ local function Farm_MoverPara(destinoPos)
         local passo = diff.Unit * FARM_TELEPORT_STEP
         local novaPos = atual + passo
         pcall(function() char:PivotTo(CFrame.new(novaPos)) end)
-        task.wait(FARM_TELEPORT_STEP_WAIT)
+        -- delay variável (anti-detecção)
+        task.wait(FARM_TELEPORT_STEP_WAIT + math.random() * 0.02)
     end
     return false
 end
 
-local function Farm_DispararTouch(coin)
-    local char = LocalPlayer.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    if firetouchinterest then
-        pcall(function()
-            firetouchinterest(hrp, coin, 0)
-            firetouchinterest(hrp, coin, 1)
-        end)
-    end
-end
-
+-- 🎯 Coleta: corpo embaixo do chão, só a cabeça toca a moeda
 local function Farm_ColetarMoeda(coin)
     if not coin or not coin.Parent then return false end
     if coin:GetAttribute("Collected") == true then return false end
 
-    -- destino: acima da moeda + offset aleatório pequeno (anti-padrão)
-    local offset = Vector3.new(
-        (math.random() - 0.5) * 2,
-        FARM_TELEPORT_Y_OFFSET,
-        (math.random() - 0.5) * 2
-    )
-    local destino = coin.Position + offset
+    local char = LocalPlayer.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
 
+    -- destino do HRP: cabeça em cima da moeda, resto do corpo abaixo
+    local destino = Vector3.new(
+        coin.Position.X,
+        coin.Position.Y - FARM_HEAD_Y_OFFSET,  -- HRP fica abaixo da cabeça
+        coin.Position.Z
+    )
+
+    -- Passo 1: mover em passos até perto do destino
     if not Farm_MoverPara(destino) then return false end
 
-    task.wait(FARM_FALL_TIME)
-    Farm_DispararTouch(coin)
+    -- Passo 2: fixar HRP no destino via RenderStepped (imune a gravidade)
+    local pinConn
+    pinConn = RunService.RenderStepped:Connect(function()
+        local c = LocalPlayer.Character
+        if not c then return end
+        local h = c:FindFirstChild("HumanoidRootPart")
+        if not h then return end
+        h.CFrame = CFrame.new(destino)
+        h.AssemblyLinearVelocity = Vector3.zero
+        h.AssemblyAngularVelocity = Vector3.zero
+    end)
 
-    local inicio = os.clock()
-    while os.clock() - inicio < FARM_VERIFY_TIMEOUT do
-        if not coin or not coin.Parent then return true end
-        if coin:GetAttribute("Collected") == true then return true end
+    -- Passo 3: disparar touch na cabeça (só a cabeça toca)
+    local fim = os.clock() + FARM_VERIFY_TIMEOUT
+    local coletou = false
+    while os.clock() < fim do
+        local c = LocalPlayer.Character
+        if not c then break end
+        local h = c:FindFirstChild("Head")
+        if not h then break end
+
+        if firetouchinterest then
+            pcall(function()
+                firetouchinterest(h, coin, 0)
+                firetouchinterest(h, coin, 1)
+            end)
+        end
+
+        if not coin or not coin.Parent then
+            coletou = true
+            break
+        end
+        if coin:GetAttribute("Collected") == true then
+            coletou = true
+            break
+        end
         task.wait(0.05)
     end
 
-    Farm_DispararTouch(coin)
-    task.wait(0.25)
-    if not coin or not coin.Parent then return true end
-    if coin:GetAttribute("Collected") == true then return true end
-    return false
+    -- Passo 4: desconecta o pin
+    if pinConn then pinConn:Disconnect(); pinConn = nil end
+
+    return coletou
 end
 
 local function Farm_Parar()
@@ -1120,7 +1142,6 @@ local function Farm_Iniciar()
     Farm.Ativo = true
     Farm.Coletadas = 0
 
-    -- ⚡ noclip ligado durante o teleporte (evita ser jogado pra fora por colisão)
     Noclip_Start(true)
 
     local char = LocalPlayer.Character
@@ -1150,6 +1171,7 @@ local function Farm_Iniciar()
                         break
                     end
                 else
+                    -- 🎯 SEMPRE vai na mais próxima primeiro
                     local myPos = hrp.Position
                     table.sort(moedas, function(a, b)
                         return (a.Position - myPos).Magnitude < (b.Position - myPos).Magnitude
@@ -1488,7 +1510,7 @@ local function IrParaGun(target)
     if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-    local pos = target.Position + Vector3.new(0, FARM_TELEPORT_Y_OFFSET, 0)
+    local pos = target.Position + Vector3.new(0, 3, 0)
     pcall(function() char:PivotTo(CFrame.new(pos)) end)
     return true
 end
@@ -1772,7 +1794,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.5", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.6", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -1806,10 +1828,7 @@ discordLbl.TextXAlignment = Enum.TextXAlignment.Center
 discordLbl.LayoutOrder = 3
 
 local uiBlock = createBlock(principalContent, 3, "🎨 UI CONFIG")
-
-createToggle(uiBlock, 2, "Interface Transparente", false, function(v)
-    Transp_Aplicar(v)
-end)
+createToggle(uiBlock, 2, "Interface Transparente", false, function(v) Transp_Aplicar(v) end)
 
 local corLbl = Instance.new("TextLabel", uiBlock)
 corLbl.Size = UDim2.new(1, 0, 0, 18)
@@ -1879,12 +1898,8 @@ setActiveColorBorder(Theme.Accent)
 --════════════ ABA ESP ════════════
 local espTab = createTab("ESP")
 local espContent = espTab.content
-
 createSection(espContent, 1, "GERAL")
-createToggle(espContent, 2, "ESP Ativado", Config.ESPEnabled, function(v)
-    Config.ESPEnabled = v
-    if not v then clearAllESP() end
-end)
+createToggle(espContent, 2, "ESP Ativado", Config.ESPEnabled, function(v) Config.ESPEnabled = v; if not v then clearAllESP() end end)
 createSection(espContent, 3, "HIGHLIGHT")
 createToggle(espContent, 4, "Ativar Highlight", Config.Highlight, function(v) Config.Highlight = v end)
 createToggle(espContent, 5, "Preenchimento", Config.HighlightFill, function(v) Config.HighlightFill = v end)
@@ -1899,7 +1914,6 @@ createToggle(espContent, 12, "Tracer", Config.ShowTracer, function(v) Config.Sho
 --════════════ ABA AIMBOT ════════════
 local aimTab = createTab("Aimbot")
 local aimContent = aimTab.content
-
 createSection(aimContent, 1, "AIMBOT")
 createToggle(aimContent, 2, "Aimbot Ativado", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end)
 createToggle(aimContent, 3, "Mostrar FOV", Config.AimbotShowFOV, function(v) Config.AimbotShowFOV = v end)
@@ -1915,7 +1929,6 @@ createSlider(aimContent, 11, "Smoothness (0 = snap)", 0, 0.95, Config.AimbotSmoo
 --════════════ ABA FARM ════════════
 local farmTab = createTab("Farm")
 local farmContent = farmTab.content
-
 createSection(farmContent, 1, "FARM DE MOEDAS")
 createToggle(farmContent, 2, "Farm Ativado", Farm.Ativo, function(v)
     if v then
@@ -1927,7 +1940,6 @@ createToggle(farmContent, 2, "Farm Ativado", Farm.Ativo, function(v)
     end
 end)
 createOptionRow(farmContent, 3, "Modo", {"Teleporte","Físico"}, FarmConfig.Modo, function(v) FarmConfig.Modo = v end)
-
 createSection(farmContent, 4, "CONTADOR")
 local farmStatusLbl = Instance.new("TextLabel")
 farmStatusLbl.Size = UDim2.new(1, -8, 0, 60)
@@ -1957,7 +1969,6 @@ end)
 --════════════ ABA FUNÇÕES ════════════
 local funcTab = createTab("Funções")
 local funcContent = funcTab.content
-
 local gunBlock = createBlock(funcContent, 1, "🔫 GUN")
 createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
     GunDrop.ESPAtivo = v
@@ -2141,4 +2152,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU mm2] v9.5 carregado 🔪")
+print("[AKZ MENU mm2] v9.6 carregado 🔪")
