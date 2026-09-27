@@ -1,8 +1,7 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.6
-   Farm Teleporte: só cabeça toca + passos menores + under-ground
-   Farm Físico: noclip + anti-travamento
+   AKZ MENU mm2  —  v9.7
+   Farm Teleporte anti-void + só cabeça toca + 3 camadas de safety
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -63,12 +62,12 @@ local Config = {
 
 local TranspState = { ativo = false }
 
---════════════ Farm Teleporte (anti-kick v3) ════════════
 local FARM_DELAY_ENTRE_MOEDAS = 0.6
 local FARM_VERIFY_TIMEOUT     = 0.8
-local FARM_TELEPORT_STEP      = 10      -- studs por passo
-local FARM_TELEPORT_STEP_WAIT = 0.05    -- espera entre passos
-local FARM_HEAD_Y_OFFSET      = 1.5     -- distância cabeça → HRP (R6/R15)
+local FARM_TELEPORT_STEP      = 10
+local FARM_TELEPORT_STEP_WAIT = 0.05
+local FARM_HEAD_Y_OFFSET      = 1.5
+local FARM_VOID_Y             = -50
 
 local FarmConfig = {
     Ativo=false, Modo="Teleporte", Coletadas=0, PosInicial=nil, Rodando=false,
@@ -998,7 +997,7 @@ local function AntiAFK_Set(ativo)
     end
 end
 
---════════════ Farm Teleporte v3 (só cabeça + under-ground) ════════════
+--════════════ Farm Teleporte v3 (anti-void) ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1040,6 +1039,16 @@ local function Farm_MoverPara(destinoPos)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
 
+    -- ⚡ Safety: se o boneco tá no void, sobe primeiro
+    if hrp.Position.Y < FARM_VOID_Y then
+        if Farm.PosInicial then
+            pcall(function() char:PivotTo(Farm.PosInicial) end)
+            task.wait(0.2)
+            hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return false end
+        end
+    end
+
     local MAX_ITER = 150
     for i = 1, MAX_ITER do
         hrp = char:FindFirstChild("HumanoidRootPart")
@@ -1059,13 +1068,13 @@ local function Farm_MoverPara(destinoPos)
         local passo = diff.Unit * FARM_TELEPORT_STEP
         local novaPos = atual + passo
         pcall(function() char:PivotTo(CFrame.new(novaPos)) end)
-        -- delay variável (anti-detecção)
         task.wait(FARM_TELEPORT_STEP_WAIT + math.random() * 0.02)
     end
     return false
 end
 
--- 🎯 Coleta: corpo embaixo do chão, só a cabeça toca a moeda
+-- 🎯 Coleta: corpo embaixo do chão, só a cabeça toca
+--    + reposiciona pra cima ANTES de soltar o pin (evita cair no void)
 local function Farm_ColetarMoeda(coin)
     if not coin or not coin.Parent then return false end
     if coin:GetAttribute("Collected") == true then return false end
@@ -1075,29 +1084,31 @@ local function Farm_ColetarMoeda(coin)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    -- destino do HRP: cabeça em cima da moeda, resto do corpo abaixo
     local destino = Vector3.new(
         coin.Position.X,
-        coin.Position.Y - FARM_HEAD_Y_OFFSET,  -- HRP fica abaixo da cabeça
+        coin.Position.Y - FARM_HEAD_Y_OFFSET,
+        coin.Position.Z
+    )
+    local safePos = Vector3.new(
+        coin.Position.X,
+        coin.Position.Y + 2,
         coin.Position.Z
     )
 
-    -- Passo 1: mover em passos até perto do destino
     if not Farm_MoverPara(destino) then return false end
 
-    -- Passo 2: fixar HRP no destino via RenderStepped (imune a gravidade)
+    local destinoAtual = destino
     local pinConn
     pinConn = RunService.RenderStepped:Connect(function()
         local c = LocalPlayer.Character
         if not c then return end
         local h = c:FindFirstChild("HumanoidRootPart")
         if not h then return end
-        h.CFrame = CFrame.new(destino)
+        h.CFrame = CFrame.new(destinoAtual)
         h.AssemblyLinearVelocity = Vector3.zero
         h.AssemblyAngularVelocity = Vector3.zero
     end)
 
-    -- Passo 3: disparar touch na cabeça (só a cabeça toca)
     local fim = os.clock() + FARM_VERIFY_TIMEOUT
     local coletou = false
     while os.clock() < fim do
@@ -1124,8 +1135,25 @@ local function Farm_ColetarMoeda(coin)
         task.wait(0.05)
     end
 
-    -- Passo 4: desconecta o pin
+    -- ⚡ Antes de soltar o pin, sobe pra cima do chão
+    destinoAtual = safePos
+    task.wait(0.12)
+
     if pinConn then pinConn:Disconnect(); pinConn = nil end
+
+    -- Safety pós-coleta
+    task.spawn(function()
+        task.wait(0.4)
+        local c = LocalPlayer.Character
+        if not c then return end
+        local h = c:FindFirstChild("HumanoidRootPart")
+        if not h then return end
+        if h.Position.Y < FARM_VOID_Y then
+            if Farm.PosInicial then
+                pcall(function() c:PivotTo(Farm.PosInicial) end)
+            end
+        end
+    end)
 
     return coletou
 end
@@ -1150,6 +1178,23 @@ local function Farm_Iniciar()
         if hrp then Farm.PosInicial = hrp.CFrame end
     end
 
+    -- ⚡ Watchdog: se cair no void, resgata pro spawn
+    task.spawn(function()
+        while Farm.Ativo do
+            task.wait(0.5)
+            local c = LocalPlayer.Character
+            if c then
+                local h = c:FindFirstChild("HumanoidRootPart")
+                if h and h.Position.Y < FARM_VOID_Y then
+                    if Farm.PosInicial then
+                        pcall(function() c:PivotTo(Farm.PosInicial) end)
+                    end
+                    task.wait(0.5)
+                end
+            end
+        end
+    end)
+
     task.spawn(function()
         while Farm.Ativo do
             local char = LocalPlayer.Character
@@ -1171,7 +1216,6 @@ local function Farm_Iniciar()
                         break
                     end
                 else
-                    -- 🎯 SEMPRE vai na mais próxima primeiro
                     local myPos = hrp.Position
                     table.sort(moedas, function(a, b)
                         return (a.Position - myPos).Magnitude < (b.Position - myPos).Magnitude
@@ -1794,7 +1838,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.6", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.7", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -2152,4 +2196,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU mm2] v9.6 carregado 🔪")
+print("[AKZ MENU mm2] v9.7 carregado 🔪")
