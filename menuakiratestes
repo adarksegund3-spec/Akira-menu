@@ -1,8 +1,7 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.3
-   Principal | ESP | Aimbot | Farm | Funções
-   + Farm Físico (LinearVelocity) • Noclip • Anti-AFK • Auto Kill
+   AKZ MENU mm2  —  v9.5
+   Farm Teleporte anti-kick (em passos) + Farm Físico (noclip + auto-unstick)
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -27,9 +26,6 @@ pcall(function()
     hasDrawing = Drawing ~= nil
 end)
 
---═══════════════════════════════════════════════════════════════
---  TEMA (dinâmico)
---═══════════════════════════════════════════════════════════════
 local Theme = {
     Accent    = Color3.fromRGB(240, 240, 245),
     AccentDim = Color3.fromRGB(180, 180, 190),
@@ -46,7 +42,6 @@ local STROKE_CLR  = Color3.fromRGB(40, 40, 48)
 local OFF_CLR     = Color3.fromRGB(55, 55, 65)
 local KNOB_OFF    = Color3.fromRGB(180, 180, 190)
 local KNOB_ON     = Color3.fromRGB(15, 15, 18)
-
 local WARN_CLR    = Color3.fromRGB(255, 190, 60)
 local SUCCESS_CLR = Color3.fromRGB(120, 220, 140)
 local DANGER_CLR  = Color3.fromRGB(230, 90, 90)
@@ -57,107 +52,59 @@ local ROLE_COLORS = {
     Innocent = Color3.fromRGB(50, 205, 50),
 }
 
---════════════ Config ════════════
 local Config = {
-    ESPEnabled       = false,
-    Highlight        = false,
-    HighlightFill    = false,
-    HighlightOutline = false,
-    Box              = false,
-    Skeleton         = false,
-    ShowName         = false,
-    ShowTracer       = false,
-    AimbotEnabled    = false,
-    AimbotShowFOV    = false,
-    AimbotFOV        = 120,
-    AimbotFOVAlpha   = 0.6,
-    AimbotFOVColor   = Color3.fromRGB(255, 255, 255),
-    AimbotPart       = "Cabeça",
-    AimbotTeam       = "Todos",
-    AimbotSmooth     = 0.15,
+    ESPEnabled=false, Highlight=false, HighlightFill=false, HighlightOutline=false,
+    Box=false, Skeleton=false, ShowName=false, ShowTracer=false,
+    AimbotEnabled=false, AimbotShowFOV=false, AimbotFOV=120, AimbotFOVAlpha=0.6,
+    AimbotFOVColor=Color3.fromRGB(255,255,255),
+    AimbotPart="Cabeça", AimbotTeam="Todos", AimbotSmooth=0.15,
 }
 
 local TranspState = { ativo = false }
 
---════════════ Farm ════════════
-local FARM_DELAY_ENTRE_MOEDAS = 0.8
-local FARM_FALL_TIME          = 0.25
+--════════════ Farm Teleporte (anti-kick) ════════════
+local FARM_DELAY_ENTRE_MOEDAS = 1.2
+local FARM_FALL_TIME          = 0.3
 local FARM_VERIFY_TIMEOUT     = 1.5
 local FARM_TELEPORT_Y_OFFSET  = 3
+local FARM_TELEPORT_STEP      = 15    -- studs por passo (anti-kick)
+local FARM_TELEPORT_STEP_WAIT = 0.08  -- espera entre passos
 
 local FarmConfig = {
-    Ativo       = false,
-    Modo        = "Teleporte",  -- "Teleporte" | "Físico"
-    Coletadas   = 0,
-    PosInicial  = nil,
-    Rodando     = false,
+    Ativo=false, Modo="Teleporte", Coletadas=0, PosInicial=nil, Rodando=false,
 }
 
---════════════ Noclip / Anti-AFK ════════════
-local NoclipState  = { Ativo = false, Conn = nil }
+local NoclipState  = { Ativo = false, Conn = nil, ForceState = false }
 local AntiAFKState = { Ativo = false }
 
---════════════ Farm Físico ════════════
 local FarmFisico = {
-    Ativo           = false,
-    Loaded          = false,
-    BagFull         = false,
-    WaitingForCoins = false,
-    ActiveCoins     = {},
-    Blacklist       = {},
-    CurrentTarget   = nil,
-    NoCoinsStart    = nil,
-    CollectedLife   = false,
-    LinearVelocity  = nil,
-    Attachment      = nil,
-    HeartbeatConn   = nil,
-    ConnAdded       = nil,
-    ConnRemoved     = nil,
-    ConnStarted     = nil,
-    ConnCollected   = nil,
-    TargetFinderThr = nil,
-    Coletadas       = 0,
+    Ativo=false, Loaded=false, BagFull=false, WaitingForCoins=false,
+    ActiveCoins={}, Blacklist={}, CurrentTarget=nil, NoCoinsStart=nil,
+    CollectedLife=false, LinearVelocity=nil, Attachment=nil,
+    HeartbeatConn=nil, ConnAdded=nil, ConnRemoved=nil, ConnStarted=nil,
+    ConnCollected=nil, TargetFinderThr=nil, Coletadas=0,
+    LastPos=nil, StuckTime=0, CharacterParts={},
 }
 
 local FF = {
-    MaxDist         = 1000,
-    TargetSpeed     = 23,
-    ResetDelay      = 5.0,
-    RoundStartDelay = 1.5,
+    MaxDist=1000, TargetSpeed=25, ResetDelay=5.0, RoundStartDelay=1.5,
+    StuckThreshold=0.8, UnstickStep=8,
 }
 
---════════════ GunDrop Config ════════════
 local GunDropConfig = {
-    ESPAtivo     = false,
-    AvisoDrop    = false,
-    AvisoColeta  = false,
-    TpGun        = false,
-    ObjetosVistos= {},
-    ObjetosMonitorados = {},
-    HighlightAtual = nil,
-    UltimaGun    = nil,
-    UltimoAviso  = 0,
-    Total        = 0,
+    ESPAtivo=false, AvisoDrop=false, AvisoColeta=false, TpGun=false,
+    ObjetosVistos={}, ObjetosMonitorados={}, HighlightAtual=nil,
+    UltimaGun=nil, UltimoAviso=0, Total=0,
 }
-
 local espCache = {}
-
---════════════ Auto Kill Config ════════════
 local AutoKillConfig = {
-    Ativo     = false,
-    Alvo      = "Todos",
-    Kills     = 0,
-    Rodando   = false,
-    Distancia = 15,
+    Ativo=false, Alvo="Todos", Kills=0, Rodando=false, Distancia=15,
 }
-
 local MurderESP_Highlight = nil
 local MurderESP_Target    = nil
 
---════════════ Role Detection ════════════
-local KNIFE_KEYWORDS = {"knife", "faca", "blade", "lâmina", "lamina", "punhal", "dagger"}
-local GUN_KEYWORDS   = {"gun", "revolver", "pistol", "arma", "pistola", "luger", "m9", "firearm",
-                        "handgun", "sidearm"}
+local KNIFE_KEYWORDS = {"knife","faca","blade","lâmina","lamina","punhal","dagger"}
+local GUN_KEYWORDS   = {"gun","revolver","pistol","arma","pistola","luger","m9","firearm","handgun","sidearm"}
 
 local function checkKeyword(name, keywords)
     if not name then return false end
@@ -172,28 +119,21 @@ local function getPlayerRole(player)
     local char = player.Character
     local bp   = player:FindFirstChildOfClass("Backpack")
     local hasKnife, hasGun = false, false
-
     local function check(tool)
         if not tool or not tool:IsA("Tool") then return end
         if checkKeyword(tool.Name, KNIFE_KEYWORDS) then hasKnife = true end
         if checkKeyword(tool.Name, GUN_KEYWORDS)   then hasGun   = true end
     end
-
     if char then
         for _, o in ipairs(char:GetChildren()) do check(o) end
-        for _, o in ipairs(char:GetDescendants()) do
-            if o:IsA("Tool") then check(o) end
-        end
+        for _, o in ipairs(char:GetDescendants()) do if o:IsA("Tool") then check(o) end end
     end
     if bp then
         for _, o in ipairs(bp:GetChildren()) do check(o) end
-        for _, o in ipairs(bp:GetDescendants()) do
-            if o:IsA("Tool") then check(o) end
-        end
+        for _, o in ipairs(bp:GetDescendants()) do if o:IsA("Tool") then check(o) end end
     end
-
     if hasKnife then return "Murderer" end
-    if hasGun   then return "Sheriff"  end
+    if hasGun then return "Sheriff" end
     return "Innocent"
 end
 
@@ -201,27 +141,21 @@ local function getRoleColor(player)
     return ROLE_COLORS[getPlayerRole(player)] or ROLE_COLORS.Innocent
 end
 
---════════════ ScreenGui ════════════
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AKZ_Menu_MM2"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 pcall(function() screenGui.Parent = CoreGui end)
-if not screenGui.Parent then
-    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+if not screenGui.Parent then screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
---════════════ Toast ════════════
 local toastGui = Instance.new("ScreenGui")
 toastGui.Name = "AKZ_Toast"
 toastGui.ResetOnSpawn = false
 toastGui.IgnoreGuiInset = true
 toastGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 pcall(function() toastGui.Parent = CoreGui end)
-if not toastGui.Parent then
-    toastGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+if not toastGui.Parent then toastGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local toastHolder = Instance.new("Frame")
 toastHolder.AnchorPoint = Vector2.new(1, 0)
@@ -248,14 +182,12 @@ local function showToast(titulo, subtitulo, cor)
     local st = Instance.new("UIStroke", toast)
     st.Color = cor
     st.Thickness = 1.5
-
     local bar = Instance.new("Frame", toast)
     bar.Size = UDim2.new(0, 3, 1, -12)
     bar.Position = UDim2.new(0, 6, 0, 6)
     bar.BackgroundColor3 = cor
     bar.BorderSizePixel = 0
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
-
     local t = Instance.new("TextLabel", toast)
     t.Position = UDim2.new(0, 16, 0, 10)
     t.Size = UDim2.new(1, -24, 0, 18)
@@ -265,7 +197,6 @@ local function showToast(titulo, subtitulo, cor)
     t.TextSize = 13
     t.TextColor3 = cor
     t.TextXAlignment = Enum.TextXAlignment.Left
-
     local s = Instance.new("TextLabel", toast)
     s.Position = UDim2.new(0, 16, 0, 30)
     s.Size = UDim2.new(1, -24, 0, 22)
@@ -276,10 +207,8 @@ local function showToast(titulo, subtitulo, cor)
     s.TextColor3 = TEXT_DIM
     s.TextXAlignment = Enum.TextXAlignment.Left
     s.TextWrapped = true
-
     TweenService:Create(toast, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
         {Position = UDim2.new(0, 0, 0, 0)}):Play()
-
     task.delay(4.5, function()
         if not toast.Parent then return end
         local out = TweenService:Create(toast, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
@@ -289,7 +218,6 @@ local function showToast(titulo, subtitulo, cor)
     end)
 end
 
---════════════ FOV Circle ════════════
 local fovCircle = Instance.new("Frame")
 fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
 fovCircle.Size = UDim2.fromOffset(Config.AimbotFOV * 2, Config.AimbotFOV * 2)
@@ -335,7 +263,6 @@ local function refreshFov()
 end
 refreshFov()
 
---════════════ Logo ════════════
 local logo = Instance.new("TextButton")
 logo.AnchorPoint = Vector2.new(0.5, 0.5)
 logo.Size = UDim2.new(0, 58, 0, 58)
@@ -369,16 +296,15 @@ knifeIcon.Font = Enum.Font.GothamBold
 
 task.spawn(function()
     while logo.Parent do
-        local c   = Theme.Accent
-        local dim = c:Lerp(Color3.new(0, 0, 0), 0.45)
-        TweenService:Create(logoStroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine), {Color = dim}):Play()
+        local c = Theme.Accent
+        local dim = c:Lerp(Color3.new(0,0,0), 0.45)
+        TweenService:Create(logoStroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine), {Color=dim}):Play()
         task.wait(1.2)
-        TweenService:Create(logoStroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine), {Color = c}):Play()
+        TweenService:Create(logoStroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine), {Color=c}):Play()
         task.wait(1.2)
     end
 end)
 
---════════════ Menu Frame ════════════
 local menuFrame = Instance.new("Frame")
 menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 menuFrame.Size = UDim2.new(0, 460, 0, 420)
@@ -446,7 +372,6 @@ contentArea.BackgroundTransparency = 1
 contentArea.ZIndex = 11
 contentArea.Parent = menuFrame
 
---════════════ Tabs ════════════
 local Tabs = {}
 local tabOrder = {}
 local ActiveTab = nil
@@ -455,13 +380,13 @@ local function selectTab(name)
     if ActiveTab == name then return end
     if ActiveTab and Tabs[ActiveTab] then
         Tabs[ActiveTab].content.Visible = false
-        TweenService:Create(Tabs[ActiveTab].indicator, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
-        TweenService:Create(Tabs[ActiveTab].button, TweenInfo.new(0.15), {TextColor3 = TEXT_DIM}):Play()
+        TweenService:Create(Tabs[ActiveTab].indicator, TweenInfo.new(0.15), {BackgroundTransparency=1}):Play()
+        TweenService:Create(Tabs[ActiveTab].button, TweenInfo.new(0.15), {TextColor3=TEXT_DIM}):Play()
     end
     ActiveTab = name
     Tabs[name].content.Visible = true
-    TweenService:Create(Tabs[name].indicator, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
-    TweenService:Create(Tabs[name].button, TweenInfo.new(0.15), {TextColor3 = Color3.fromRGB(255,255,255)}):Play()
+    TweenService:Create(Tabs[name].indicator, TweenInfo.new(0.15), {BackgroundTransparency=0}):Play()
+    TweenService:Create(Tabs[name].button, TweenInfo.new(0.15), {TextColor3=Color3.fromRGB(255,255,255)}):Play()
 end
 
 local function createTab(name)
@@ -510,7 +435,6 @@ local function createTab(name)
     return Tabs[name]
 end
 
---════════════ UI Helpers ════════════
 local function createSection(parent, order, text)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -6, 0, 22)
@@ -538,17 +462,14 @@ local function createBlock(parent, order, titulo)
     st.Color = Theme.Accent
     st.Thickness = 1.5
     st.Transparency = 0.5
-
     local pad = Instance.new("UIPadding", block)
     pad.PaddingTop = UDim.new(0, 10)
     pad.PaddingBottom = UDim.new(0, 10)
     pad.PaddingLeft = UDim.new(0, 10)
     pad.PaddingRight = UDim.new(0, 10)
-
     local lay = Instance.new("UIListLayout", block)
     lay.Padding = UDim.new(0, 6)
     lay.SortOrder = Enum.SortOrder.LayoutOrder
-
     if titulo then
         local t = Instance.new("TextLabel", block)
         t.Size = UDim2.new(1, 0, 0, 20)
@@ -560,7 +481,6 @@ local function createBlock(parent, order, titulo)
         t.TextXAlignment = Enum.TextXAlignment.Left
         t.LayoutOrder = 1
     end
-
     return block
 end
 
@@ -572,7 +492,6 @@ local function createToggle(parent, order, label, initial, onChange)
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
-
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -70, 1, 0)
     lbl.Position = UDim2.new(0, 12, 0, 0)
@@ -583,7 +502,6 @@ local function createToggle(parent, order, label, initial, onChange)
     lbl.TextColor3 = TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
-
     local track = Instance.new("Frame")
     track.Size = UDim2.new(0, 38, 0, 20)
     track.Position = UDim2.new(1, -50, 0.5, -10)
@@ -591,7 +509,6 @@ local function createToggle(parent, order, label, initial, onChange)
     track.BorderSizePixel = 0
     track.Parent = row
     Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
-
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 16, 0, 16)
     knob.Position = initial and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
@@ -599,13 +516,11 @@ local function createToggle(parent, order, label, initial, onChange)
     knob.BorderSizePixel = 0
     knob.Parent = track
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
     local click = Instance.new("TextButton")
     click.Size = UDim2.new(1, 0, 1, 0)
     click.BackgroundTransparency = 1
     click.Text = ""
     click.Parent = row
-
     local state = initial
     local function apply(v, fire)
         state = v
@@ -617,10 +532,7 @@ local function createToggle(parent, order, label, initial, onChange)
         if fire and onChange then onChange(v) end
     end
     click.MouseButton1Click:Connect(function() apply(not state, true) end)
-    return {
-        Set = function(v) apply(v, true) end,
-        Get = function() return state end,
-    }
+    return { Set = function(v) apply(v, true) end, Get = function() return state end }
 end
 
 local function createOptionRow(parent, order, label, options, initial, onChange)
@@ -631,7 +543,6 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
-
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(0, 120, 1, 0)
     lbl.Position = UDim2.new(0, 12, 0, 0)
@@ -642,21 +553,17 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
     lbl.TextColor3 = TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
-
     local holder = Instance.new("Frame")
     holder.Size = UDim2.new(1, -138, 1, -8)
     holder.Position = UDim2.new(0, 130, 0, 4)
     holder.BackgroundTransparency = 1
     holder.Parent = row
-
     local layout = Instance.new("UIListLayout", holder)
     layout.FillDirection = Enum.FillDirection.Horizontal
     layout.Padding = UDim.new(0, 4)
     layout.VerticalAlignment = Enum.VerticalAlignment.Center
-
     local buttons = {}
     local current = initial
-
     local function setActive(name)
         for n, b in pairs(buttons) do
             local active = n == name
@@ -664,7 +571,6 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
             b.TextColor3 = active and Color3.fromRGB(15, 15, 18) or TEXT_DIM
         end
     end
-
     for _, name in ipairs(options) do
         local b = Instance.new("TextButton")
         b.Size = UDim2.new(0, 0, 1, 0)
@@ -682,7 +588,6 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
         pad.PaddingLeft = UDim.new(0, 10)
         pad.PaddingRight = UDim.new(0, 10)
         buttons[name] = b
-
         b.MouseButton1Click:Connect(function()
             current = name
             setActive(name)
@@ -690,11 +595,7 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
         end)
     end
     setActive(initial)
-
-    return {
-        Set = function(v) current = v; setActive(v); if onChange then onChange(v) end end,
-        Get = function() return current end,
-    }
+    return { Set = function(v) current=v; setActive(v); if onChange then onChange(v) end end, Get = function() return current end }
 end
 
 local function createSlider(parent, order, label, minV, maxV, initial, isFloat, onChange)
@@ -705,7 +606,6 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
-
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -70, 0, 16)
     lbl.Position = UDim2.new(0, 12, 0, 4)
@@ -716,7 +616,6 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     lbl.TextColor3 = TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
-
     local valLbl = Instance.new("TextLabel")
     valLbl.Size = UDim2.new(0, 60, 0, 16)
     valLbl.Position = UDim2.new(1, -72, 0, 4)
@@ -727,7 +626,6 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     valLbl.TextColor3 = Theme.Accent
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = row
-
     local bar = Instance.new("Frame")
     bar.Size = UDim2.new(1, -24, 0, 6)
     bar.Position = UDim2.new(0, 12, 0, 28)
@@ -735,14 +633,12 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     bar.BorderSizePixel = 0
     bar.Parent = row
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
-
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((initial - minV) / (maxV - minV), 0, 1, 0)
     fill.BackgroundColor3 = Theme.Accent
     fill.BorderSizePixel = 0
     fill.Parent = bar
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
-
     local knob = Instance.new("Frame")
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Size = UDim2.new(0, 12, 0, 12)
@@ -751,70 +647,48 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     knob.BorderSizePixel = 0
     knob.Parent = bar
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
     local click = Instance.new("TextButton")
     click.Size = UDim2.new(1, 0, 1, 0)
     click.BackgroundTransparency = 1
     click.Text = ""
     click.Parent = row
-
     local dragging = false
     local value = initial
-
     local function setFromAbsX(absX)
         local rel = math.clamp((absX - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
         value = minV + rel * (maxV - minV)
         local display
-        if isFloat then
-            display = math.floor(value * 100) / 100
-        else
-            display = math.floor(value + 0.5)
-        end
+        if isFloat then display = math.floor(value * 100) / 100
+        else display = math.floor(value + 0.5) end
         valLbl.Text = tostring(display)
         fill.Size = UDim2.new(rel, 0, 1, 0)
         knob.Position = UDim2.new(rel, 0, 0.5, 0)
         if onChange then onChange(value) end
     end
-
     click.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            setFromAbsX(input.Position.X)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; setFromAbsX(input.Position.X)
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             setFromAbsX(input.Position.X)
         end
     end)
-
     UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
-
-    return {
-        Set = function(v)
-            setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X)
-        end,
-        Get = function() return value end,
-    }
+    return { Set = function(v) setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X) end, Get = function() return value end }
 end
 
---════════════ Sistema de Transparência ════════════
 local function Transp_AplicarEm(obj)
     if not obj:IsA("GuiObject") then return end
     local bt = obj.BackgroundTransparency
     if bt >= 0.9 then return end
-    if obj:GetAttribute("AKZ_OrigBT") == nil then
-        obj:SetAttribute("AKZ_OrigBT", bt)
-    end
+    if obj:GetAttribute("AKZ_OrigBT") == nil then obj:SetAttribute("AKZ_OrigBT", bt) end
     obj.BackgroundTransparency = math.min(0.88, bt + 0.5)
 end
 
@@ -831,28 +705,14 @@ local function Transp_Aplicar(ativar)
     TranspState.ativo = ativar
     if ativar then
         menuFrame.BackgroundTransparency = 0.4
-        for _, obj in ipairs(menuFrame:GetDescendants()) do
-            Transp_AplicarEm(obj)
-        end
+        for _, obj in ipairs(menuFrame:GetDescendants()) do Transp_AplicarEm(obj) end
     else
         menuFrame.BackgroundTransparency = 0
-        for _, obj in ipairs(menuFrame:GetDescendants()) do
-            Transp_RestaurarEm(obj)
-        end
+        for _, obj in ipairs(menuFrame:GetDescendants()) do Transp_RestaurarEm(obj) end
     end
 end
 
-local function Transp_Reaplicar()
-    if not TranspState.ativo then return end
-    menuFrame.BackgroundTransparency = 0.4
-    for _, obj in ipairs(menuFrame:GetDescendants()) do
-        Transp_AplicarEm(obj)
-    end
-end
-
---════════════ ESP Logic ════════════
 local HL_TAG = "AKZ_HL"
-
 local SKELETON_R15 = {
     {"Head","UpperTorso"}, {"UpperTorso","LowerTorso"},
     {"UpperTorso","LeftUpperArm"}, {"LeftUpperArm","LeftLowerArm"}, {"LeftLowerArm","LeftHand"},
@@ -895,11 +755,9 @@ local function get2DBounds(char)
     local ok = pcall(function() cf, size = char:GetBoundingBox() end)
     if not ok or not cf then return nil end
     size = size + Vector3.new(0, 0.6, 0)
-
     local minX, minY = math.huge, math.huge
     local maxX, maxY = -math.huge, -math.huge
     local any = false
-
     for ix = -0.5, 0.5, 1 do
         for iy = -0.5, 0.5, 1 do
             for iz = -0.5, 0.5, 1 do
@@ -923,11 +781,9 @@ local function updatePlayerESP(player)
     if not char then clearESPForPlayer(player); return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then clearESPForPlayer(player); return end
-
     local color = getRoleColor(player)
     local cache = espCache[player]
     if not cache then cache = { drawings = {} }; espCache[player] = cache end
-
     local querHighlight = Config.Highlight and (Config.HighlightFill or Config.HighlightOutline)
     if querHighlight then
         if not cache.highlight or not cache.highlight.Parent then
@@ -945,7 +801,6 @@ local function updatePlayerESP(player)
     elseif cache.highlight then
         cache.highlight:Destroy(); cache.highlight = nil
     end
-
     local head = char:FindFirstChild("Head")
     if Config.ShowName and head then
         if not cache.billboard or not cache.billboard.Parent then
@@ -972,10 +827,8 @@ local function updatePlayerESP(player)
     elseif cache.billboard then
         cache.billboard:Destroy(); cache.billboard = nil
     end
-
     if hasDrawing then
         local top, bottom = get2DBounds(char)
-
         if Config.Box and top and bottom then
             if not cache.drawings.box then
                 local sq = Drawing.new("Square")
@@ -990,7 +843,6 @@ local function updatePlayerESP(player)
         elseif cache.drawings.box then
             cache.drawings.box.Visible = false
         end
-
         local pairsList = getSkeletonPairs(char)
         cache.drawings.lines = cache.drawings.lines or {}
         if Config.Skeleton then
@@ -1008,15 +860,11 @@ local function updatePlayerESP(player)
                     local sb, ob = Camera:WorldToViewportPoint(b.Position)
                     if oa and ob then
                         ln.From = Vector2.new(sa.X, sa.Y)
-                        ln.To   = Vector2.new(sb.X, sb.Y)
+                        ln.To = Vector2.new(sb.X, sb.Y)
                         ln.Color = color
                         ln.Visible = true
-                    else
-                        ln.Visible = false
-                    end
-                else
-                    ln.Visible = false
-                end
+                    else ln.Visible = false end
+                else ln.Visible = false end
             end
             for i = #pairsList + 1, #cache.drawings.lines do
                 cache.drawings.lines[i].Visible = false
@@ -1024,7 +872,6 @@ local function updatePlayerESP(player)
         else
             for _, l in ipairs(cache.drawings.lines) do l.Visible = false end
         end
-
         if Config.ShowTracer and top and bottom then
             if not cache.drawings.tracer then
                 local t = Drawing.new("Line")
@@ -1033,7 +880,7 @@ local function updatePlayerESP(player)
             end
             local t = cache.drawings.tracer
             t.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-            t.To   = Vector2.new((top.X + bottom.X) / 2, bottom.Y)
+            t.To = Vector2.new((top.X + bottom.X) / 2, bottom.Y)
             t.Color = color
             t.Visible = true
         elseif cache.drawings.tracer then
@@ -1046,16 +893,13 @@ local function clearAllESP()
     for p, _ in pairs(espCache) do clearESPForPlayer(p) end
 end
 
---════════════ Aimbot Logic ════════════
 local function getAimPart(char)
     if not char then return nil end
     if Config.AimbotPart == "Cabeça" then
         return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
     else
-        return char:FindFirstChild("UpperTorso")
-            or char:FindFirstChild("Torso")
-            or char:FindFirstChild("LowerTorso")
-            or char:FindFirstChild("HumanoidRootPart")
+        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+            or char:FindFirstChild("LowerTorso") or char:FindFirstChild("HumanoidRootPart")
     end
 end
 
@@ -1105,35 +949,37 @@ local function lockOn(targetPart)
 end
 
 --════════════ Noclip / Anti-AFK ════════════
-local function Noclip_Set(ativo)
-    NoclipState.Ativo = ativo
-    if ativo then
-        if not NoclipState.Conn then
-            NoclipState.Conn = RunService.Stepped:Connect(function()
-                if not NoclipState.Ativo then return end
-                local char = LocalPlayer.Character
-                if not char then return end
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if not hum or hum.Health <= 0 then return end
-                for _, part in ipairs(char:GetChildren()) do
-                    if part:IsA("BasePart") and part.CanCollide then
-                        part.CanCollide = false
-                    end
-                end
-            end)
-        end
-    else
-        if NoclipState.Conn then
-            NoclipState.Conn:Disconnect()
-            NoclipState.Conn = nil
-        end
+local function Noclip_Start(force)
+    if force then NoclipState.ForceState = true end
+    if NoclipState.Conn then return end
+    NoclipState.Ativo = true
+    NoclipState.Conn = RunService.Stepped:Connect(function()
+        if not NoclipState.Ativo then return end
         local char = LocalPlayer.Character
-        if char then
-            for _, part in ipairs(char:GetChildren()) do
-                if part:IsA("BasePart") then part.CanCollide = true end
-            end
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+        end
+    end)
+end
+
+local function Noclip_Stop(force)
+    if force then NoclipState.ForceState = false end
+    if NoclipState.ForceState then return end
+    NoclipState.Ativo = false
+    if NoclipState.Conn then NoclipState.Conn:Disconnect(); NoclipState.Conn = nil end
+    local char = LocalPlayer.Character
+    if char then
+        for _, part in ipairs(char:GetChildren()) do
+            if part:IsA("BasePart") then part.CanCollide = true end
         end
     end
+end
+
+local function Noclip_Set(ativo)
+    if ativo then Noclip_Start(false) else Noclip_Stop(false) end
 end
 
 local function AntiAFK_Set(ativo)
@@ -1152,7 +998,7 @@ local function AntiAFK_Set(ativo)
     end
 end
 
---════════════ Farm Teleporte ════════════
+--════════════ Farm Teleporte (ANTI-KICK v2) ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1185,16 +1031,37 @@ local function Farm_ListarMoedas()
     return lista
 end
 
-local function Farm_TeleportarAcima(pos)
+-- 🔥 Teleporta em passos pequenos — engana o anti-cheat
+local function Farm_MoverPara(destinoPos)
     local char = LocalPlayer.Character
     if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health <= 0 then return false end
-    local acima = pos + Vector3.new(0, FARM_TELEPORT_Y_OFFSET, 0)
-    pcall(function() char:PivotTo(CFrame.new(acima)) end)
-    return true
+    if not hum or hum.Health <= 0 then return false end
+
+    local MAX_ITER = 120
+    for i = 1, MAX_ITER do
+        hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return false end
+        hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return false end
+
+        local atual = hrp.Position
+        local diff = destinoPos - atual
+        local dist = diff.Magnitude
+
+        if dist <= FARM_TELEPORT_STEP then
+            pcall(function() char:PivotTo(CFrame.new(destinoPos)) end)
+            return true
+        end
+
+        local passo = diff.Unit * FARM_TELEPORT_STEP
+        local novaPos = atual + passo
+        pcall(function() char:PivotTo(CFrame.new(novaPos)) end)
+        task.wait(FARM_TELEPORT_STEP_WAIT)
+    end
+    return false
 end
 
 local function Farm_DispararTouch(coin)
@@ -1213,17 +1080,29 @@ end
 local function Farm_ColetarMoeda(coin)
     if not coin or not coin.Parent then return false end
     if coin:GetAttribute("Collected") == true then return false end
-    if not Farm_TeleportarAcima(coin.Position) then return false end
+
+    -- destino: acima da moeda + offset aleatório pequeno (anti-padrão)
+    local offset = Vector3.new(
+        (math.random() - 0.5) * 2,
+        FARM_TELEPORT_Y_OFFSET,
+        (math.random() - 0.5) * 2
+    )
+    local destino = coin.Position + offset
+
+    if not Farm_MoverPara(destino) then return false end
+
     task.wait(FARM_FALL_TIME)
     Farm_DispararTouch(coin)
+
     local inicio = os.clock()
     while os.clock() - inicio < FARM_VERIFY_TIMEOUT do
         if not coin or not coin.Parent then return true end
         if coin:GetAttribute("Collected") == true then return true end
         task.wait(0.05)
     end
+
     Farm_DispararTouch(coin)
-    task.wait(0.2)
+    task.wait(0.25)
     if not coin or not coin.Parent then return true end
     if coin:GetAttribute("Collected") == true then return true end
     return false
@@ -1232,6 +1111,7 @@ end
 local function Farm_Parar()
     Farm.Ativo = false
     Farm.Rodando = false
+    Noclip_Stop(true)
 end
 
 local function Farm_Iniciar()
@@ -1239,6 +1119,9 @@ local function Farm_Iniciar()
     Farm.Rodando = true
     Farm.Ativo = true
     Farm.Coletadas = 0
+
+    -- ⚡ noclip ligado durante o teleporte (evita ser jogado pra fora por colisão)
+    Noclip_Start(true)
 
     local char = LocalPlayer.Character
     if char then
@@ -1285,21 +1168,11 @@ local function Farm_Iniciar()
             task.wait(0.1)
         end
         Farm.Rodando = false
+        Noclip_Stop(true)
     end)
 end
 
 --════════════ Farm Físico ════════════
-local function FF_UpdateParts()
-    FF.CharacterParts = {}
-    local char = LocalPlayer.Character
-    if not char then return end
-    for _, part in ipairs(char:GetChildren()) do
-        if part:IsA("BasePart") then
-            table.insert(FF.CharacterParts, part)
-        end
-    end
-end
-
 local function FF_CleanupConns()
     if FarmFisico.HeartbeatConn then FarmFisico.HeartbeatConn:Disconnect(); FarmFisico.HeartbeatConn = nil end
     if FarmFisico.ConnAdded then FarmFisico.ConnAdded:Disconnect(); FarmFisico.ConnAdded = nil end
@@ -1323,14 +1196,12 @@ end
 local function FF_SetupVel()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-
     FarmFisico.Attachment = root:FindFirstChild("FarmAttachment")
     if not FarmFisico.Attachment then
         FarmFisico.Attachment = Instance.new("Attachment")
         FarmFisico.Attachment.Name = "FarmAttachment"
         FarmFisico.Attachment.Parent = root
     end
-
     FarmFisico.LinearVelocity = root:FindFirstChild("FarmLinearVelocity")
     if not FarmFisico.LinearVelocity then
         FarmFisico.LinearVelocity = Instance.new("LinearVelocity")
@@ -1362,7 +1233,7 @@ local function FF_CheckBagFull()
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
     if not pg then return false end
     for _, gui in ipairs(pg:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Name ~= "AKZ_Menu_MM2" then
+        if gui:IsA("ScreenGui") and gui.Name ~= "AKZ_Menu_MM2" and gui.Name ~= "AKZ_Toast" then
             local container = gui:FindFirstChild("Container", true)
             if container then
                 for _, frame in ipairs(container:GetChildren()) do
@@ -1387,10 +1258,8 @@ local function FF_TriggerBagFullReset()
     task.wait(0.2)
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then
-        hum.Health = 0
-    end
-    showToast("🎒 BOLSA CHEIA", "Resetando personagem pra continuar", WARN_CLR)
+    if hum and hum.Health > 0 then hum.Health = 0 end
+    showToast("🎒 BOLSA CHEIA", "Resetando personagem", WARN_CLR)
 end
 
 local function FF_InitListeners()
@@ -1398,22 +1267,18 @@ local function FF_InitListeners()
     for _, v in ipairs(workspace:GetDescendants()) do
         if FF_IsCoin(v) then FarmFisico.ActiveCoins[v] = true end
     end
-
     FarmFisico.ConnAdded = workspace.DescendantAdded:Connect(function(part)
         if FF_IsCoin(part) then FarmFisico.ActiveCoins[part] = true end
     end)
-
     FarmFisico.ConnRemoved = workspace.DescendantRemoving:Connect(function(part)
         FarmFisico.ActiveCoins[part] = nil
         if FarmFisico.CurrentTarget == part then FarmFisico.CurrentTarget = nil end
     end)
-
     local remotes = ReplicatedStorage:FindFirstChild("Remotes")
     local gameplay = remotes and remotes:FindFirstChild("Gameplay")
     if gameplay then
         local coinsStarted = gameplay:FindFirstChild("CoinsStarted")
         local coinCollected = gameplay:FindFirstChild("CoinCollected")
-
         if coinsStarted then
             FarmFisico.ConnStarted = coinsStarted.OnClientEvent:Connect(function()
                 FarmFisico.WaitingForCoins = true
@@ -1423,23 +1288,18 @@ local function FF_InitListeners()
                 FarmFisico.Blacklist = {}
                 FarmFisico.NoCoinsStart = nil
                 FarmFisico.BagFull = false
-
                 task.wait(FF.RoundStartDelay)
-
                 for _, v in ipairs(workspace:GetDescendants()) do
                     if FF_IsCoin(v) then FarmFisico.ActiveCoins[v] = true end
                 end
                 FarmFisico.WaitingForCoins = false
             end)
         end
-
         if coinCollected then
-            FarmFisico.ConnCollected = coinCollected.OnClientEvent:Connect(function(_, currentAmount, maxAmount)
-                local cur = tonumber(currentAmount)
-                local mx  = tonumber(maxAmount)
-                if cur and mx and cur >= mx then
-                    FF_TriggerBagFullReset()
-                end
+            FarmFisico.ConnCollected = coinCollected.OnClientEvent:Connect(function(_, cur, mx)
+                local c = tonumber(cur)
+                local m = tonumber(mx)
+                if c and m and c >= m then FF_TriggerBagFullReset() end
             end)
         end
     end
@@ -1447,22 +1307,18 @@ end
 
 local function FF_StartTargetFinder()
     if FarmFisico.TargetFinderThr then task.cancel(FarmFisico.TargetFinderThr) end
-
     FarmFisico.TargetFinderThr = task.spawn(function()
         while FarmFisico.Loaded do
             task.wait(0.1)
-
             if FarmFisico.Ativo and not FarmFisico.BagFull and FF_CheckBagFull() then
                 FF_TriggerBagFullReset()
             end
-
             if FarmFisico.Ativo and not FarmFisico.BagFull and not FarmFisico.WaitingForCoins then
                 local char = LocalPlayer.Character
                 local root = char and char:FindFirstChild("HumanoidRootPart")
                 if root then
                     local rootPos = root.Position
                     local nearest, nearestDist = nil, FF.MaxDist + 1
-
                     for coin in pairs(FarmFisico.ActiveCoins) do
                         if coin and coin.Parent and not FarmFisico.Blacklist[coin] then
                             local dist = (coin.Position - rootPos).Magnitude
@@ -1474,12 +1330,10 @@ local function FF_StartTargetFinder()
                             FarmFisico.ActiveCoins[coin] = nil
                         end
                     end
-
                     if nearest and not nearest:FindFirstChild("CoinVisual") then
                         FarmFisico.ActiveCoins[nearest] = nil
                         nearest = nil
                     end
-
                     FarmFisico.CurrentTarget = nearest
                 end
             end
@@ -1487,42 +1341,68 @@ local function FF_StartTargetFinder()
     end)
 end
 
+local function FF_CheckStuck(root, targetPos, now)
+    if not FarmFisico.LastPos then
+        FarmFisico.LastPos = root.Position
+        FarmFisico.StuckTime = now
+        return
+    end
+    local moved = (root.Position - FarmFisico.LastPos).Magnitude
+    if moved < 0.5 then
+        if now - FarmFisico.StuckTime >= FF.StuckThreshold then
+            local myPos = root.Position
+            local dir = (targetPos - myPos)
+            dir = Vector3.new(dir.X, 0, dir.Z)
+            if dir.Magnitude > 0.1 then
+                local step = dir.Unit * math.min(FF.UnstickStep, dir.Magnitude)
+                local newPos = myPos + step + Vector3.new(0, 1, 0)
+                pcall(function() LocalPlayer.Character:PivotTo(CFrame.new(newPos)) end)
+            end
+            FarmFisico.StuckTime = now
+            FarmFisico.LastPos = root.Position
+        end
+    else
+        FarmFisico.LastPos = root.Position
+        FarmFisico.StuckTime = now
+    end
+end
+
 local function FF_StartEngine()
     FF_CleanupConns()
     FF_SetupVel()
     FF_InitListeners()
     FarmFisico.NoCoinsStart = nil
-
+    FarmFisico.LastPos = nil
+    FarmFisico.StuckTime = os.clock()
     FarmFisico.HeartbeatConn = RunService.Heartbeat:Connect(function()
         if not FarmFisico.Ativo or FarmFisico.BagFull or FarmFisico.WaitingForCoins then
             FF_StopMovement()
             return
         end
-
         local char = LocalPlayer.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
         if not root or not root.Parent or not hum or hum.Health <= 0 then
             FF_StopMovement()
             return
         end
-
         if FarmFisico.CurrentTarget and FarmFisico.CurrentTarget.Parent
            and not FarmFisico.Blacklist[FarmFisico.CurrentTarget] then
             FarmFisico.NoCoinsStart = nil
             local targetPos = FarmFisico.CurrentTarget.Position
             local rootPos = root.Position
             local dist = (targetPos - rootPos).Magnitude
-
-            if dist <= 1.2 then
-                root.CFrame = CFrame.new(targetPos)
+            if dist <= 2.0 then
+                root.CFrame = CFrame.new(targetPos + Vector3.new(0, 1, 0))
                 FF_StopMovement()
                 FarmFisico.CollectedLife = true
                 FarmFisico.Blacklist[FarmFisico.CurrentTarget] = true
                 FarmFisico.ActiveCoins[FarmFisico.CurrentTarget] = nil
                 FarmFisico.CurrentTarget = nil
                 FarmFisico.Coletadas = FarmFisico.Coletadas + 1
+                FarmFisico.LastPos = nil
             else
+                FF_CheckStuck(root, targetPos, os.clock())
                 if FarmFisico.LinearVelocity then
                     FarmFisico.LinearVelocity.Enabled = true
                     FarmFisico.LinearVelocity.VectorVelocity = (targetPos - rootPos).Unit * FF.TargetSpeed
@@ -1530,7 +1410,7 @@ local function FF_StartEngine()
             end
         else
             FF_StopMovement()
-
+            FarmFisico.LastPos = nil
             if FarmFisico.CollectedLife then
                 if not FarmFisico.NoCoinsStart then
                     FarmFisico.NoCoinsStart = os.clock()
@@ -1552,6 +1432,8 @@ local function FarmFisico_Parar()
     FarmFisico.BagFull = false
     FarmFisico.WaitingForCoins = false
     FarmFisico.CollectedLife = false
+    FarmFisico.LastPos = nil
+    FarmFisico.StuckTime = 0
     FF_CleanupConns()
     FF_StopMovement()
     FF_RemoveVel()
@@ -1559,6 +1441,7 @@ local function FarmFisico_Parar()
         task.cancel(FarmFisico.TargetFinderThr)
         FarmFisico.TargetFinderThr = nil
     end
+    Noclip_Stop(true)
 end
 
 local function FarmFisico_Iniciar()
@@ -1566,12 +1449,15 @@ local function FarmFisico_Iniciar()
     FarmFisico.Loaded = true
     FarmFisico.Coletadas = 0
     FarmFisico.BagFull = false
+    FarmFisico.LastPos = nil
+    FarmFisico.StuckTime = os.clock()
+    Noclip_Start(true)
     FF_StartTargetFinder()
     FF_StartEngine()
-    showToast("🌾 FARM FÍSICO", "Coletando moedas por física", SUCCESS_CLR)
+    showToast("🌾 FARM FÍSICO", "Noclip ativado (não trava em paredes)", SUCCESS_CLR)
 end
 
---════════════ GunDrop Logic ════════════
+--════════════ GunDrop ════════════
 local GunDrop = GunDropConfig
 
 local function ehGun(obj)
@@ -1592,9 +1478,8 @@ local function ehGun(obj)
         match = checkKeyword(obj.Parent.Name, GUN_KEYWORDS)
     end
     if not match then return false end
-    local temTouch = obj:FindFirstChildOfClass("TouchTransmitter") ~= nil
-                  or obj:FindFirstChild("TouchInterest") ~= nil
-    return temTouch
+    return obj:FindFirstChildOfClass("TouchTransmitter") ~= nil
+        or obj:FindFirstChild("TouchInterest") ~= nil
 end
 
 local function IrParaGun(target)
@@ -1612,20 +1497,15 @@ local function GunDrop_Processar(obj)
     if not obj or not obj.Parent then return end
     if GunDrop.ObjetosVistos[obj] then return end
     if not ehGun(obj) then return end
-
     GunDrop.ObjetosVistos[obj] = true
     GunDrop.Total = GunDrop.Total + 1
     GunDrop.UltimaGun = obj
     GunDrop.ObjetosMonitorados[obj] = true
-
     local agora = tick()
     local debounce = (agora - GunDrop.UltimoAviso) < 1.5
     GunDrop.UltimoAviso = agora
-
     if GunDrop.ESPAtivo then
-        if GunDrop.HighlightAtual then
-            pcall(function() GunDrop.HighlightAtual:Destroy() end)
-        end
+        if GunDrop.HighlightAtual then pcall(function() GunDrop.HighlightAtual:Destroy() end) end
         local hl = Instance.new("Highlight")
         hl.Name = "AKZ_GunDrop_HL"
         hl.Adornee = obj
@@ -1637,16 +1517,13 @@ local function GunDrop_Processar(obj)
         hl.Parent = obj
         GunDrop.HighlightAtual = hl
     end
-
     if GunDrop.AvisoDrop and not debounce then
         showToast("🔫 ARMA DROPADA", obj.Name .. " caiu no mapa!", WARN_CLR)
     end
-
     if GunDrop.TpGun and not debounce then
         task.wait(0.15)
         if obj and obj.Parent then IrParaGun(obj) end
     end
-
     local conn
     conn = obj.Destroying:Connect(function()
         if GunDrop.HighlightAtual and GunDrop.HighlightAtual.Adornee == obj then
@@ -1659,7 +1536,6 @@ local function GunDrop_Processar(obj)
         GunDrop.ObjetosMonitorados[obj] = nil
         if conn then conn:Disconnect() end
     end)
-
     if GunDrop_CountLbl and GunDrop_CountLbl.Parent then
         GunDrop_CountLbl.Text = "Detectadas: " .. GunDrop.Total
         GunDrop_CountLbl.TextColor3 = WARN_CLR
@@ -1679,20 +1555,18 @@ local function GunDrop_VarrerAgora()
     end
 end
 
---════════════ Auto Kill Logic ════════════
+--════════════ Auto Kill ════════════
 local function getMyKnife()
     local char = LocalPlayer.Character
     if not char then return nil end
     local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-
-    local function findIn(container)
-        if not container then return nil end
-        for _, o in ipairs(container:GetChildren()) do
+    local function findIn(c)
+        if not c then return nil end
+        for _, o in ipairs(c:GetChildren()) do
             if o:IsA("Tool") and checkKeyword(o.Name, KNIFE_KEYWORDS) then return o end
         end
         return nil
     end
-
     return findIn(char) or findIn(bp)
 end
 
@@ -1716,23 +1590,18 @@ local function killPlayer(target)
     if not targetChar then return false end
     local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return false end
-
     local pos = targetHRP.Position + Vector3.new(2.5, 0, 2.5)
     pcall(function() char:PivotTo(CFrame.new(pos)) end)
     task.wait(0.35)
-
     local knife = getMyKnife()
     if not knife then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
-
     if knife.Parent ~= char then
         pcall(function() hum:EquipTool(knife) end)
         task.wait(0.15)
     end
-
     pcall(function() knife:Activate() end)
-
     if firetouchinterest then
         local handle = knife:FindFirstChild("Handle")
         if handle then
@@ -1742,16 +1611,12 @@ local function killPlayer(target)
             end)
         end
     end
-
     task.wait(0.2)
     return true
 end
 
 local function applyMurderESP(target)
-    if MurderESP_Highlight then
-        pcall(function() MurderESP_Highlight:Destroy() end)
-        MurderESP_Highlight = nil
-    end
+    if MurderESP_Highlight then pcall(function() MurderESP_Highlight:Destroy() end) MurderESP_Highlight = nil end
     if not target or not target.Character then return end
     local hl = Instance.new("Highlight")
     hl.Name = "AKZ_MurderESP"
@@ -1767,10 +1632,7 @@ local function applyMurderESP(target)
 end
 
 local function clearMurderESP()
-    if MurderESP_Highlight then
-        pcall(function() MurderESP_Highlight:Destroy() end)
-        MurderESP_Highlight = nil
-    end
+    if MurderESP_Highlight then pcall(function() MurderESP_Highlight:Destroy() end) MurderESP_Highlight = nil end
     MurderESP_Target = nil
 end
 
@@ -1784,12 +1646,10 @@ local function AutoKill_Iniciar()
     if AutoKillConfig.Rodando then return end
     AutoKillConfig.Rodando = true
     AutoKillConfig.Ativo = true
-
     task.spawn(function()
         while AutoKillConfig.Ativo do
             local char = LocalPlayer.Character
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-
             if not char or not hum or hum.Health <= 0 then
                 task.wait(0.5)
             else
@@ -1806,11 +1666,8 @@ local function AutoKill_Iniciar()
                             if myHRP then
                                 local diff = myHRP.Position - mHRP.Position
                                 local flat = Vector3.new(diff.X, 0, diff.Z)
-                                if flat.Magnitude < 1 then
-                                    flat = Vector3.new(AutoKillConfig.Distancia, 0, 0)
-                                else
-                                    flat = flat.Unit * AutoKillConfig.Distancia
-                                end
+                                if flat.Magnitude < 1 then flat = Vector3.new(AutoKillConfig.Distancia, 0, 0)
+                                else flat = flat.Unit * AutoKillConfig.Distancia end
                                 local safePos = mHRP.Position + flat + Vector3.new(0, 3, 0)
                                 pcall(function() char:PivotTo(CFrame.new(safePos)) end)
                             end
@@ -1844,18 +1701,14 @@ local function AutoKill_Iniciar()
                                 end
                             end
                         end
-
-                        if #targets == 0 then
-                            task.wait(0.5)
+                        if #targets == 0 then task.wait(0.5)
                         else
                             for _, t in ipairs(targets) do
                                 if not AutoKillConfig.Ativo then break end
                                 if t and t.Character then
                                     local tHum = t.Character:FindFirstChildOfClass("Humanoid")
                                     if tHum and tHum.Health > 0 then
-                                        if killPlayer(t) then
-                                            AutoKillConfig.Kills = AutoKillConfig.Kills + 1
-                                        end
+                                        if killPlayer(t) then AutoKillConfig.Kills = AutoKillConfig.Kills + 1 end
                                     end
                                 end
                                 task.wait(1)
@@ -1870,41 +1723,27 @@ local function AutoKill_Iniciar()
     end)
 end
 
---═══════════════════════════════════════════════════════════════
---  APLICADOR DE TEMA
---═══════════════════════════════════════════════════════════════
+--════════════ Tema ════════════
 local function applyTheme(newColor)
     local oldAccent = Theme.Accent
-    Theme.Accent    = newColor
+    Theme.Accent = newColor
     Theme.AccentDim = newColor:Lerp(Color3.new(0,0,0), 0.35)
-
     local function swap(root)
         for _, d in ipairs(root:GetDescendants()) do
+            pcall(function() if d.BackgroundColor3 == oldAccent then d.BackgroundColor3 = newColor end end)
+            pcall(function() if d.TextColor3 == oldAccent then d.TextColor3 = newColor end end)
+            pcall(function() if d:IsA("UIStroke") and d.Color == oldAccent then d.Color = newColor end end)
             pcall(function()
-                if d.BackgroundColor3 == oldAccent then d.BackgroundColor3 = newColor end
-            end)
-            pcall(function()
-                if d.TextColor3 == oldAccent then d.TextColor3 = newColor end
-            end)
-            pcall(function()
-                if d:IsA("UIStroke") and d.Color == oldAccent then d.Color = newColor end
-            end)
-            pcall(function()
-                if d:IsA("ScrollingFrame") and d.ScrollBarImageColor3 == oldAccent then
-                    d.ScrollBarImageColor3 = newColor
-                end
+                if d:IsA("ScrollingFrame") and d.ScrollBarImageColor3 == oldAccent then d.ScrollBarImageColor3 = newColor end
             end)
         end
     end
-
     swap(menuFrame)
     swap(logo)
     pcall(function() if logoStroke.Color == oldAccent then logoStroke.Color = newColor end end)
 end
 
---═══════════════════════════════════════════════════════════════
---  ABA: PRINCIPAL
---═══════════════════════════════════════════════════════════════
+--════════════ ABA PRINCIPAL ════════════
 local principalTab = createTab("Principal")
 local principalContent = principalTab.content
 
@@ -1929,13 +1768,11 @@ local function infoRow(parent, order, texto, cor)
 end
 
 local executorNome = "Desconhecido"
-pcall(function()
-    if identifyexecutor then executorNome = identifyexecutor() end
-end)
+pcall(function() if identifyexecutor then executorNome = identifyexecutor() end end)
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.3", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.5", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -1996,25 +1833,25 @@ corGridLayout.CellPadding = UDim2.new(0, 6, 0, 6)
 corGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local PRESETS = {
-    {nome="Branco",       cor=Color3.fromRGB(240, 240, 245)},
-    {nome="Verde",        cor=Color3.fromRGB(80, 220, 120)},
-    {nome="Vermelho",     cor=Color3.fromRGB(230, 70, 70)},
-    {nome="Azul",         cor=Color3.fromRGB(80, 150, 255)},
-    {nome="Roxo",         cor=Color3.fromRGB(170, 100, 255)},
-    {nome="Amarelo",      cor=Color3.fromRGB(255, 210, 70)},
-    {nome="Rosa",         cor=Color3.fromRGB(255, 105, 180)},
-    {nome="Ciano",        cor=Color3.fromRGB(60, 220, 220)},
-    {nome="Laranja",      cor=Color3.fromRGB(255, 140, 60)},
-    {nome="Vinho",        cor=Color3.fromRGB(180, 60, 90)},
-    {nome="Verde-água",   cor=Color3.fromRGB(60, 180, 160)},
-    {nome="Cinza",        cor=Color3.fromRGB(160, 160, 175)},
+    {nome="Branco", cor=Color3.fromRGB(240, 240, 245)},
+    {nome="Verde", cor=Color3.fromRGB(80, 220, 120)},
+    {nome="Vermelho", cor=Color3.fromRGB(230, 70, 70)},
+    {nome="Azul", cor=Color3.fromRGB(80, 150, 255)},
+    {nome="Roxo", cor=Color3.fromRGB(170, 100, 255)},
+    {nome="Amarelo", cor=Color3.fromRGB(255, 210, 70)},
+    {nome="Rosa", cor=Color3.fromRGB(255, 105, 180)},
+    {nome="Ciano", cor=Color3.fromRGB(60, 220, 220)},
+    {nome="Laranja", cor=Color3.fromRGB(255, 140, 60)},
+    {nome="Vinho", cor=Color3.fromRGB(180, 60, 90)},
+    {nome="Verde-água", cor=Color3.fromRGB(60, 180, 160)},
+    {nome="Cinza", cor=Color3.fromRGB(160, 160, 175)},
 }
 
 local corRefs = {}
 local function setActiveColorBorder(ativo)
     for _, r in ipairs(corRefs) do
         r.stroke.Transparency = (r.color == ativo) and 0 or 0.7
-        r.stroke.Thickness   = (r.color == ativo) and 2 or 1
+        r.stroke.Thickness = (r.color == ativo) and 2 or 1
     end
 end
 
@@ -2032,7 +1869,6 @@ for i, preset in ipairs(PRESETS) do
     st.Thickness = 1
     st.Transparency = 0.7
     corRefs[#corRefs+1] = {color = preset.cor, stroke = st}
-
     b.MouseButton1Click:Connect(function()
         applyTheme(preset.cor)
         setActiveColorBorder(preset.cor)
@@ -2040,7 +1876,7 @@ for i, preset in ipairs(PRESETS) do
 end
 setActiveColorBorder(Theme.Accent)
 
---════════════ ABA: ESP ════════════
+--════════════ ABA ESP ════════════
 local espTab = createTab("ESP")
 local espContent = espTab.content
 
@@ -2049,70 +1885,48 @@ createToggle(espContent, 2, "ESP Ativado", Config.ESPEnabled, function(v)
     Config.ESPEnabled = v
     if not v then clearAllESP() end
 end)
-
 createSection(espContent, 3, "HIGHLIGHT")
 createToggle(espContent, 4, "Ativar Highlight", Config.Highlight, function(v) Config.Highlight = v end)
-createToggle(espContent, 5, "Preenchimento",     Config.HighlightFill, function(v) Config.HighlightFill = v end)
-createToggle(espContent, 6, "Contorno",          Config.HighlightOutline, function(v) Config.HighlightOutline = v end)
-
+createToggle(espContent, 5, "Preenchimento", Config.HighlightFill, function(v) Config.HighlightFill = v end)
+createToggle(espContent, 6, "Contorno", Config.HighlightOutline, function(v) Config.HighlightOutline = v end)
 createSection(espContent, 7, "FORMAS")
-createToggle(espContent, 8, "Box",      Config.Box,      function(v) Config.Box = v end)
+createToggle(espContent, 8, "Box", Config.Box, function(v) Config.Box = v end)
 createToggle(espContent, 9, "Skeleton", Config.Skeleton, function(v) Config.Skeleton = v end)
-
 createSection(espContent, 10, "EXTRAS")
-createToggle(espContent, 11, "Nome",   Config.ShowName,   function(v) Config.ShowName = v end)
+createToggle(espContent, 11, "Nome", Config.ShowName, function(v) Config.ShowName = v end)
 createToggle(espContent, 12, "Tracer", Config.ShowTracer, function(v) Config.ShowTracer = v end)
 
---════════════ ABA: AIMBOT ════════════
+--════════════ ABA AIMBOT ════════════
 local aimTab = createTab("Aimbot")
 local aimContent = aimTab.content
 
 createSection(aimContent, 1, "AIMBOT")
 createToggle(aimContent, 2, "Aimbot Ativado", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end)
 createToggle(aimContent, 3, "Mostrar FOV", Config.AimbotShowFOV, function(v) Config.AimbotShowFOV = v end)
-
 createSection(aimContent, 4, "ALVO")
-createOptionRow(aimContent, 5, "Parte do corpo", {"Cabeça", "Tronco"}, Config.AimbotPart, function(v)
-    Config.AimbotPart = v
-end)
-createOptionRow(aimContent, 6, "Travar em", {"Todos", "Innocent", "Murderer", "Sheriff"}, Config.AimbotTeam, function(v)
-    Config.AimbotTeam = v
-end)
-
+createOptionRow(aimContent, 5, "Parte do corpo", {"Cabeça","Tronco"}, Config.AimbotPart, function(v) Config.AimbotPart = v end)
+createOptionRow(aimContent, 6, "Travar em", {"Todos","Innocent","Murderer","Sheriff"}, Config.AimbotTeam, function(v) Config.AimbotTeam = v end)
 createSection(aimContent, 7, "FOV")
-createSlider(aimContent, 8, "Tamanho", 40, 500, Config.AimbotFOV, false, function(v)
-    Config.AimbotFOV = math.floor(v); refreshFov()
-end)
-createSlider(aimContent, 9, "Transparência", 0, 1, Config.AimbotFOVAlpha, true, function(v)
-    Config.AimbotFOVAlpha = v; refreshFov()
-end)
-
+createSlider(aimContent, 8, "Tamanho", 40, 500, Config.AimbotFOV, false, function(v) Config.AimbotFOV = math.floor(v); refreshFov() end)
+createSlider(aimContent, 9, "Transparência", 0, 1, Config.AimbotFOVAlpha, true, function(v) Config.AimbotFOVAlpha = v; refreshFov() end)
 createSection(aimContent, 10, "SUAVIDADE")
-createSlider(aimContent, 11, "Smoothness (0 = snap)", 0, 0.95, Config.AimbotSmooth, true, function(v)
-    Config.AimbotSmooth = v
-end)
+createSlider(aimContent, 11, "Smoothness (0 = snap)", 0, 0.95, Config.AimbotSmooth, true, function(v) Config.AimbotSmooth = v end)
 
---════════════ ABA: FARM ════════════
+--════════════ ABA FARM ════════════
 local farmTab = createTab("Farm")
 local farmContent = farmTab.content
 
 createSection(farmContent, 1, "FARM DE MOEDAS")
 createToggle(farmContent, 2, "Farm Ativado", Farm.Ativo, function(v)
     if v then
-        if FarmConfig.Modo == "Teleporte" then
-            Farm_Iniciar()
-        else
-            FarmFisico_Iniciar()
-        end
+        if FarmConfig.Modo == "Teleporte" then Farm_Iniciar()
+        else FarmFisico_Iniciar() end
     else
         Farm_Parar()
         FarmFisico_Parar()
     end
 end)
-
-createOptionRow(farmContent, 3, "Modo", {"Teleporte", "Físico"}, FarmConfig.Modo, function(v)
-    FarmConfig.Modo = v
-end)
+createOptionRow(farmContent, 3, "Modo", {"Teleporte","Físico"}, FarmConfig.Modo, function(v) FarmConfig.Modo = v end)
 
 createSection(farmContent, 4, "CONTADOR")
 local farmStatusLbl = Instance.new("TextLabel")
@@ -2132,31 +1946,22 @@ Instance.new("UICorner", farmStatusLbl).CornerRadius = UDim.new(0, 8)
 task.spawn(function()
     while farmStatusLbl.Parent do
         task.wait(0.2)
-        local n
-        local ativo
-        if FarmConfig.Modo == "Teleporte" then
-            n = Farm.Coletadas
-            ativo = Farm.Rodando
-        else
-            n = FarmFisico.Coletadas
-            ativo = FarmFisico.Ativo
-        end
+        local n, ativo
+        if FarmConfig.Modo == "Teleporte" then n = Farm.Coletadas; ativo = Farm.Rodando
+        else n = FarmFisico.Coletadas; ativo = FarmFisico.Ativo end
         farmStatusLbl.Text = string.format("Coletadas: %d", n)
         farmStatusLbl.TextColor3 = ativo and Theme.Accent or TEXT_DIM
     end
 end)
 
---════════════ ABA: FUNÇÕES ════════════
+--════════════ ABA FUNÇÕES ════════════
 local funcTab = createTab("Funções")
 local funcContent = funcTab.content
 
--- BLOCO: GUN
 local gunBlock = createBlock(funcContent, 1, "🔫 GUN")
-
 createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
     GunDrop.ESPAtivo = v
-    if v then
-        task.spawn(GunDrop_VarrerAgora)
+    if v then task.spawn(GunDrop_VarrerAgora)
     elseif GunDrop.HighlightAtual then
         pcall(function() GunDrop.HighlightAtual:Destroy() end)
         GunDrop.HighlightAtual = nil
@@ -2179,14 +1984,11 @@ GunDrop_CountLbl.TextXAlignment = Enum.TextXAlignment.Center
 GunDrop_CountLbl.TextYAlignment = Enum.TextYAlignment.Center
 Instance.new("UICorner", GunDrop_CountLbl).CornerRadius = UDim.new(0, 8)
 
--- BLOCO: AUTO KILL
 local autoKillBlock = createBlock(funcContent, 2, "🗡️ AUTO KILL")
-
 createToggle(autoKillBlock, 2, "Auto Kill Ativado", AutoKillConfig.Ativo, function(v)
     if v then AutoKill_Iniciar() else AutoKill_Parar() end
 end)
-
-createOptionRow(autoKillBlock, 3, "Alvo", {"Todos", "Só Sheriff", "Só Murder"}, AutoKillConfig.Alvo, function(v)
+createOptionRow(autoKillBlock, 3, "Alvo", {"Todos","Só Sheriff","Só Murder"}, AutoKillConfig.Alvo, function(v)
     AutoKillConfig.Alvo = v
     if AutoKillConfig.Ativo then
         AutoKill_Parar()
@@ -2226,23 +2028,12 @@ task.spawn(function()
     end
 end)
 
--- BLOCO: UTILITÁRIOS
 local utilBlock = createBlock(funcContent, 3, "⚙️ UTILITÁRIOS")
+createToggle(utilBlock, 2, "Noclip", false, function(v) Noclip_Set(v) end)
+createToggle(utilBlock, 3, "Anti-AFK", false, function(v) AntiAFK_Set(v) end)
 
-createToggle(utilBlock, 2, "Noclip", false, function(v)
-    Noclip_Set(v)
-end)
-
-createToggle(utilBlock, 3, "Anti-AFK", false, function(v)
-    AntiAFK_Set(v)
-end)
-
---═══════════════════════════════════════════════════════════════
---  INICIA COM PRINCIPAL
---═══════════════════════════════════════════════════════════════
 selectTab("Principal")
 
---════════════ Hotkey V ════════════
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if input.KeyCode == Enum.KeyCode.V then
@@ -2251,13 +2042,10 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
---════════════ Loop principal ════════════
 local wasEnabled = false
-
 RunService.RenderStepped:Connect(function(dt)
     local showFov = Config.AimbotEnabled and Config.AimbotShowFOV
-    local centro  = getScreenCenter()
-
+    local centro = getScreenCenter()
     if AimFovDrawing then
         AimFovDrawing.Visible = showFov
         AimFovDrawing.Position = centro
@@ -2266,17 +2054,13 @@ RunService.RenderStepped:Connect(function(dt)
         fovCircle.Visible = showFov
         if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
-
     if not Config.ESPEnabled then
         if wasEnabled then clearAllESP() end
         wasEnabled = false
     else
         wasEnabled = true
-        for _, player in ipairs(Players:GetPlayers()) do
-            updatePlayerESP(player)
-        end
+        for _, player in ipairs(Players:GetPlayers()) do updatePlayerESP(player) end
     end
-
     if Config.AimbotEnabled then
         local target = getAimbotTarget()
         if target then lockOn(target) end
@@ -2288,46 +2072,35 @@ Players.PlayerRemoving:Connect(function(p)
     espCache[p] = nil
 end)
 
---════════════ Abrir / Fechar ════════════
 local menuOpen = false
-
 local function openMenu()
     if menuOpen then return end
     menuOpen = true
     menuFrame.Visible = true
     menuScale.Scale = 0.75
     menuFrame.Position = UDim2.new(0.5, 0, 0.5, 25)
-    TweenService:Create(menuScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1}):Play()
+    TweenService:Create(menuScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale=1}):Play()
     TweenService:Create(menuFrame, TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
         Position = UDim2.new(0.5, 0, 0.5, 0)
     }):Play()
 end
-
 local function closeMenu()
     if not menuOpen then return end
     menuOpen = false
-    TweenService:Create(menuScale, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {Scale = 0.75}):Play()
+    TweenService:Create(menuScale, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {Scale=0.75}):Play()
     local t = TweenService:Create(menuFrame, TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
         Position = UDim2.new(0.5, 0, 0.5, 25)
     })
     t:Play()
-    t.Completed:Connect(function()
-        if not menuOpen then menuFrame.Visible = false end
-    end)
+    t.Completed:Connect(function() if not menuOpen then menuFrame.Visible = false end end)
 end
-
 closeBtn.MouseButton1Click:Connect(closeMenu)
 
---════════════ Drag Logo ════════════
 local logoDragging, logoDragStart, logoStartPos, logoMoved = false, nil, nil, false
-
 logo.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-        logoDragging = true
-        logoMoved = false
-        logoDragStart = input.Position
-        logoStartPos = logo.Position
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        logoDragging = true; logoMoved = false
+        logoDragStart = input.Position; logoStartPos = logo.Position
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 logoDragging = false
@@ -2338,49 +2111,34 @@ logo.InputBegan:Connect(function(input)
         end)
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if not logoDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - logoDragStart
-        if math.abs(delta.X) > 3 or math.abs(delta.Y) > 3 then
-            logoMoved = true
-        end
-        logo.Position = UDim2.new(
-            logoStartPos.X.Scale, logoStartPos.X.Offset + delta.X,
-            logoStartPos.Y.Scale, logoStartPos.Y.Offset + delta.Y
-        )
+        if math.abs(delta.X) > 3 or math.abs(delta.Y) > 3 then logoMoved = true end
+        logo.Position = UDim2.new(logoStartPos.X.Scale, logoStartPos.X.Offset + delta.X,
+            logoStartPos.Y.Scale, logoStartPos.Y.Offset + delta.Y)
     end
 end)
 
---════════════ Drag Menu ════════════
 local menuDragging, menuDragStart, menuStartPos = false, nil, nil
-
 header.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         menuDragging = true
         menuDragStart = input.Position
         menuStartPos = menuFrame.Position
         input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                menuDragging = false
-            end
+            if input.UserInputState == Enum.UserInputState.End then menuDragging = false end
         end)
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if not menuDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-    or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         local delta = input.Position - menuDragStart
-        menuFrame.Position = UDim2.new(
-            menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y
-        )
+        menuFrame.Position = UDim2.new(menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
+            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y)
     end
 end)
 
-print("[AKZ MENU mm2] v9.3 carregado 🔪")
+print("[AKZ MENU mm2] v9.5 carregado 🔪")
