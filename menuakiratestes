@@ -1,7 +1,8 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.7
-   Farm Teleporte anti-void + só cabeça toca + 3 camadas de safety
+   AKZ MENU mm2  —  v9.8
+   Farm Teleporte: LinearVelocity (longe) + PivotTo em passos (perto)
+   Sem enterrar • sem clipar no chão • anti-kick
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -62,12 +63,13 @@ local Config = {
 
 local TranspState = { ativo = false }
 
-local FARM_DELAY_ENTRE_MOEDAS = 0.6
-local FARM_VERIFY_TIMEOUT     = 0.8
-local FARM_TELEPORT_STEP      = 10
-local FARM_TELEPORT_STEP_WAIT = 0.05
-local FARM_HEAD_Y_OFFSET      = 1.5
+local FARM_DELAY_ENTRE_MOEDAS = 1.2
+local FARM_VERIFY_TIMEOUT     = 1.2
+local FARM_PIVOT_STEP         = 8
+local FARM_PIVOT_WAIT         = 0.15
+local FARM_VELOCITY           = 80
 local FARM_VOID_Y             = -50
+local FARM_NEAR_DIST          = 50
 
 local FarmConfig = {
     Ativo=false, Modo="Teleporte", Coletadas=0, PosInicial=nil, Rodando=false,
@@ -997,7 +999,7 @@ local function AntiAFK_Set(ativo)
     end
 end
 
---════════════ Farm Teleporte v3 (anti-void) ════════════
+--════════════ Farm Teleporte v4 (velocidade + pivot leve) ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1030,7 +1032,41 @@ local function Farm_ListarMoedas()
     return lista
 end
 
--- 📏 Teleporta em passos pequenos até chegar perto
+-- Cria/pega Attachment + LinearVelocity do HRP pra usar na fase "longe"
+local function Farm_GarantirVelocity(hrp)
+    local att = hrp:FindFirstChild("FarmAtt")
+    if not att then
+        att = Instance.new("Attachment")
+        att.Name = "FarmAtt"
+        att.Parent = hrp
+    end
+    local lv = hrp:FindFirstChild("FarmLV")
+    if not lv then
+        lv = Instance.new("LinearVelocity")
+        lv.Name = "FarmLV"
+        lv.Attachment0 = att
+        lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+        lv.RelativeTo = Enum.ActuatorRelativeTo.World
+        lv.ForceLimitMode = Enum.ForceLimitMode.PerAxis
+        lv.MaxAxesForce = Vector3.new(100000, 100000, 100000)
+        lv.Parent = hrp
+    end
+    return lv
+end
+
+local function Farm_LimparVelocity(char)
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    local lv = hrp:FindFirstChild("FarmLV")
+    if lv then lv:Destroy() end
+    local att = hrp:FindFirstChild("FarmAtt")
+    if att then att:Destroy() end
+end
+
+-- 📏 Mover pro destino:
+--    - > 50 studs: LinearVelocity a 80 studs/s (física normal → não kicka)
+--    - ≤ 50 studs: PivotTo em passos de 8 studs com 0.15s (bem devagar)
 local function Farm_MoverPara(destinoPos)
     local char = LocalPlayer.Character
     if not char then return false end
@@ -1039,42 +1075,74 @@ local function Farm_MoverPara(destinoPos)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
 
-    -- ⚡ Safety: se o boneco tá no void, sobe primeiro
+    -- safety void
     if hrp.Position.Y < FARM_VOID_Y then
         if Farm.PosInicial then
             pcall(function() char:PivotTo(Farm.PosInicial) end)
-            task.wait(0.2)
+            task.wait(0.3)
             hrp = char:FindFirstChild("HumanoidRootPart")
             if not hrp then return false end
         end
     end
 
-    local MAX_ITER = 150
-    for i = 1, MAX_ITER do
+    -- FASE 1: distância longa → velocidade (não kicka)
+    if (destinoPos - hrp.Position).Magnitude > FARM_NEAR_DIST then
+        local lv = Farm_GarantirVelocity(hrp)
+        lv.Enabled = true
+
+        local inicio = os.clock()
+        while true do
+            local c = LocalPlayer.Character
+            if not c then break end
+            local h = c:FindFirstChild("HumanoidRootPart")
+            if not h then break end
+            if not Farm.Ativo then break end
+            if os.clock() - inicio > 10 then break end  -- timeout 10s
+
+            local cur = h.Position
+            local diff = destinoPos - cur
+            local dist = diff.Magnitude
+            if dist <= FARM_NEAR_DIST then break end
+
+            lv.VectorVelocity = diff.Unit * FARM_VELOCITY
+            task.wait(0.05)
+        end
+
+        lv.VectorVelocity = Vector3.zero
+        lv.Enabled = false
+        task.wait(0.15)
+
         hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
-        hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then return false end
+    end
 
-        local atual = hrp.Position
+    -- FASE 2: últimos 50 studs → PivotTo em passos de 8 (3-6 PivotTo só)
+    local MAX_ITER = 12
+    for i = 1, MAX_ITER do
+        local c = LocalPlayer.Character
+        if not c then return false end
+        local h = c:FindFirstChild("HumanoidRootPart")
+        if not h then return false end
+        local hu = c:FindFirstChildOfClass("Humanoid")
+        if not hu or hu.Health <= 0 then return false end
+
+        local atual = h.Position
         local diff = destinoPos - atual
-        local dist = diff.Magnitude
+        local d = diff.Magnitude
 
-        if dist <= FARM_TELEPORT_STEP then
-            pcall(function() char:PivotTo(CFrame.new(destinoPos)) end)
+        if d <= FARM_PIVOT_STEP then
+            pcall(function() c:PivotTo(CFrame.new(destinoPos)) end)
             return true
         end
 
-        local passo = diff.Unit * FARM_TELEPORT_STEP
-        local novaPos = atual + passo
-        pcall(function() char:PivotTo(CFrame.new(novaPos)) end)
-        task.wait(FARM_TELEPORT_STEP_WAIT + math.random() * 0.02)
+        local passo = diff.Unit * FARM_PIVOT_STEP
+        pcall(function() c:PivotTo(CFrame.new(atual + passo)) end)
+        task.wait(FARM_PIVOT_WAIT + math.random() * 0.03)
     end
     return false
 end
 
--- 🎯 Coleta: corpo embaixo do chão, só a cabeça toca
---    + reposiciona pra cima ANTES de soltar o pin (evita cair no void)
+-- 🎯 Coleta SEM enterrar: teleporta em cima da moeda, deixa cair natural
 local function Farm_ColetarMoeda(coin)
     if not coin or not coin.Parent then return false end
     if coin:GetAttribute("Collected") == true then return false end
@@ -1084,64 +1152,62 @@ local function Farm_ColetarMoeda(coin)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
+    -- destino: LEVEMENTE acima da moeda → o Roblox encaixa o boneco no chão sozinho
     local destino = Vector3.new(
-        coin.Position.X,
-        coin.Position.Y - FARM_HEAD_Y_OFFSET,
-        coin.Position.Z
-    )
-    local safePos = Vector3.new(
-        coin.Position.X,
-        coin.Position.Y + 2,
-        coin.Position.Z
+        coin.Position.X + (math.random() - 0.5) * 0.6,
+        coin.Position.Y + 1,
+        coin.Position.Z + (math.random() - 0.5) * 0.6
     )
 
     if not Farm_MoverPara(destino) then return false end
 
-    local destinoAtual = destino
-    local pinConn
-    pinConn = RunService.RenderStepped:Connect(function()
+    -- deixa cair naturalmente (gravidade puxa pra posição correta)
+    task.wait(0.35)
+
+    -- fixa posição no lugar EXATO por 1.2s
+    local destinoFinal = destino
+    local pinConn = RunService.RenderStepped:Connect(function()
         local c = LocalPlayer.Character
         if not c then return end
         local h = c:FindFirstChild("HumanoidRootPart")
         if not h then return end
-        h.CFrame = CFrame.new(destinoAtual)
+        h.CFrame = CFrame.new(destinoFinal)
         h.AssemblyLinearVelocity = Vector3.zero
         h.AssemblyAngularVelocity = Vector3.zero
     end)
 
+    -- dispara touch em todas as partes do corpo + HRP
+    local partes = {"Head", "HumanoidRootPart", "LeftFoot", "RightFoot", "LeftLeg", "RightLeg"}
     local fim = os.clock() + FARM_VERIFY_TIMEOUT
     local coletou = false
     while os.clock() < fim do
         local c = LocalPlayer.Character
         if not c then break end
-        local h = c:FindFirstChild("Head")
-        if not h then break end
 
         if firetouchinterest then
-            pcall(function()
-                firetouchinterest(h, coin, 0)
-                firetouchinterest(h, coin, 1)
-            end)
+            for _, nome in ipairs(partes) do
+                local parte = c:FindFirstChild(nome)
+                if parte then
+                    pcall(function()
+                        firetouchinterest(parte, coin, 0)
+                        firetouchinterest(parte, coin, 1)
+                    end)
+                end
+            end
         end
 
-        if not coin or not coin.Parent then
-            coletou = true
-            break
-        end
-        if coin:GetAttribute("Collected") == true then
-            coletou = true
-            break
-        end
-        task.wait(0.05)
+        if not coin or not coin.Parent then coletou = true; break end
+        if coin:GetAttribute("Collected") == true then coletou = true; break end
+        task.wait(0.08)
     end
 
-    -- ⚡ Antes de soltar o pin, sobe pra cima do chão
-    destinoAtual = safePos
-    task.wait(0.12)
+    -- ⚡ antes de soltar, sobe pra cima do chão
+    destinoFinal = Vector3.new(destinoFinal.X, coin.Position.Y + 4, destinoFinal.Z)
+    task.wait(0.15)
 
     if pinConn then pinConn:Disconnect(); pinConn = nil end
 
-    -- Safety pós-coleta
+    -- safety pós-coleta
     task.spawn(function()
         task.wait(0.4)
         local c = LocalPlayer.Character
@@ -1161,6 +1227,9 @@ end
 local function Farm_Parar()
     Farm.Ativo = false
     Farm.Rodando = false
+    if LocalPlayer.Character then
+        Farm_LimparVelocity(LocalPlayer.Character)
+    end
     Noclip_Stop(true)
 end
 
@@ -1178,7 +1247,7 @@ local function Farm_Iniciar()
         if hrp then Farm.PosInicial = hrp.CFrame end
     end
 
-    -- ⚡ Watchdog: se cair no void, resgata pro spawn
+    -- watchdog: se cair no void, resgata
     task.spawn(function()
         while Farm.Ativo do
             task.wait(0.5)
@@ -1216,6 +1285,7 @@ local function Farm_Iniciar()
                         break
                     end
                 else
+                    -- ordena por distância
                     local myPos = hrp.Position
                     table.sort(moedas, function(a, b)
                         return (a.Position - myPos).Magnitude < (b.Position - myPos).Magnitude
@@ -1234,6 +1304,7 @@ local function Farm_Iniciar()
             task.wait(0.1)
         end
         Farm.Rodando = false
+        if LocalPlayer.Character then Farm_LimparVelocity(LocalPlayer.Character) end
         Noclip_Stop(true)
     end)
 end
@@ -1838,7 +1909,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.7", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.8", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -2181,19 +2252,4 @@ header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         menuDragging = true
         menuDragStart = input.Position
-        menuStartPos = menuFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then menuDragging = false end
-        end)
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if not menuDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        local delta = input.Position - menuDragStart
-        menuFrame.Position = UDim2.new(menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y)
-    end
-end)
-
-print("[AKZ MENU mm2] v9.7 carregado 🔪")
+        menuStartPos =
