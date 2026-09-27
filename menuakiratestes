@@ -1,7 +1,8 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v1
-   Auto Murder e Pegar Gun agora são botões (ação única)
+   AKZ MENU mm2  —  v1.1
+   + Formato do menu (Em pé / Deitado)
+   + Auto Murder e Pegar Gun como botões
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -51,6 +52,13 @@ local ROLE_COLORS = {
     Sheriff  = Color3.fromRGB(40, 120, 255),
     Innocent = Color3.fromRGB(50, 205, 50),
 }
+
+-- ⚙️ Layouts
+local LAYOUTS = {
+    ["Em pé"]  = UDim2.new(0, 460, 0, 420),
+    ["Deitado"] = UDim2.new(0, 660, 0, 340),
+}
+local CurrentLayout = "Em pé"
 
 local Config = {
     ESPEnabled=false, Highlight=false, HighlightFill=false, HighlightOutline=false,
@@ -304,7 +312,7 @@ end)
 
 local menuFrame = Instance.new("Frame")
 menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-menuFrame.Size = UDim2.new(0, 460, 0, 420)
+menuFrame.Size = LAYOUTS[CurrentLayout]
 menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 menuFrame.BackgroundColor3 = BG
 menuFrame.BorderSizePixel = 0
@@ -681,7 +689,6 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     return { Set = function(v) setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X) end, Get = function() return value end }
 end
 
--- 🎯 BOTÃO (para ação única)
 local function createButton(parent, order, label, onClick)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, 34)
@@ -1684,8 +1691,6 @@ local function IrProMurder()
     if not mChar then return end
     local mHRP = mChar:FindFirstChild("HumanoidRootPart")
     if not mHRP then return end
-
-    -- 12 studs atrás dele (fora do FOV frontal)
     local lookVec = mHRP.CFrame.LookVector
     local flatLook = Vector3.new(lookVec.X, 0, lookVec.Z)
     if flatLook.Magnitude < 0.1 then
@@ -1703,13 +1708,9 @@ local function AcharGunMaisProxima()
     if not char then return nil end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-
-    -- preferência: última gun monitorada se ainda existe
     if GunDrop.UltimaGun and GunDrop.UltimaGun.Parent then
         return GunDrop.UltimaGun
     end
-
-    -- senão, procura a mais próxima no mapa
     local myPos = hrp.Position
     local melhor, melhorDist = nil, math.huge
     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -1735,7 +1736,6 @@ local function PegarGun()
     local pos = gun.Position + Vector3.new(0, 2.5, 0)
     pcall(function() char:PivotTo(CFrame.new(pos)) end)
     task.wait(0.1)
-    -- dispara touch pra pegar
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if hrp and firetouchinterest then
         pcall(function()
@@ -1744,6 +1744,15 @@ local function PegarGun()
         end)
     end
     showToast("PEGAR GUN", "Teleportado pra gun", SUCCESS_CLR)
+end
+
+--════════════ Layout toggle ════════════
+local function setLayout(modo)
+    if not LAYOUTS[modo] then return end
+    CurrentLayout = modo
+    TweenService:Create(menuFrame, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = LAYOUTS[modo]
+    }):Play()
 end
 
 --════════════ Tema ════════════
@@ -1795,7 +1804,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v1", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v1.1", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -1829,7 +1838,14 @@ discordLbl.TextXAlignment = Enum.TextXAlignment.Center
 discordLbl.LayoutOrder = 3
 
 local uiBlock = createBlock(principalContent, 3, "🎨 UI CONFIG")
-createToggle(uiBlock, 2, "Interface Transparente", false, function(v) Transp_Aplicar(v) end)
+
+-- 🆕 Formato do menu
+createOptionRow(uiBlock, 2, "Formato", {"Em pé", "Deitado"}, CurrentLayout, function(v)
+    setLayout(v)
+    showToast("📐 FORMATO", "Menu agora: " .. v, SUCCESS_CLR)
+end)
+
+createToggle(uiBlock, 3, "Interface Transparente", false, function(v) Transp_Aplicar(v) end)
 
 local corLbl = Instance.new("TextLabel", uiBlock)
 corLbl.Size = UDim2.new(1, 0, 0, 18)
@@ -1839,13 +1855,13 @@ corLbl.Font = Enum.Font.GothamMedium
 corLbl.TextSize = 11
 corLbl.TextColor3 = TEXT
 corLbl.TextXAlignment = Enum.TextXAlignment.Left
-corLbl.LayoutOrder = 3
+corLbl.LayoutOrder = 4
 
 local corGrid = Instance.new("Frame", uiBlock)
 corGrid.Size = UDim2.new(1, 0, 0, 0)
 corGrid.AutomaticSize = Enum.AutomaticSize.Y
 corGrid.BackgroundTransparency = 1
-corGrid.LayoutOrder = 4
+corGrid.LayoutOrder = 5
 
 local corGridLayout = Instance.new("UIGridLayout", corGrid)
 corGridLayout.CellSize = UDim2.new(0, 34, 0, 34)
@@ -1971,7 +1987,6 @@ end)
 local funcTab = createTab("Funções")
 local funcContent = funcTab.content
 
--- BLOCO: GUN
 local gunBlock = createBlock(funcContent, 1, "🔫 GUN")
 createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
     GunDrop.ESPAtivo = v
@@ -1997,12 +2012,10 @@ GunDrop_CountLbl.TextXAlignment = Enum.TextXAlignment.Center
 GunDrop_CountLbl.TextYAlignment = Enum.TextYAlignment.Center
 Instance.new("UICorner", GunDrop_CountLbl).CornerRadius = UDim.new(0, 8)
 
--- 🎯 BOTÃO: Pegar Gun
 createButton(gunBlock, 6, "📌  Pegar Gun (teleportar)", function()
     PegarGun()
 end)
 
--- BLOCO: AUTO MURDER
 local murderBlock = createBlock(funcContent, 2, "🗡️ AUTO MURDER")
 
 local murderHint = Instance.new("TextLabel", murderBlock)
@@ -2016,12 +2029,10 @@ murderHint.TextXAlignment = Enum.TextXAlignment.Left
 murderHint.TextWrapped = true
 murderHint.LayoutOrder = 2
 
--- 🎯 BOTÃO: Ir pro Murder
 createButton(murderBlock, 3, "🗡️  Ir pro Murder", function()
     IrProMurder()
 end)
 
--- BLOCO: UTILITÁRIOS
 local utilBlock = createBlock(funcContent, 3, "⚙️ UTILITÁRIOS")
 createToggle(utilBlock, 2, "Noclip", false, function(v) Noclip_Set(v) end)
 createToggle(utilBlock, 3, "Anti-AFK", false, function(v) AntiAFK_Set(v) end)
@@ -2071,6 +2082,7 @@ local function openMenu()
     if menuOpen then return end
     menuOpen = true
     menuFrame.Visible = true
+    menuFrame.Size = LAYOUTS[CurrentLayout]
     menuScale.Scale = 0.75
     menuFrame.Position = UDim2.new(0.5, 0, 0.5, 25)
     TweenService:Create(menuScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale=1}):Play()
@@ -2135,4 +2147,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU mm2] v1 carregado 🔪")
+print("[AKZ MENU mm2] v1.1 carregado 🔪")
