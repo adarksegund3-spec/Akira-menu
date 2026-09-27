@@ -1,8 +1,8 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.2
-   Abas: Principal | ESP | Aimbot | Farm | Funções
-   + Transparência UI • GUN block completo
+   AKZ MENU mm2  —  v9.3
+   Principal | ESP | Aimbot | Farm | Funções
+   + Farm Físico (LinearVelocity) • Noclip • Anti-AFK • Auto Kill
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -11,6 +11,8 @@ local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CoreGui          = game:GetService("CoreGui")
 local TweenService     = game:GetService("TweenService")
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local VirtualUser      = game:GetService("VirtualUser")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera      = workspace.CurrentCamera
@@ -75,7 +77,6 @@ local Config = {
     AimbotSmooth     = 0.15,
 }
 
---════════════ Transparência UI ════════════
 local TranspState = { ativo = false }
 
 --════════════ Farm ════════════
@@ -86,19 +87,53 @@ local FARM_TELEPORT_Y_OFFSET  = 3
 
 local FarmConfig = {
     Ativo       = false,
+    Modo        = "Teleporte",  -- "Teleporte" | "Físico"
     Coletadas   = 0,
     PosInicial  = nil,
     Rodando     = false,
 }
 
+--════════════ Noclip / Anti-AFK ════════════
+local NoclipState  = { Ativo = false, Conn = nil }
+local AntiAFKState = { Ativo = false }
+
+--════════════ Farm Físico ════════════
+local FarmFisico = {
+    Ativo           = false,
+    Loaded          = false,
+    BagFull         = false,
+    WaitingForCoins = false,
+    ActiveCoins     = {},
+    Blacklist       = {},
+    CurrentTarget   = nil,
+    NoCoinsStart    = nil,
+    CollectedLife   = false,
+    LinearVelocity  = nil,
+    Attachment      = nil,
+    HeartbeatConn   = nil,
+    ConnAdded       = nil,
+    ConnRemoved     = nil,
+    ConnStarted     = nil,
+    ConnCollected   = nil,
+    TargetFinderThr = nil,
+    Coletadas       = 0,
+}
+
+local FF = {
+    MaxDist         = 1000,
+    TargetSpeed     = 23,
+    ResetDelay      = 5.0,
+    RoundStartDelay = 1.5,
+}
+
 --════════════ GunDrop Config ════════════
 local GunDropConfig = {
-    ESPAtivo     = false,   -- Highlight na gun
-    AvisoDrop    = false,   -- toast quando dropa
-    AvisoColeta  = false,   -- toast quando alguém pega
-    TpGun        = false,   -- auto-teleport
+    ESPAtivo     = false,
+    AvisoDrop    = false,
+    AvisoColeta  = false,
+    TpGun        = false,
     ObjetosVistos= {},
-    ObjetosMonitorados = {}, -- {obj = true} quando foi visto dropando
+    ObjetosMonitorados = {},
     HighlightAtual = nil,
     UltimaGun    = nil,
     UltimoAviso  = 0,
@@ -1069,7 +1104,55 @@ local function lockOn(targetPart)
     end
 end
 
---════════════ Farm Logic ════════════
+--════════════ Noclip / Anti-AFK ════════════
+local function Noclip_Set(ativo)
+    NoclipState.Ativo = ativo
+    if ativo then
+        if not NoclipState.Conn then
+            NoclipState.Conn = RunService.Stepped:Connect(function()
+                if not NoclipState.Ativo then return end
+                local char = LocalPlayer.Character
+                if not char then return end
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health <= 0 then return end
+                for _, part in ipairs(char:GetChildren()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        part.CanCollide = false
+                    end
+                end
+            end)
+        end
+    else
+        if NoclipState.Conn then
+            NoclipState.Conn:Disconnect()
+            NoclipState.Conn = nil
+        end
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetChildren()) do
+                if part:IsA("BasePart") then part.CanCollide = true end
+            end
+        end
+    end
+end
+
+local function AntiAFK_Set(ativo)
+    AntiAFKState.Ativo = ativo
+    if ativo then
+        task.spawn(function()
+            while AntiAFKState.Ativo do
+                task.wait(30)
+                if not AntiAFKState.Ativo then break end
+                pcall(function()
+                    VirtualUser:CaptureController()
+                    VirtualUser:ClickButton2(Vector2.new())
+                end)
+            end
+        end)
+    end
+end
+
+--════════════ Farm Teleporte ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1205,6 +1288,289 @@ local function Farm_Iniciar()
     end)
 end
 
+--════════════ Farm Físico ════════════
+local function FF_UpdateParts()
+    FF.CharacterParts = {}
+    local char = LocalPlayer.Character
+    if not char then return end
+    for _, part in ipairs(char:GetChildren()) do
+        if part:IsA("BasePart") then
+            table.insert(FF.CharacterParts, part)
+        end
+    end
+end
+
+local function FF_CleanupConns()
+    if FarmFisico.HeartbeatConn then FarmFisico.HeartbeatConn:Disconnect(); FarmFisico.HeartbeatConn = nil end
+    if FarmFisico.ConnAdded then FarmFisico.ConnAdded:Disconnect(); FarmFisico.ConnAdded = nil end
+    if FarmFisico.ConnRemoved then FarmFisico.ConnRemoved:Disconnect(); FarmFisico.ConnRemoved = nil end
+    if FarmFisico.ConnStarted then FarmFisico.ConnStarted:Disconnect(); FarmFisico.ConnStarted = nil end
+    if FarmFisico.ConnCollected then FarmFisico.ConnCollected:Disconnect(); FarmFisico.ConnCollected = nil end
+end
+
+local function FF_StopMovement()
+    if FarmFisico.LinearVelocity then
+        FarmFisico.LinearVelocity.VectorVelocity = Vector3.zero
+        FarmFisico.LinearVelocity.Enabled = false
+    end
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        root.AssemblyLinearVelocity = Vector3.zero
+        root.AssemblyAngularVelocity = Vector3.zero
+    end
+end
+
+local function FF_SetupVel()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    FarmFisico.Attachment = root:FindFirstChild("FarmAttachment")
+    if not FarmFisico.Attachment then
+        FarmFisico.Attachment = Instance.new("Attachment")
+        FarmFisico.Attachment.Name = "FarmAttachment"
+        FarmFisico.Attachment.Parent = root
+    end
+
+    FarmFisico.LinearVelocity = root:FindFirstChild("FarmLinearVelocity")
+    if not FarmFisico.LinearVelocity then
+        FarmFisico.LinearVelocity = Instance.new("LinearVelocity")
+        FarmFisico.LinearVelocity.Name = "FarmLinearVelocity"
+        FarmFisico.LinearVelocity.Attachment0 = FarmFisico.Attachment
+        FarmFisico.LinearVelocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+        FarmFisico.LinearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+        FarmFisico.LinearVelocity.VectorVelocity = Vector3.zero
+        FarmFisico.LinearVelocity.Enabled = false
+        FarmFisico.LinearVelocity.ForceLimitMode = Enum.ForceLimitMode.PerAxis
+        FarmFisico.LinearVelocity.MaxAxesForce = Vector3.new(100000, 100000, 100000)
+        FarmFisico.LinearVelocity.Parent = root
+    end
+end
+
+local function FF_RemoveVel()
+    if FarmFisico.LinearVelocity then FarmFisico.LinearVelocity:Destroy(); FarmFisico.LinearVelocity = nil end
+    if FarmFisico.Attachment then FarmFisico.Attachment:Destroy(); FarmFisico.Attachment = nil end
+end
+
+local function FF_IsCoin(part)
+    if not part:IsA("BasePart") then return false end
+    if FarmFisico.Blacklist[part] then return false end
+    local n = part.Name:lower()
+    return n:find("coin") or n:find("cash") or n:find("money") or n:find("collect")
+end
+
+local function FF_CheckBagFull()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    for _, gui in ipairs(pg:GetChildren()) do
+        if gui:IsA("ScreenGui") and gui.Name ~= "AKZ_Menu_MM2" then
+            local container = gui:FindFirstChild("Container", true)
+            if container then
+                for _, frame in ipairs(container:GetChildren()) do
+                    if frame:IsA("Frame") and frame.Visible then
+                        local fullIcon = frame:FindFirstChild("FullBagIcon", true)
+                        local fullText = frame:FindFirstChild("Full", true)
+                        if (fullIcon and fullIcon.Visible) or (fullText and fullText.Visible) then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function FF_TriggerBagFullReset()
+    if FarmFisico.BagFull then return end
+    FarmFisico.BagFull = true
+    FF_StopMovement()
+    task.wait(0.2)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 0 then
+        hum.Health = 0
+    end
+    showToast("🎒 BOLSA CHEIA", "Resetando personagem pra continuar", WARN_CLR)
+end
+
+local function FF_InitListeners()
+    FarmFisico.ActiveCoins = {}
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if FF_IsCoin(v) then FarmFisico.ActiveCoins[v] = true end
+    end
+
+    FarmFisico.ConnAdded = workspace.DescendantAdded:Connect(function(part)
+        if FF_IsCoin(part) then FarmFisico.ActiveCoins[part] = true end
+    end)
+
+    FarmFisico.ConnRemoved = workspace.DescendantRemoving:Connect(function(part)
+        FarmFisico.ActiveCoins[part] = nil
+        if FarmFisico.CurrentTarget == part then FarmFisico.CurrentTarget = nil end
+    end)
+
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    local gameplay = remotes and remotes:FindFirstChild("Gameplay")
+    if gameplay then
+        local coinsStarted = gameplay:FindFirstChild("CoinsStarted")
+        local coinCollected = gameplay:FindFirstChild("CoinCollected")
+
+        if coinsStarted then
+            FarmFisico.ConnStarted = coinsStarted.OnClientEvent:Connect(function()
+                FarmFisico.WaitingForCoins = true
+                FF_StopMovement()
+                FarmFisico.CurrentTarget = nil
+                FarmFisico.ActiveCoins = {}
+                FarmFisico.Blacklist = {}
+                FarmFisico.NoCoinsStart = nil
+                FarmFisico.BagFull = false
+
+                task.wait(FF.RoundStartDelay)
+
+                for _, v in ipairs(workspace:GetDescendants()) do
+                    if FF_IsCoin(v) then FarmFisico.ActiveCoins[v] = true end
+                end
+                FarmFisico.WaitingForCoins = false
+            end)
+        end
+
+        if coinCollected then
+            FarmFisico.ConnCollected = coinCollected.OnClientEvent:Connect(function(_, currentAmount, maxAmount)
+                local cur = tonumber(currentAmount)
+                local mx  = tonumber(maxAmount)
+                if cur and mx and cur >= mx then
+                    FF_TriggerBagFullReset()
+                end
+            end)
+        end
+    end
+end
+
+local function FF_StartTargetFinder()
+    if FarmFisico.TargetFinderThr then task.cancel(FarmFisico.TargetFinderThr) end
+
+    FarmFisico.TargetFinderThr = task.spawn(function()
+        while FarmFisico.Loaded do
+            task.wait(0.1)
+
+            if FarmFisico.Ativo and not FarmFisico.BagFull and FF_CheckBagFull() then
+                FF_TriggerBagFullReset()
+            end
+
+            if FarmFisico.Ativo and not FarmFisico.BagFull and not FarmFisico.WaitingForCoins then
+                local char = LocalPlayer.Character
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local rootPos = root.Position
+                    local nearest, nearestDist = nil, FF.MaxDist + 1
+
+                    for coin in pairs(FarmFisico.ActiveCoins) do
+                        if coin and coin.Parent and not FarmFisico.Blacklist[coin] then
+                            local dist = (coin.Position - rootPos).Magnitude
+                            if dist < nearestDist then
+                                nearestDist = dist
+                                nearest = coin
+                            end
+                        else
+                            FarmFisico.ActiveCoins[coin] = nil
+                        end
+                    end
+
+                    if nearest and not nearest:FindFirstChild("CoinVisual") then
+                        FarmFisico.ActiveCoins[nearest] = nil
+                        nearest = nil
+                    end
+
+                    FarmFisico.CurrentTarget = nearest
+                end
+            end
+        end
+    end)
+end
+
+local function FF_StartEngine()
+    FF_CleanupConns()
+    FF_SetupVel()
+    FF_InitListeners()
+    FarmFisico.NoCoinsStart = nil
+
+    FarmFisico.HeartbeatConn = RunService.Heartbeat:Connect(function()
+        if not FarmFisico.Ativo or FarmFisico.BagFull or FarmFisico.WaitingForCoins then
+            FF_StopMovement()
+            return
+        end
+
+        local char = LocalPlayer.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if not root or not root.Parent or not hum or hum.Health <= 0 then
+            FF_StopMovement()
+            return
+        end
+
+        if FarmFisico.CurrentTarget and FarmFisico.CurrentTarget.Parent
+           and not FarmFisico.Blacklist[FarmFisico.CurrentTarget] then
+            FarmFisico.NoCoinsStart = nil
+            local targetPos = FarmFisico.CurrentTarget.Position
+            local rootPos = root.Position
+            local dist = (targetPos - rootPos).Magnitude
+
+            if dist <= 1.2 then
+                root.CFrame = CFrame.new(targetPos)
+                FF_StopMovement()
+                FarmFisico.CollectedLife = true
+                FarmFisico.Blacklist[FarmFisico.CurrentTarget] = true
+                FarmFisico.ActiveCoins[FarmFisico.CurrentTarget] = nil
+                FarmFisico.CurrentTarget = nil
+                FarmFisico.Coletadas = FarmFisico.Coletadas + 1
+            else
+                if FarmFisico.LinearVelocity then
+                    FarmFisico.LinearVelocity.Enabled = true
+                    FarmFisico.LinearVelocity.VectorVelocity = (targetPos - rootPos).Unit * FF.TargetSpeed
+                end
+            end
+        else
+            FF_StopMovement()
+
+            if FarmFisico.CollectedLife then
+                if not FarmFisico.NoCoinsStart then
+                    FarmFisico.NoCoinsStart = os.clock()
+                elseif os.clock() - FarmFisico.NoCoinsStart >= FF.ResetDelay then
+                    FarmFisico.NoCoinsStart = nil
+                    FF_CleanupConns()
+                    if hum.Health > 0 then hum.Health = 0 end
+                end
+            else
+                FarmFisico.NoCoinsStart = nil
+            end
+        end
+    end)
+end
+
+local function FarmFisico_Parar()
+    FarmFisico.Ativo = false
+    FarmFisico.Loaded = false
+    FarmFisico.BagFull = false
+    FarmFisico.WaitingForCoins = false
+    FarmFisico.CollectedLife = false
+    FF_CleanupConns()
+    FF_StopMovement()
+    FF_RemoveVel()
+    if FarmFisico.TargetFinderThr then
+        task.cancel(FarmFisico.TargetFinderThr)
+        FarmFisico.TargetFinderThr = nil
+    end
+end
+
+local function FarmFisico_Iniciar()
+    FarmFisico.Ativo = true
+    FarmFisico.Loaded = true
+    FarmFisico.Coletadas = 0
+    FarmFisico.BagFull = false
+    FF_StartTargetFinder()
+    FF_StartEngine()
+    showToast("🌾 FARM FÍSICO", "Coletando moedas por física", SUCCESS_CLR)
+end
+
 --════════════ GunDrop Logic ════════════
 local GunDrop = GunDropConfig
 
@@ -1256,7 +1622,6 @@ local function GunDrop_Processar(obj)
     local debounce = (agora - GunDrop.UltimoAviso) < 1.5
     GunDrop.UltimoAviso = agora
 
-    -- ESP Gun Drop (Highlight amarelo)
     if GunDrop.ESPAtivo then
         if GunDrop.HighlightAtual then
             pcall(function() GunDrop.HighlightAtual:Destroy() end)
@@ -1273,20 +1638,15 @@ local function GunDrop_Processar(obj)
         GunDrop.HighlightAtual = hl
     end
 
-    -- Aviso de arma dropada
     if GunDrop.AvisoDrop and not debounce then
         showToast("🔫 ARMA DROPADA", obj.Name .. " caiu no mapa!", WARN_CLR)
     end
 
-    -- Tp Gun
     if GunDrop.TpGun and not debounce then
         task.wait(0.15)
-        if obj and obj.Parent then
-            IrParaGun(obj)
-        end
+        if obj and obj.Parent then IrParaGun(obj) end
     end
 
-    -- Monitora coleta (Destroying)
     local conn
     conn = obj.Destroying:Connect(function()
         if GunDrop.HighlightAtual and GunDrop.HighlightAtual.Adornee == obj then
@@ -1300,19 +1660,15 @@ local function GunDrop_Processar(obj)
         if conn then conn:Disconnect() end
     end)
 
-    -- Atualiza contador
     if GunDrop_CountLbl and GunDrop_CountLbl.Parent then
         GunDrop_CountLbl.Text = "Detectadas: " .. GunDrop.Total
         GunDrop_CountLbl.TextColor3 = WARN_CLR
     end
 end
 
--- Conexão única
 workspace.DescendantAdded:Connect(function(obj)
-    if not GunDrop.ESPAtivo
-    and not GunDrop.AvisoDrop
-    and not GunDrop.TpGun
-    and not GunDrop.AvisoColeta then return end
+    if not GunDrop.ESPAtivo and not GunDrop.AvisoDrop
+    and not GunDrop.TpGun and not GunDrop.AvisoColeta then return end
     task.wait(0.05)
     GunDrop_Processar(obj)
 end)
@@ -1332,9 +1688,7 @@ local function getMyKnife()
     local function findIn(container)
         if not container then return nil end
         for _, o in ipairs(container:GetChildren()) do
-            if o:IsA("Tool") and checkKeyword(o.Name, KNIFE_KEYWORDS) then
-                return o
-            end
+            if o:IsA("Tool") and checkKeyword(o.Name, KNIFE_KEYWORDS) then return o end
         end
         return nil
     end
@@ -1348,9 +1702,7 @@ local function findMurderer()
             local char = p.Character
             if char then
                 local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 and getPlayerRole(p) == "Murderer" then
-                    return p
-                end
+                if hum and hum.Health > 0 and getPlayerRole(p) == "Murderer" then return p end
             end
         end
     end
@@ -1556,7 +1908,6 @@ end
 local principalTab = createTab("Principal")
 local principalContent = principalTab.content
 
--- Bloco Info
 local infoBlock = createBlock(principalContent, 1, "👤 INFO")
 local function infoRow(parent, order, texto, cor)
     local c = Instance.new("Frame", parent)
@@ -1584,11 +1935,10 @@ end)
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.2", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.3", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
--- Bloco Discord
 local discordBlock = createBlock(principalContent, 2, "💬 COMUNIDADE")
 local discordBtn = Instance.new("TextButton", discordBlock)
 discordBtn.Size = UDim2.new(1, 0, 0, 34)
@@ -1605,9 +1955,7 @@ Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0, 8)
 discordBtn.MouseButton1Click:Connect(function()
     local link = "https://discord.gg/kc7myVSq3"
     pcall(function() setclipboard(link) end)
-    pcall(function()
-        game:GetService("GuiService"):OpenBrowserWindow(link)
-    end)
+    pcall(function() game:GetService("GuiService"):OpenBrowserWindow(link) end)
     showToast("💬 DISCORD", "Link copiado + navegador aberto", Color3.fromRGB(88, 101, 242))
 end)
 local discordLbl = Instance.new("TextLabel", discordBlock)
@@ -1620,15 +1968,12 @@ discordLbl.TextColor3 = TEXT_DIM
 discordLbl.TextXAlignment = Enum.TextXAlignment.Center
 discordLbl.LayoutOrder = 3
 
--- Bloco UI Config
 local uiBlock = createBlock(principalContent, 3, "🎨 UI CONFIG")
 
--- Toggle transparência
 createToggle(uiBlock, 2, "Interface Transparente", false, function(v)
     Transp_Aplicar(v)
 end)
 
--- Cor do tema
 local corLbl = Instance.new("TextLabel", uiBlock)
 corLbl.Size = UDim2.new(1, 0, 0, 18)
 corLbl.BackgroundTransparency = 1
@@ -1693,7 +2038,6 @@ for i, preset in ipairs(PRESETS) do
         setActiveColorBorder(preset.cor)
     end)
 end
-
 setActiveColorBorder(Theme.Accent)
 
 --════════════ ABA: ESP ════════════
@@ -1754,15 +2098,28 @@ local farmContent = farmTab.content
 
 createSection(farmContent, 1, "FARM DE MOEDAS")
 createToggle(farmContent, 2, "Farm Ativado", Farm.Ativo, function(v)
-    if v then Farm_Iniciar() else Farm_Parar() end
+    if v then
+        if FarmConfig.Modo == "Teleporte" then
+            Farm_Iniciar()
+        else
+            FarmFisico_Iniciar()
+        end
+    else
+        Farm_Parar()
+        FarmFisico_Parar()
+    end
 end)
 
-createSection(farmContent, 3, "CONTADOR")
+createOptionRow(farmContent, 3, "Modo", {"Teleporte", "Físico"}, FarmConfig.Modo, function(v)
+    FarmConfig.Modo = v
+end)
+
+createSection(farmContent, 4, "CONTADOR")
 local farmStatusLbl = Instance.new("TextLabel")
 farmStatusLbl.Size = UDim2.new(1, -8, 0, 60)
 farmStatusLbl.BackgroundColor3 = BG_ROW
 farmStatusLbl.BorderSizePixel = 0
-farmStatusLbl.LayoutOrder = 4
+farmStatusLbl.LayoutOrder = 5
 farmStatusLbl.Text = "Coletadas: 0"
 farmStatusLbl.Font = Enum.Font.Code
 farmStatusLbl.TextSize = 14
@@ -1775,8 +2132,17 @@ Instance.new("UICorner", farmStatusLbl).CornerRadius = UDim.new(0, 8)
 task.spawn(function()
     while farmStatusLbl.Parent do
         task.wait(0.2)
-        farmStatusLbl.Text = string.format("Coletadas: %d", Farm.Coletadas)
-        farmStatusLbl.TextColor3 = Farm.Rodando and Theme.Accent or TEXT_DIM
+        local n
+        local ativo
+        if FarmConfig.Modo == "Teleporte" then
+            n = Farm.Coletadas
+            ativo = Farm.Rodando
+        else
+            n = FarmFisico.Coletadas
+            ativo = FarmFisico.Ativo
+        end
+        farmStatusLbl.Text = string.format("Coletadas: %d", n)
+        farmStatusLbl.TextColor3 = ativo and Theme.Accent or TEXT_DIM
     end
 end)
 
@@ -1796,20 +2162,10 @@ createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
         GunDrop.HighlightAtual = nil
     end
 end)
+createToggle(gunBlock, 3, "Aviso de arma dropada", GunDrop.AvisoDrop, function(v) GunDrop.AvisoDrop = v end)
+createToggle(gunBlock, 4, "Aviso de arma coletada", GunDrop.AvisoColeta, function(v) GunDrop.AvisoColeta = v end)
+createToggle(gunBlock, 5, "Tp gun", GunDrop.TpGun, function(v) GunDrop.TpGun = v end)
 
-createToggle(gunBlock, 3, "Aviso de arma dropada", GunDrop.AvisoDrop, function(v)
-    GunDrop.AvisoDrop = v
-end)
-
-createToggle(gunBlock, 4, "Aviso de arma coletada", GunDrop.AvisoColeta, function(v)
-    GunDrop.AvisoColeta = v
-end)
-
-createToggle(gunBlock, 5, "Tp gun", GunDrop.TpGun, function(v)
-    GunDrop.TpGun = v
-end)
-
--- Contador da gun
 GunDrop_CountLbl = Instance.new("TextLabel", gunBlock)
 GunDrop_CountLbl.Size = UDim2.new(1, 0, 0, 40)
 GunDrop_CountLbl.BackgroundColor3 = BG_ROW
@@ -1870,6 +2226,17 @@ task.spawn(function()
     end
 end)
 
+-- BLOCO: UTILITÁRIOS
+local utilBlock = createBlock(funcContent, 3, "⚙️ UTILITÁRIOS")
+
+createToggle(utilBlock, 2, "Noclip", false, function(v)
+    Noclip_Set(v)
+end)
+
+createToggle(utilBlock, 3, "Anti-AFK", false, function(v)
+    AntiAFK_Set(v)
+end)
+
 --═══════════════════════════════════════════════════════════════
 --  INICIA COM PRINCIPAL
 --═══════════════════════════════════════════════════════════════
@@ -1897,9 +2264,7 @@ RunService.RenderStepped:Connect(function(dt)
         fovCircle.Visible = false
     else
         fovCircle.Visible = showFov
-        if showFov then
-            fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y)
-        end
+        if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
 
     if not Config.ESPEnabled then
@@ -2018,4 +2383,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU mm2] v9.2 carregado 🔪")
+print("[AKZ MENU mm2] v9.3 carregado 🔪")
