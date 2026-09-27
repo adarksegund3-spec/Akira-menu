@@ -1,8 +1,9 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.8
-   Farm Teleporte: LinearVelocity (longe) + PivotTo em passos (perto)
-   Sem enterrar • sem clipar no chão • anti-kick
+   AKZ MENU mm2  —  v9.9
+   Auto Kill "Só Murder" → modo DRONE AÉREO
+   + 22 studs acima, 10 atrás • noclip auto • raycast de teto
+   + jitter anti-padrão • distância adaptativa
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -100,9 +101,17 @@ local GunDropConfig = {
 local espCache = {}
 local AutoKillConfig = {
     Ativo=false, Alvo="Todos", Kills=0, Rodando=false, Distancia=15,
+    -- Drone (Só Murder)
+    DroneHeight = 22,
+    DroneBehind = 10,
+    DroneHeightRunning = 30,
+    DroneBehindRunning = 14,
+    DroneNoclip = false,
 }
 local MurderESP_Highlight = nil
 local MurderESP_Target    = nil
+local DroneJitter         = Vector3.zero
+local DroneJitterTime     = 0
 
 local KNIFE_KEYWORDS = {"knife","faca","blade","lâmina","lamina","punhal","dagger"}
 local GUN_KEYWORDS   = {"gun","revolver","pistol","arma","pistola","luger","m9","firearm","handgun","sidearm"}
@@ -999,7 +1008,7 @@ local function AntiAFK_Set(ativo)
     end
 end
 
---════════════ Farm Teleporte v4 (velocidade + pivot leve) ════════════
+--════════════ Farm Teleporte ════════════
 local Farm = FarmConfig
 
 local function Farm_PegarContainer()
@@ -1032,7 +1041,6 @@ local function Farm_ListarMoedas()
     return lista
 end
 
--- Cria/pega Attachment + LinearVelocity do HRP pra usar na fase "longe"
 local function Farm_GarantirVelocity(hrp)
     local att = hrp:FindFirstChild("FarmAtt")
     if not att then
@@ -1064,9 +1072,6 @@ local function Farm_LimparVelocity(char)
     if att then att:Destroy() end
 end
 
--- 📏 Mover pro destino:
---    - > 50 studs: LinearVelocity a 80 studs/s (física normal → não kicka)
---    - ≤ 50 studs: PivotTo em passos de 8 studs com 0.15s (bem devagar)
 local function Farm_MoverPara(destinoPos)
     local char = LocalPlayer.Character
     if not char then return false end
@@ -1075,7 +1080,6 @@ local function Farm_MoverPara(destinoPos)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
 
-    -- safety void
     if hrp.Position.Y < FARM_VOID_Y then
         if Farm.PosInicial then
             pcall(function() char:PivotTo(Farm.PosInicial) end)
@@ -1085,11 +1089,9 @@ local function Farm_MoverPara(destinoPos)
         end
     end
 
-    -- FASE 1: distância longa → velocidade (não kicka)
     if (destinoPos - hrp.Position).Magnitude > FARM_NEAR_DIST then
         local lv = Farm_GarantirVelocity(hrp)
         lv.Enabled = true
-
         local inicio = os.clock()
         while true do
             local c = LocalPlayer.Character
@@ -1097,26 +1099,21 @@ local function Farm_MoverPara(destinoPos)
             local h = c:FindFirstChild("HumanoidRootPart")
             if not h then break end
             if not Farm.Ativo then break end
-            if os.clock() - inicio > 10 then break end  -- timeout 10s
-
+            if os.clock() - inicio > 10 then break end
             local cur = h.Position
             local diff = destinoPos - cur
             local dist = diff.Magnitude
             if dist <= FARM_NEAR_DIST then break end
-
             lv.VectorVelocity = diff.Unit * FARM_VELOCITY
             task.wait(0.05)
         end
-
         lv.VectorVelocity = Vector3.zero
         lv.Enabled = false
         task.wait(0.15)
-
         hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
     end
 
-    -- FASE 2: últimos 50 studs → PivotTo em passos de 8 (3-6 PivotTo só)
     local MAX_ITER = 12
     for i = 1, MAX_ITER do
         local c = LocalPlayer.Character
@@ -1125,16 +1122,13 @@ local function Farm_MoverPara(destinoPos)
         if not h then return false end
         local hu = c:FindFirstChildOfClass("Humanoid")
         if not hu or hu.Health <= 0 then return false end
-
         local atual = h.Position
         local diff = destinoPos - atual
         local d = diff.Magnitude
-
         if d <= FARM_PIVOT_STEP then
             pcall(function() c:PivotTo(CFrame.new(destinoPos)) end)
             return true
         end
-
         local passo = diff.Unit * FARM_PIVOT_STEP
         pcall(function() c:PivotTo(CFrame.new(atual + passo)) end)
         task.wait(FARM_PIVOT_WAIT + math.random() * 0.03)
@@ -1142,29 +1136,20 @@ local function Farm_MoverPara(destinoPos)
     return false
 end
 
--- 🎯 Coleta SEM enterrar: teleporta em cima da moeda, deixa cair natural
 local function Farm_ColetarMoeda(coin)
     if not coin or not coin.Parent then return false end
     if coin:GetAttribute("Collected") == true then return false end
-
     local char = LocalPlayer.Character
     if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-
-    -- destino: LEVEMENTE acima da moeda → o Roblox encaixa o boneco no chão sozinho
     local destino = Vector3.new(
         coin.Position.X + (math.random() - 0.5) * 0.6,
         coin.Position.Y + 1,
         coin.Position.Z + (math.random() - 0.5) * 0.6
     )
-
     if not Farm_MoverPara(destino) then return false end
-
-    -- deixa cair naturalmente (gravidade puxa pra posição correta)
     task.wait(0.35)
-
-    -- fixa posição no lugar EXATO por 1.2s
     local destinoFinal = destino
     local pinConn = RunService.RenderStepped:Connect(function()
         local c = LocalPlayer.Character
@@ -1175,15 +1160,12 @@ local function Farm_ColetarMoeda(coin)
         h.AssemblyLinearVelocity = Vector3.zero
         h.AssemblyAngularVelocity = Vector3.zero
     end)
-
-    -- dispara touch em todas as partes do corpo + HRP
     local partes = {"Head", "HumanoidRootPart", "LeftFoot", "RightFoot", "LeftLeg", "RightLeg"}
     local fim = os.clock() + FARM_VERIFY_TIMEOUT
     local coletou = false
     while os.clock() < fim do
         local c = LocalPlayer.Character
         if not c then break end
-
         if firetouchinterest then
             for _, nome in ipairs(partes) do
                 local parte = c:FindFirstChild(nome)
@@ -1195,19 +1177,13 @@ local function Farm_ColetarMoeda(coin)
                 end
             end
         end
-
         if not coin or not coin.Parent then coletou = true; break end
         if coin:GetAttribute("Collected") == true then coletou = true; break end
         task.wait(0.08)
     end
-
-    -- ⚡ antes de soltar, sobe pra cima do chão
     destinoFinal = Vector3.new(destinoFinal.X, coin.Position.Y + 4, destinoFinal.Z)
     task.wait(0.15)
-
     if pinConn then pinConn:Disconnect(); pinConn = nil end
-
-    -- safety pós-coleta
     task.spawn(function()
         task.wait(0.4)
         local c = LocalPlayer.Character
@@ -1220,16 +1196,13 @@ local function Farm_ColetarMoeda(coin)
             end
         end
     end)
-
     return coletou
 end
 
 local function Farm_Parar()
     Farm.Ativo = false
     Farm.Rodando = false
-    if LocalPlayer.Character then
-        Farm_LimparVelocity(LocalPlayer.Character)
-    end
+    if LocalPlayer.Character then Farm_LimparVelocity(LocalPlayer.Character) end
     Noclip_Stop(true)
 end
 
@@ -1238,16 +1211,12 @@ local function Farm_Iniciar()
     Farm.Rodando = true
     Farm.Ativo = true
     Farm.Coletadas = 0
-
     Noclip_Start(true)
-
     local char = LocalPlayer.Character
     if char then
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if hrp then Farm.PosInicial = hrp.CFrame end
     end
-
-    -- watchdog: se cair no void, resgata
     task.spawn(function()
         while Farm.Ativo do
             task.wait(0.5)
@@ -1263,13 +1232,11 @@ local function Farm_Iniciar()
             end
         end
     end)
-
     task.spawn(function()
         while Farm.Ativo do
             local char = LocalPlayer.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             local hum = char and char:FindFirstChildOfClass("Humanoid")
-
             if not char or not hrp or not hum or hum.Health <= 0 then
                 task.wait(0.5)
             else
@@ -1285,7 +1252,6 @@ local function Farm_Iniciar()
                         break
                     end
                 else
-                    -- ordena por distância
                     local myPos = hrp.Position
                     table.sort(moedas, function(a, b)
                         return (a.Position - myPos).Magnitude < (b.Position - myPos).Magnitude
@@ -1692,7 +1658,7 @@ local function GunDrop_VarrerAgora()
     end
 end
 
---════════════ Auto Kill ════════════
+--════════════ Auto Kill — com modo DRONE AÉREO no "Só Murder" ════════════
 local function getMyKnife()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -1773,10 +1739,68 @@ local function clearMurderESP()
     MurderESP_Target = nil
 end
 
+-- 🔥 Drone: calcula a posição segura acima + atrás do Murderer
+local function getDronePosition(murder)
+    if not murder or not murder.Character then return nil end
+    local mHRP = murder.Character:FindFirstChild("HumanoidRootPart")
+    local mHum = murder.Character:FindFirstChildOfClass("Humanoid")
+    if not mHRP or not mHum then return nil end
+
+    local basePos = mHRP.Position
+    local lookVec = mHRP.CFrame.LookVector
+    local flatLook = Vector3.new(lookVec.X, 0, lookVec.Z)
+    if flatLook.Magnitude < 0.1 then
+        flatLook = Vector3.new(0, 0, -1)
+    else
+        flatLook = flatLook.Unit
+    end
+
+    -- distância adaptativa: se ele corre, sobe mais alto e fica mais atrás
+    local running = mHum.MoveDirection.Magnitude > 0.1
+    local height = running and AutoKillConfig.DroneHeightRunning or AutoKillConfig.DroneHeight
+    local behind = running and AutoKillConfig.DroneBehindRunning or AutoKillConfig.DroneBehind
+
+    -- raycast pra checar teto
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    local filtro = {}
+    if LocalPlayer.Character then table.insert(filtro, LocalPlayer.Character) end
+    if murder.Character then table.insert(filtro, murder.Character) end
+    rayParams.FilterDescendantsInstances = filtro
+
+    local origin = basePos + Vector3.new(0, 3, 0)
+    local dir = Vector3.new(0, height + 5, 0)
+    local ray = workspace:Raycast(origin, dir, rayParams)
+    if ray then
+        -- tem teto → reduz a altura
+        local distTeto = (ray.Position - basePos).Magnitude
+        height = math.max(8, distTeto - 3)
+    end
+
+    -- jitter pra quebrar padrão (atualiza a cada ~0.6s)
+    local agora = os.clock()
+    if agora - DroneJitterTime > 0.6 then
+        DroneJitter = Vector3.new(
+            (math.random() - 0.5) * 3,
+            (math.random() - 0.5) * 1.5,
+            (math.random() - 0.5) * 3
+        )
+        DroneJitterTime = agora
+    end
+
+    -- posição final: acima + atrás (no plano) + jitter
+    local pos = basePos + Vector3.new(0, height, 0) - flatLook * behind + DroneJitter
+    return pos
+end
+
 local function AutoKill_Parar()
     AutoKillConfig.Ativo = false
     AutoKillConfig.Rodando = false
     clearMurderESP()
+    if AutoKillConfig.DroneNoclip then
+        AutoKillConfig.DroneNoclip = false
+        Noclip_Stop(true)
+    end
 end
 
 local function AutoKill_Iniciar()
@@ -1791,24 +1815,32 @@ local function AutoKill_Iniciar()
                 task.wait(0.5)
             else
                 if AutoKillConfig.Alvo == "Só Murder" then
+                    -- 🤖 MODO DRONE AÉREO
                     local murder = findMurderer()
                     if murder and murder.Character then
                         local mHRP = murder.Character:FindFirstChild("HumanoidRootPart")
                         local mHum = murder.Character:FindFirstChildOfClass("Humanoid")
                         if mHRP and mHum and mHum.Health > 0 then
+                            -- ESP no Murder
                             if MurderESP_Target ~= murder or not MurderESP_Highlight or not MurderESP_Highlight.Parent then
                                 applyMurderESP(murder)
                             end
-                            local myHRP = char:FindFirstChild("HumanoidRootPart")
-                            if myHRP then
-                                local diff = myHRP.Position - mHRP.Position
-                                local flat = Vector3.new(diff.X, 0, diff.Z)
-                                if flat.Magnitude < 1 then flat = Vector3.new(AutoKillConfig.Distancia, 0, 0)
-                                else flat = flat.Unit * AutoKillConfig.Distancia end
-                                local safePos = mHRP.Position + flat + Vector3.new(0, 3, 0)
-                                pcall(function() char:PivotTo(CFrame.new(safePos)) end)
+
+                            -- Noclip automático nesse modo (essencial pro drone)
+                            if not AutoKillConfig.DroneNoclip then
+                                AutoKillConfig.DroneNoclip = true
+                                Noclip_Start(true)
                             end
-                            task.wait(0.4)
+
+                            -- calcula posição drone
+                            local dronePos = getDronePosition(murder)
+                            if dronePos then
+                                local myChar = LocalPlayer.Character
+                                if myChar then
+                                    pcall(function() myChar:PivotTo(CFrame.new(dronePos)) end)
+                                end
+                            end
+                            task.wait(0.5)  -- atualiza 2x/s (suave)
                         else
                             clearMurderESP()
                             AutoKillConfig.Ativo = false
@@ -1819,6 +1851,12 @@ local function AutoKill_Iniciar()
                         task.wait(1)
                     end
                 else
+                    -- modos agressivos (Todos / Só Sheriff) → exigem ser Murderer
+                    if AutoKillConfig.DroneNoclip then
+                        AutoKillConfig.DroneNoclip = false
+                        Noclip_Stop(true)
+                    end
+
                     if getPlayerRole(LocalPlayer) ~= "Murderer" then
                         task.wait(1)
                     else
@@ -1857,6 +1895,10 @@ local function AutoKill_Iniciar()
             task.wait(0.1)
         end
         AutoKillConfig.Rodando = false
+        if AutoKillConfig.DroneNoclip then
+            AutoKillConfig.DroneNoclip = false
+            Noclip_Stop(true)
+        end
     end)
 end
 
@@ -1909,7 +1951,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.8", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v9.9", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -2141,7 +2183,7 @@ task.spawn(function()
         task.wait(0.25)
         if AutoKillConfig.Alvo == "Só Murder" then
             if MurderESP_Target then
-                autoKillCountLbl.Text = "Rastreando: " .. MurderESP_Target.DisplayName
+                autoKillCountLbl.Text = "🚁 Drone: " .. MurderESP_Target.DisplayName
                 autoKillCountLbl.TextColor3 = Color3.fromRGB(220, 80, 80)
             else
                 autoKillCountLbl.Text = "Aguardando Murderer..."
@@ -2252,4 +2294,19 @@ header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         menuDragging = true
         menuDragStart = input.Position
-        menuStartPos =
+        menuStartPos = menuFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then menuDragging = false end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if not menuDragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        local delta = input.Position - menuDragStart
+        menuFrame.Position = UDim2.new(menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
+            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+print("[AKZ MENU mm2] v9.9 carregado 🔪")
