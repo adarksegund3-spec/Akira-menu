@@ -1,9 +1,7 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU mm2  —  v9.9
-   Auto Kill "Só Murder" → modo DRONE AÉREO
-   + 22 studs acima, 10 atrás • noclip auto • raycast de teto
-   + jitter anti-padrão • distância adaptativa
+   AKZ MENU mm2  —  v1
+   Auto Murder e Pegar Gun agora são botões (ação única)
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -94,24 +92,13 @@ local FF = {
 }
 
 local GunDropConfig = {
-    ESPAtivo=false, AvisoDrop=false, AvisoColeta=false, TpGun=false,
+    ESPAtivo=false, AvisoDrop=false, AvisoColeta=false,
     ObjetosVistos={}, ObjetosMonitorados={}, HighlightAtual=nil,
     UltimaGun=nil, UltimoAviso=0, Total=0,
 }
 local espCache = {}
-local AutoKillConfig = {
-    Ativo=false, Alvo="Todos", Kills=0, Rodando=false, Distancia=15,
-    -- Drone (Só Murder)
-    DroneHeight = 22,
-    DroneBehind = 10,
-    DroneHeightRunning = 30,
-    DroneBehindRunning = 14,
-    DroneNoclip = false,
-}
 local MurderESP_Highlight = nil
 local MurderESP_Target    = nil
-local DroneJitter         = Vector3.zero
-local DroneJitterTime     = 0
 
 local KNIFE_KEYWORDS = {"knife","faca","blade","lâmina","lamina","punhal","dagger"}
 local GUN_KEYWORDS   = {"gun","revolver","pistol","arma","pistola","luger","m9","firearm","handgun","sidearm"}
@@ -694,6 +681,35 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     return { Set = function(v) setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X) end, Get = function() return value end }
 end
 
+-- 🎯 BOTÃO (para ação única)
+local function createButton(parent, order, label, onClick)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(34, 34, 42)
+    btn.BorderSizePixel = 0
+    btn.Text = label
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.TextColor3 = TEXT
+    btn.AutoButtonColor = false
+    btn.LayoutOrder = order
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    local st = Instance.new("UIStroke", btn)
+    st.Color = Theme.Accent
+    st.Thickness = 1
+    st.Transparency = 0.6
+
+    btn.MouseButton1Click:Connect(function()
+        TweenService:Create(st, TweenInfo.new(0.1), {Transparency = 0}):Play()
+        task.delay(0.15, function()
+            TweenService:Create(st, TweenInfo.new(0.2), {Transparency = 0.6}):Play()
+        end)
+        if onClick then onClick() end
+    end)
+    return btn
+end
+
 local function Transp_AplicarEm(obj)
     if not obj:IsA("GuiObject") then return end
     local bt = obj.BackgroundTransparency
@@ -1079,7 +1095,6 @@ local function Farm_MoverPara(destinoPos)
     if not hrp then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
-
     if hrp.Position.Y < FARM_VOID_Y then
         if Farm.PosInicial then
             pcall(function() char:PivotTo(Farm.PosInicial) end)
@@ -1088,7 +1103,6 @@ local function Farm_MoverPara(destinoPos)
             if not hrp then return false end
         end
     end
-
     if (destinoPos - hrp.Position).Magnitude > FARM_NEAR_DIST then
         local lv = Farm_GarantirVelocity(hrp)
         lv.Enabled = true
@@ -1113,7 +1127,6 @@ local function Farm_MoverPara(destinoPos)
         hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then return false end
     end
-
     local MAX_ITER = 12
     for i = 1, MAX_ITER do
         local c = LocalPlayer.Character
@@ -1585,17 +1598,6 @@ local function ehGun(obj)
         or obj:FindFirstChild("TouchInterest") ~= nil
 end
 
-local function IrParaGun(target)
-    if not target or not target.Parent then return false end
-    local char = LocalPlayer.Character
-    if not char then return false end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    local pos = target.Position + Vector3.new(0, 3, 0)
-    pcall(function() char:PivotTo(CFrame.new(pos)) end)
-    return true
-end
-
 local function GunDrop_Processar(obj)
     if not obj or not obj.Parent then return end
     if GunDrop.ObjetosVistos[obj] then return end
@@ -1623,10 +1625,6 @@ local function GunDrop_Processar(obj)
     if GunDrop.AvisoDrop and not debounce then
         showToast("🔫 ARMA DROPADA", obj.Name .. " caiu no mapa!", WARN_CLR)
     end
-    if GunDrop.TpGun and not debounce then
-        task.wait(0.15)
-        if obj and obj.Parent then IrParaGun(obj) end
-    end
     local conn
     conn = obj.Destroying:Connect(function()
         if GunDrop.HighlightAtual and GunDrop.HighlightAtual.Adornee == obj then
@@ -1647,7 +1645,7 @@ end
 
 workspace.DescendantAdded:Connect(function(obj)
     if not GunDrop.ESPAtivo and not GunDrop.AvisoDrop
-    and not GunDrop.TpGun and not GunDrop.AvisoColeta then return end
+    and not GunDrop.AvisoColeta then return end
     task.wait(0.05)
     GunDrop_Processar(obj)
 end)
@@ -1658,95 +1656,36 @@ local function GunDrop_VarrerAgora()
     end
 end
 
---════════════ Auto Kill — com modo DRONE AÉREO no "Só Murder" ════════════
-local function getMyKnife()
-    local char = LocalPlayer.Character
-    if not char then return nil end
-    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-    local function findIn(c)
-        if not c then return nil end
-        for _, o in ipairs(c:GetChildren()) do
-            if o:IsA("Tool") and checkKeyword(o.Name, KNIFE_KEYWORDS) then return o end
-        end
-        return nil
-    end
-    return findIn(char) or findIn(bp)
-end
-
-local function findMurderer()
+--════════════ Ações one-shot (Auto Murder / Pegar Gun) ════════════
+local function AcharMurder()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local char = p.Character
             if char then
                 local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 and getPlayerRole(p) == "Murderer" then return p end
+                if hum and hum.Health > 0 and getPlayerRole(p) == "Murderer" then
+                    return p
+                end
             end
         end
     end
     return nil
 end
 
-local function killPlayer(target)
+local function IrProMurder()
+    local murder = AcharMurder()
+    if not murder then
+        showToast("AUTO MURDER", "Nenhum Murderer encontrado", DANGER_CLR)
+        return
+    end
     local char = LocalPlayer.Character
-    if not char then return false end
-    local targetChar = target.Character
-    if not targetChar then return false end
-    local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
-    if not targetHRP then return false end
-    local pos = targetHRP.Position + Vector3.new(2.5, 0, 2.5)
-    pcall(function() char:PivotTo(CFrame.new(pos)) end)
-    task.wait(0.35)
-    local knife = getMyKnife()
-    if not knife then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    if knife.Parent ~= char then
-        pcall(function() hum:EquipTool(knife) end)
-        task.wait(0.15)
-    end
-    pcall(function() knife:Activate() end)
-    if firetouchinterest then
-        local handle = knife:FindFirstChild("Handle")
-        if handle then
-            pcall(function()
-                firetouchinterest(handle, targetHRP, 0)
-                firetouchinterest(targetHRP, handle, 0)
-            end)
-        end
-    end
-    task.wait(0.2)
-    return true
-end
+    if not char then return end
+    local mChar = murder.Character
+    if not mChar then return end
+    local mHRP = mChar:FindFirstChild("HumanoidRootPart")
+    if not mHRP then return end
 
-local function applyMurderESP(target)
-    if MurderESP_Highlight then pcall(function() MurderESP_Highlight:Destroy() end) MurderESP_Highlight = nil end
-    if not target or not target.Character then return end
-    local hl = Instance.new("Highlight")
-    hl.Name = "AKZ_MurderESP"
-    hl.Adornee = target.Character
-    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    hl.FillColor = Color3.fromRGB(220, 40, 40)
-    hl.OutlineColor = Color3.fromRGB(255, 100, 100)
-    hl.FillTransparency = 0.35
-    hl.OutlineTransparency = 0
-    hl.Parent = target.Character
-    MurderESP_Highlight = hl
-    MurderESP_Target = target
-end
-
-local function clearMurderESP()
-    if MurderESP_Highlight then pcall(function() MurderESP_Highlight:Destroy() end) MurderESP_Highlight = nil end
-    MurderESP_Target = nil
-end
-
--- 🔥 Drone: calcula a posição segura acima + atrás do Murderer
-local function getDronePosition(murder)
-    if not murder or not murder.Character then return nil end
-    local mHRP = murder.Character:FindFirstChild("HumanoidRootPart")
-    local mHum = murder.Character:FindFirstChildOfClass("Humanoid")
-    if not mHRP or not mHum then return nil end
-
-    local basePos = mHRP.Position
+    -- 12 studs atrás dele (fora do FOV frontal)
     local lookVec = mHRP.CFrame.LookVector
     local flatLook = Vector3.new(lookVec.X, 0, lookVec.Z)
     if flatLook.Magnitude < 0.1 then
@@ -1754,152 +1693,57 @@ local function getDronePosition(murder)
     else
         flatLook = flatLook.Unit
     end
-
-    -- distância adaptativa: se ele corre, sobe mais alto e fica mais atrás
-    local running = mHum.MoveDirection.Magnitude > 0.1
-    local height = running and AutoKillConfig.DroneHeightRunning or AutoKillConfig.DroneHeight
-    local behind = running and AutoKillConfig.DroneBehindRunning or AutoKillConfig.DroneBehind
-
-    -- raycast pra checar teto
-    local rayParams = RaycastParams.new()
-    rayParams.FilterType = Enum.RaycastFilterType.Exclude
-    local filtro = {}
-    if LocalPlayer.Character then table.insert(filtro, LocalPlayer.Character) end
-    if murder.Character then table.insert(filtro, murder.Character) end
-    rayParams.FilterDescendantsInstances = filtro
-
-    local origin = basePos + Vector3.new(0, 3, 0)
-    local dir = Vector3.new(0, height + 5, 0)
-    local ray = workspace:Raycast(origin, dir, rayParams)
-    if ray then
-        -- tem teto → reduz a altura
-        local distTeto = (ray.Position - basePos).Magnitude
-        height = math.max(8, distTeto - 3)
-    end
-
-    -- jitter pra quebrar padrão (atualiza a cada ~0.6s)
-    local agora = os.clock()
-    if agora - DroneJitterTime > 0.6 then
-        DroneJitter = Vector3.new(
-            (math.random() - 0.5) * 3,
-            (math.random() - 0.5) * 1.5,
-            (math.random() - 0.5) * 3
-        )
-        DroneJitterTime = agora
-    end
-
-    -- posição final: acima + atrás (no plano) + jitter
-    local pos = basePos + Vector3.new(0, height, 0) - flatLook * behind + DroneJitter
-    return pos
+    local destino = mHRP.Position - flatLook * 12 + Vector3.new(0, 3, 0)
+    pcall(function() char:PivotTo(CFrame.new(destino)) end)
+    showToast("AUTO MURDER", "Teleportado perto de " .. murder.DisplayName, SUCCESS_CLR)
 end
 
-local function AutoKill_Parar()
-    AutoKillConfig.Ativo = false
-    AutoKillConfig.Rodando = false
-    clearMurderESP()
-    if AutoKillConfig.DroneNoclip then
-        AutoKillConfig.DroneNoclip = false
-        Noclip_Stop(true)
+local function AcharGunMaisProxima()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    -- preferência: última gun monitorada se ainda existe
+    if GunDrop.UltimaGun and GunDrop.UltimaGun.Parent then
+        return GunDrop.UltimaGun
     end
-end
 
-local function AutoKill_Iniciar()
-    if AutoKillConfig.Rodando then return end
-    AutoKillConfig.Rodando = true
-    AutoKillConfig.Ativo = true
-    task.spawn(function()
-        while AutoKillConfig.Ativo do
-            local char = LocalPlayer.Character
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            if not char or not hum or hum.Health <= 0 then
-                task.wait(0.5)
-            else
-                if AutoKillConfig.Alvo == "Só Murder" then
-                    -- 🤖 MODO DRONE AÉREO
-                    local murder = findMurderer()
-                    if murder and murder.Character then
-                        local mHRP = murder.Character:FindFirstChild("HumanoidRootPart")
-                        local mHum = murder.Character:FindFirstChildOfClass("Humanoid")
-                        if mHRP and mHum and mHum.Health > 0 then
-                            -- ESP no Murder
-                            if MurderESP_Target ~= murder or not MurderESP_Highlight or not MurderESP_Highlight.Parent then
-                                applyMurderESP(murder)
-                            end
-
-                            -- Noclip automático nesse modo (essencial pro drone)
-                            if not AutoKillConfig.DroneNoclip then
-                                AutoKillConfig.DroneNoclip = true
-                                Noclip_Start(true)
-                            end
-
-                            -- calcula posição drone
-                            local dronePos = getDronePosition(murder)
-                            if dronePos then
-                                local myChar = LocalPlayer.Character
-                                if myChar then
-                                    pcall(function() myChar:PivotTo(CFrame.new(dronePos)) end)
-                                end
-                            end
-                            task.wait(0.5)  -- atualiza 2x/s (suave)
-                        else
-                            clearMurderESP()
-                            AutoKillConfig.Ativo = false
-                            break
-                        end
-                    else
-                        clearMurderESP()
-                        task.wait(1)
-                    end
-                else
-                    -- modos agressivos (Todos / Só Sheriff) → exigem ser Murderer
-                    if AutoKillConfig.DroneNoclip then
-                        AutoKillConfig.DroneNoclip = false
-                        Noclip_Stop(true)
-                    end
-
-                    if getPlayerRole(LocalPlayer) ~= "Murderer" then
-                        task.wait(1)
-                    else
-                        local targets = {}
-                        for _, p in ipairs(Players:GetPlayers()) do
-                            if p ~= LocalPlayer then
-                                local pChar = p.Character
-                                if pChar then
-                                    local tHum = pChar:FindFirstChildOfClass("Humanoid")
-                                    if tHum and tHum.Health > 0 then
-                                        local role = getPlayerRole(p)
-                                        if AutoKillConfig.Alvo == "Todos"
-                                        or (AutoKillConfig.Alvo == "Só Sheriff" and role == "Sheriff") then
-                                            table.insert(targets, p)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                        if #targets == 0 then task.wait(0.5)
-                        else
-                            for _, t in ipairs(targets) do
-                                if not AutoKillConfig.Ativo then break end
-                                if t and t.Character then
-                                    local tHum = t.Character:FindFirstChildOfClass("Humanoid")
-                                    if tHum and tHum.Health > 0 then
-                                        if killPlayer(t) then AutoKillConfig.Kills = AutoKillConfig.Kills + 1 end
-                                    end
-                                end
-                                task.wait(1)
-                            end
-                        end
-                    end
-                end
+    -- senão, procura a mais próxima no mapa
+    local myPos = hrp.Position
+    local melhor, melhorDist = nil, math.huge
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if ehGun(obj) then
+            local dist = (obj.Position - myPos).Magnitude
+            if dist < melhorDist then
+                melhorDist = dist
+                melhor = obj
             end
-            task.wait(0.1)
         end
-        AutoKillConfig.Rodando = false
-        if AutoKillConfig.DroneNoclip then
-            AutoKillConfig.DroneNoclip = false
-            Noclip_Stop(true)
-        end
-    end)
+    end
+    return melhor
+end
+
+local function PegarGun()
+    local gun = AcharGunMaisProxima()
+    if not gun then
+        showToast("PEGAR GUN", "Nenhuma gun encontrada", DANGER_CLR)
+        return
+    end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local pos = gun.Position + Vector3.new(0, 2.5, 0)
+    pcall(function() char:PivotTo(CFrame.new(pos)) end)
+    task.wait(0.1)
+    -- dispara touch pra pegar
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp and firetouchinterest then
+        pcall(function()
+            firetouchinterest(hrp, gun, 0)
+            firetouchinterest(hrp, gun, 1)
+        end)
+    end
+    showToast("PEGAR GUN", "Teleportado pra gun", SUCCESS_CLR)
 end
 
 --════════════ Tema ════════════
@@ -1951,7 +1795,7 @@ pcall(function() if identifyexecutor then executorNome = identifyexecutor() end 
 
 infoRow(infoBlock, 2, "👤  Jogador: " .. LocalPlayer.DisplayName, TEXT)
 infoRow(infoBlock, 3, "⚙️  Executor: " .. executorNome, TEXT)
-infoRow(infoBlock, 4, "📦  Versão: v9.9", TEXT)
+infoRow(infoBlock, 4, "📦  Versão: v1", TEXT)
 infoRow(infoBlock, 5, "👑  Desenvolvedor: Akira007p", Theme.Accent)
 infoRow(infoBlock, 6, "✅  Status: ● Ativo", SUCCESS_CLR)
 
@@ -2126,6 +1970,8 @@ end)
 --════════════ ABA FUNÇÕES ════════════
 local funcTab = createTab("Funções")
 local funcContent = funcTab.content
+
+-- BLOCO: GUN
 local gunBlock = createBlock(funcContent, 1, "🔫 GUN")
 createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
     GunDrop.ESPAtivo = v
@@ -2137,65 +1983,45 @@ createToggle(gunBlock, 2, "ESP Gun Drop", GunDrop.ESPAtivo, function(v)
 end)
 createToggle(gunBlock, 3, "Aviso de arma dropada", GunDrop.AvisoDrop, function(v) GunDrop.AvisoDrop = v end)
 createToggle(gunBlock, 4, "Aviso de arma coletada", GunDrop.AvisoColeta, function(v) GunDrop.AvisoColeta = v end)
-createToggle(gunBlock, 5, "Tp gun", GunDrop.TpGun, function(v) GunDrop.TpGun = v end)
 
 GunDrop_CountLbl = Instance.new("TextLabel", gunBlock)
-GunDrop_CountLbl.Size = UDim2.new(1, 0, 0, 40)
+GunDrop_CountLbl.Size = UDim2.new(1, 0, 0, 30)
 GunDrop_CountLbl.BackgroundColor3 = BG_ROW
 GunDrop_CountLbl.BorderSizePixel = 0
-GunDrop_CountLbl.LayoutOrder = 6
+GunDrop_CountLbl.LayoutOrder = 5
 GunDrop_CountLbl.Text = "Detectadas: 0"
 GunDrop_CountLbl.Font = Enum.Font.Code
-GunDrop_CountLbl.TextSize = 13
+GunDrop_CountLbl.TextSize = 12
 GunDrop_CountLbl.TextColor3 = TEXT_DIM
 GunDrop_CountLbl.TextXAlignment = Enum.TextXAlignment.Center
 GunDrop_CountLbl.TextYAlignment = Enum.TextYAlignment.Center
 Instance.new("UICorner", GunDrop_CountLbl).CornerRadius = UDim.new(0, 8)
 
-local autoKillBlock = createBlock(funcContent, 2, "🗡️ AUTO KILL")
-createToggle(autoKillBlock, 2, "Auto Kill Ativado", AutoKillConfig.Ativo, function(v)
-    if v then AutoKill_Iniciar() else AutoKill_Parar() end
-end)
-createOptionRow(autoKillBlock, 3, "Alvo", {"Todos","Só Sheriff","Só Murder"}, AutoKillConfig.Alvo, function(v)
-    AutoKillConfig.Alvo = v
-    if AutoKillConfig.Ativo then
-        AutoKill_Parar()
-        task.wait(0.15)
-        AutoKill_Iniciar()
-    end
+-- 🎯 BOTÃO: Pegar Gun
+createButton(gunBlock, 6, "📌  Pegar Gun (teleportar)", function()
+    PegarGun()
 end)
 
-local autoKillCountLbl = Instance.new("TextLabel", autoKillBlock)
-autoKillCountLbl.Size = UDim2.new(1, 0, 0, 40)
-autoKillCountLbl.BackgroundColor3 = BG_ROW
-autoKillCountLbl.BorderSizePixel = 0
-autoKillCountLbl.LayoutOrder = 4
-autoKillCountLbl.Text = "Kills: 0"
-autoKillCountLbl.Font = Enum.Font.Code
-autoKillCountLbl.TextSize = 13
-autoKillCountLbl.TextColor3 = TEXT_DIM
-autoKillCountLbl.TextXAlignment = Enum.TextXAlignment.Center
-autoKillCountLbl.TextYAlignment = Enum.TextYAlignment.Center
-Instance.new("UICorner", autoKillCountLbl).CornerRadius = UDim.new(0, 8)
+-- BLOCO: AUTO MURDER
+local murderBlock = createBlock(funcContent, 2, "🗡️ AUTO MURDER")
 
-task.spawn(function()
-    while autoKillCountLbl.Parent do
-        task.wait(0.25)
-        if AutoKillConfig.Alvo == "Só Murder" then
-            if MurderESP_Target then
-                autoKillCountLbl.Text = "🚁 Drone: " .. MurderESP_Target.DisplayName
-                autoKillCountLbl.TextColor3 = Color3.fromRGB(220, 80, 80)
-            else
-                autoKillCountLbl.Text = "Aguardando Murderer..."
-                autoKillCountLbl.TextColor3 = TEXT_DIM
-            end
-        else
-            autoKillCountLbl.Text = "Kills: " .. AutoKillConfig.Kills
-            autoKillCountLbl.TextColor3 = AutoKillConfig.Rodando and Theme.Accent or TEXT_DIM
-        end
-    end
+local murderHint = Instance.new("TextLabel", murderBlock)
+murderHint.Size = UDim2.new(1, 0, 0, 32)
+murderHint.BackgroundTransparency = 1
+murderHint.Text = "Teleporta uma vez pra perto do Murderer (fora do FOV dele)."
+murderHint.Font = Enum.Font.GothamMedium
+murderHint.TextSize = 11
+murderHint.TextColor3 = TEXT_DIM
+murderHint.TextXAlignment = Enum.TextXAlignment.Left
+murderHint.TextWrapped = true
+murderHint.LayoutOrder = 2
+
+-- 🎯 BOTÃO: Ir pro Murder
+createButton(murderBlock, 3, "🗡️  Ir pro Murder", function()
+    IrProMurder()
 end)
 
+-- BLOCO: UTILITÁRIOS
 local utilBlock = createBlock(funcContent, 3, "⚙️ UTILITÁRIOS")
 createToggle(utilBlock, 2, "Noclip", false, function(v) Noclip_Set(v) end)
 createToggle(utilBlock, 3, "Anti-AFK", false, function(v) AntiAFK_Set(v) end)
@@ -2309,4 +2135,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU mm2] v9.9 carregado 🔪")
+print("[AKZ MENU mm2] v1 carregado 🔪")
