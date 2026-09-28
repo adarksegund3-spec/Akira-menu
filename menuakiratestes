@@ -1,605 +1,482 @@
 --[[
-   AKZ MENU — Walk Safe
-   Logo arrastável • Salvar posição • Andar até lá
-   SEM bypass arriscado, SEM metatable
+═══════════════════════════════════════════════════════════════
+   AKZ DIAGNÓSTICO — Steal an Egg
+   
+   Escaneia TUDO do jogo (read-only)
+   Preview pequeno • Copiar completo
+═══════════════════════════════════════════════════════════════
 --]]
 
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
+local Lighting = game:GetService("Lighting")
+local Teams = game:GetService("Teams")
+local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 
--- Tema
-local Accent    = Color3.fromRGB(170, 100, 255)
-local BG        = Color3.fromRGB(12, 12, 16)
-local BG_HEADER = Color3.fromRGB(18, 18, 24)
-local BG_TAB    = Color3.fromRGB(10, 10, 14)
-local BG_ROW    = Color3.fromRGB(22, 22, 28)
-local BG_BTN    = Color3.fromRGB(32, 32, 42)
-local TEXT      = Color3.fromRGB(240, 240, 245)
-local TEXT_DIM  = Color3.fromRGB(140, 140, 150)
-local STROKE    = Color3.fromRGB(45, 45, 58)
-local SUCCESS   = Color3.fromRGB(120, 220, 140)
-local WARN      = Color3.fromRGB(255, 190, 60)
-local DANGER    = Color3.fromRGB(230, 90, 90)
-
--- Config
-local posicaoSalva = nil
-local andandoAtivo = false
-local speedWalk    = 38
-local waypointDist = 20
-local chegadaDist  = 5
-
+-- ═══════════════════════════════════════════════════════════════
 -- GUI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AKZ_Menu"
-screenGui.ResetOnSpawn = false
-screenGui.IgnoreGuiInset = true
-pcall(function() screenGui.Parent = CoreGui end)
-if not screenGui.Parent then screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
--- Logo
-local logo = Instance.new("TextButton")
-logo.AnchorPoint = Vector2.new(0.5, 0.5)
-logo.Size = UDim2.new(0, 100, 0, 40)
-logo.Position = UDim2.new(0, 100, 0, 80)
-logo.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
-logo.BorderSizePixel = 0
-logo.Text = "AKZ"
-logo.Font = Enum.Font.GothamBlack
-logo.TextSize = 22
-logo.TextColor3 = Accent
-logo.AutoButtonColor = false
-logo.Active = true
-logo.ZIndex = 5
-logo.Parent = screenGui
-
-Instance.new("UICorner", logo).CornerRadius = UDim.new(0, 12)
-local logoStroke = Instance.new("UIStroke", logo)
-logoStroke.Color = Accent
-logoStroke.Thickness = 2
-logoStroke.Transparency = 0.1
-
--- Menu
-local menuFrame = Instance.new("Frame")
-menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-menuFrame.Size = UDim2.new(0, 400, 0, 340)
-menuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-menuFrame.BackgroundColor3 = BG
-menuFrame.BorderSizePixel = 0
-menuFrame.Visible = false
-menuFrame.ClipsDescendants = true
-menuFrame.ZIndex = 10
-menuFrame.Parent = screenGui
-Instance.new("UICorner", menuFrame).CornerRadius = UDim.new(0, 14)
-local menuStroke = Instance.new("UIStroke", menuFrame)
-menuStroke.Color = STROKE
-menuStroke.Thickness = 1
-
-local header = Instance.new("Frame")
-header.Size = UDim2.new(1, 0, 0, 44)
-header.BackgroundColor3 = BG_HEADER
-header.BorderSizePixel = 0
-header.ZIndex = 11
-header.Parent = menuFrame
-Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
-
-local headerTitle = Instance.new("TextLabel")
-headerTitle.Size = UDim2.new(1, -80, 1, 0)
-headerTitle.Position = UDim2.new(0, 16, 0, 0)
-headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "AKZ  •  Walk"
-headerTitle.Font = Enum.Font.GothamBold
-headerTitle.TextSize = 14
-headerTitle.TextColor3 = TEXT
-headerTitle.TextXAlignment = Enum.TextXAlignment.Left
-headerTitle.ZIndex = 11
-headerTitle.Parent = header
-
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 26, 0, 26)
-closeBtn.Position = UDim2.new(1, -36, 0.5, -13)
-closeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 72)
-closeBtn.Text = "×"
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 18
-closeBtn.TextColor3 = TEXT
-closeBtn.BorderSizePixel = 0
-closeBtn.AutoButtonColor = false
-closeBtn.ZIndex = 11
-closeBtn.Parent = header
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
-
-local tabBar = Instance.new("Frame")
-tabBar.Size = UDim2.new(1, 0, 0, 38)
-tabBar.Position = UDim2.new(0, 0, 0, 44)
-tabBar.BackgroundColor3 = BG_TAB
-tabBar.BorderSizePixel = 0
-tabBar.ZIndex = 11
-tabBar.Parent = menuFrame
-
-local contentArea = Instance.new("Frame")
-contentArea.Size = UDim2.new(1, 0, 1, -82)
-contentArea.Position = UDim2.new(0, 0, 0, 82)
-contentArea.BackgroundTransparency = 1
-contentArea.ZIndex = 11
-contentArea.Parent = menuFrame
-
-local Tabs, tabOrder, ActiveTab = {}, {}, nil
-
-local function selectTab(name)
-    if ActiveTab == name then return end
-    if ActiveTab and Tabs[ActiveTab] then
-        Tabs[ActiveTab].content.Visible = false
-        Tabs[ActiveTab].indicator.BackgroundTransparency = 1
-        Tabs[ActiveTab].button.TextColor3 = TEXT_DIM
+-- ═══════════════════════════════════════════════════════════════
+for _, g in ipairs(CoreGui:GetChildren()) do
+    if g.Name == "AKZ_Diag_SAE" then g:Destroy() end
+end
+pcall(function()
+    for _, g in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
+        if g.Name == "AKZ_Diag_SAE" then g:Destroy() end
     end
-    ActiveTab = name
-    Tabs[name].content.Visible = true
-    Tabs[name].indicator.BackgroundTransparency = 0
-    Tabs[name].button.TextColor3 = Color3.fromRGB(255,255,255)
-end
+end)
 
-local function createTab(name)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.5, -4, 1, 0)
-    btn.Position = UDim2.new(#tabOrder * 0.5, 4, 0, 0)
-    btn.BackgroundTransparency = 1
-    btn.Text = name
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
-    btn.TextColor3 = TEXT_DIM
-    btn.AutoButtonColor = false
-    btn.ZIndex = 12
-    btn.Parent = tabBar
+local gui = Instance.new("ScreenGui")
+gui.Name = "AKZ_Diag_SAE"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999
+pcall(function() gui.Parent = CoreGui end)
+if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    local indicator = Instance.new("Frame")
-    indicator.Size = UDim2.new(1, -30, 0, 2)
-    indicator.Position = UDim2.new(0, 15, 1, -2)
-    indicator.BackgroundColor3 = Accent
-    indicator.BorderSizePixel = 0
-    indicator.BackgroundTransparency = 1
-    indicator.ZIndex = 12
-    indicator.Parent = btn
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 520, 0, 480)
+frame.Position = UDim2.new(0.5, -260, 0.5, -240)
+frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+frame.BorderSizePixel = 0
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+local st = Instance.new("UIStroke", frame)
+st.Color = Color3.fromRGB(120, 220, 140)
+st.Thickness = 2
 
-    local content = Instance.new("Frame")
-    content.Size = UDim2.new(1, -20, 1, -16)
-    content.Position = UDim2.new(0, 10, 0, 8)
-    content.BackgroundTransparency = 1
-    content.Visible = false
-    content.ZIndex = 12
-    content.Parent = contentArea
+local titulo = Instance.new("TextLabel")
+titulo.Size = UDim2.new(1, 0, 0, 36)
+titulo.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+titulo.BorderSizePixel = 0
+titulo.Text = "AKZ DIAGNOSTICO — Steal an Egg"
+titulo.Font = Enum.Font.GothamBold
+titulo.TextSize = 14
+titulo.TextColor3 = Color3.fromRGB(120, 220, 140)
+titulo.Parent = frame
+Instance.new("UICorner", titulo).CornerRadius = UDim.new(0, 10)
 
-    local layout = Instance.new("UIListLayout", content)
-    layout.Padding = UDim.new(0, 8)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
+local fechar = Instance.new("TextButton")
+fechar.Size = UDim2.new(0, 28, 0, 28)
+fechar.Position = UDim2.new(1, -34, 0, 4)
+fechar.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+fechar.Text = "X"
+fechar.Font = Enum.Font.GothamBold
+fechar.TextSize = 15
+fechar.TextColor3 = Color3.fromRGB(255,255,255)
+fechar.BorderSizePixel = 0
+fechar.Parent = frame
+Instance.new("UICorner", fechar).CornerRadius = UDim.new(0, 6)
+fechar.MouseButton1Click:Connect(function() gui:Destroy() end)
 
-    btn.MouseButton1Click:Connect(function() selectTab(name) end)
+local ativar = Instance.new("TextButton")
+ativar.Size = UDim2.new(0, 180, 0, 38)
+ativar.Position = UDim2.new(0, 12, 0, 46)
+ativar.BackgroundColor3 = Color3.fromRGB(120, 220, 140)
+ativar.Text = "ATIVAR"
+ativar.Font = Enum.Font.GothamBold
+ativar.TextSize = 15
+ativar.TextColor3 = Color3.fromRGB(15, 15, 20)
+ativar.BorderSizePixel = 0
+ativar.Parent = frame
+Instance.new("UICorner", ativar).CornerRadius = UDim.new(0, 8)
 
-    Tabs[name] = { button = btn, content = content, indicator = indicator }
-    tabOrder[#tabOrder + 1] = name
-    return Tabs[name]
-end
+local copiar = Instance.new("TextButton")
+copiar.Size = UDim2.new(0, 140, 0, 38)
+copiar.Position = UDim2.new(0, 200, 0, 46)
+copiar.BackgroundColor3 = Color3.fromRGB(80, 150, 255)
+copiar.Text = "COPIAR TUDO"
+copiar.Font = Enum.Font.GothamBold
+copiar.TextSize = 13
+copiar.TextColor3 = Color3.fromRGB(255, 255, 255)
+copiar.BorderSizePixel = 0
+copiar.Parent = frame
+Instance.new("UICorner", copiar).CornerRadius = UDim.new(0, 8)
 
-local function createButton(parent, order, label, onClick)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 44)
-    btn.BackgroundColor3 = BG_BTN
-    btn.BorderSizePixel = 0
-    btn.Text = label
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
-    btn.TextColor3 = TEXT
-    btn.AutoButtonColor = false
-    btn.LayoutOrder = order
-    btn.Parent = parent
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-    local st = Instance.new("UIStroke", btn)
-    st.Color = Accent
-    st.Thickness = 1.2
-    st.Transparency = 0.5
-    btn.MouseButton1Click:Connect(onClick)
-    return btn
-end
+local statusLbl = Instance.new("TextLabel")
+statusLbl.Size = UDim2.new(1, -360, 0, 38)
+statusLbl.Position = UDim2.new(0, 348, 0, 46)
+statusLbl.BackgroundTransparency = 1
+statusLbl.Text = "Pronto"
+statusLbl.Font = Enum.Font.GothamMedium
+statusLbl.TextSize = 11
+statusLbl.TextColor3 = Color3.fromRGB(140, 140, 150)
+statusLbl.TextXAlignment = Enum.TextXAlignment.Right
+statusLbl.TextYAlignment = Enum.TextYAlignment.Center
+statusLbl.Parent = frame
 
-local function createSlider(parent, order, label, minV, maxV, initial, onChange)
-    local row = Instance.new("Frame")
-    row.Size = UDim2.new(1, 0, 0, 52)
-    row.BackgroundColor3 = BG_ROW
-    row.BorderSizePixel = 0
-    row.LayoutOrder = order
-    row.Parent = parent
-    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 10)
+local preview = Instance.new("ScrollingFrame")
+preview.Size = UDim2.new(1, -24, 1, -110)
+preview.Position = UDim2.new(0, 12, 0, 94)
+preview.BackgroundColor3 = Color3.fromRGB(5, 5, 8)
+preview.BorderSizePixel = 0
+preview.ScrollBarThickness = 6
+preview.CanvasSize = UDim2.new(0, 0, 0, 0)
+preview.AutomaticCanvasSize = Enum.AutomaticSize.Y
+preview.Parent = frame
+Instance.new("UICorner", preview).CornerRadius = UDim.new(0, 8)
 
-    local lbl = Instance.new("TextLabel", row)
-    lbl.Size = UDim2.new(1, -80, 0, 18)
-    lbl.Position = UDim2.new(0, 14, 0, 6)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = label
-    lbl.Font = Enum.Font.GothamMedium
-    lbl.TextSize = 12
-    lbl.TextColor3 = TEXT
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
+local previewText = Instance.new("TextLabel")
+previewText.Size = UDim2.new(1, -12, 0, 0)
+previewText.Position = UDim2.new(0, 6, 0, 6)
+previewText.AutomaticSize = Enum.AutomaticSize.Y
+previewText.BackgroundTransparency = 1
+previewText.Text = "Toque em ATIVAR para escanear."
+previewText.Font = Enum.Font.Code
+previewText.TextSize = 11
+previewText.TextColor3 = Color3.fromRGB(220, 220, 230)
+previewText.TextXAlignment = Enum.TextXAlignment.Left
+previewText.TextYAlignment = Enum.TextYAlignment.Top
+previewText.TextWrapped = true
+previewText.Parent = preview
 
-    local valLbl = Instance.new("TextLabel", row)
-    valLbl.Size = UDim2.new(0, 60, 0, 18)
-    valLbl.Position = UDim2.new(1, -74, 0, 6)
-    valLbl.BackgroundTransparency = 1
-    valLbl.Text = tostring(initial)
-    valLbl.Font = Enum.Font.GothamBold
-    valLbl.TextSize = 12
-    valLbl.TextColor3 = Accent
-    valLbl.TextXAlignment = Enum.TextXAlignment.Right
+-- ═══════════════════════════════════════════════════════════════
+-- FUNÇÕES DE SCAN
+-- ═══════════════════════════════════════════════════════════════
+local linhas = {}
+local function L(s) table.insert(linhas, tostring(s)) end
 
-    local bar = Instance.new("Frame", row)
-    bar.Size = UDim2.new(1, -28, 0, 6)
-    bar.Position = UDim2.new(0, 14, 0, 36)
-    bar.BackgroundColor3 = Color3.fromRGB(45, 45, 58)
-    bar.BorderSizePixel = 0
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
-
-    local fill = Instance.new("Frame", bar)
-    fill.Size = UDim2.new((initial - minV) / (maxV - minV), 0, 1, 0)
-    fill.BackgroundColor3 = Accent
-    fill.BorderSizePixel = 0
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
-
-    local knob = Instance.new("Frame", bar)
-    knob.AnchorPoint = Vector2.new(0.5, 0.5)
-    knob.Size = UDim2.new(0, 14, 0, 14)
-    knob.Position = UDim2.new((initial - minV) / (maxV - minV), 0, 0.5, 0)
-    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    knob.BorderSizePixel = 0
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
-    local click = Instance.new("TextButton", row)
-    click.Size = UDim2.new(1, 0, 1, 0)
-    click.BackgroundTransparency = 1
-    click.Text = ""
-
-    local dragging = false
-    local function setFromAbsX(absX)
-        local rel = math.clamp((absX - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-        local value = math.floor(minV + rel * (maxV - minV) + 0.5)
-        valLbl.Text = tostring(value)
-        fill.Size = UDim2.new(rel, 0, 1, 0)
-        knob.Position = UDim2.new(rel, 0, 0.5, 0)
-        if onChange then onChange(value) end
+local function scanAttributes(inst, prefixo, maxItems)
+    local attrs = inst:GetAttributes()
+    local n = 0
+    for k, v in pairs(attrs) do
+        n = n + 1
+        if not maxItems or n <= maxItems then
+            L(string.format("%s  %s = %s [%s]", prefixo, k, tostring(v), typeof(v)))
+        end
     end
-
-    click.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; setFromAbsX(input.Position.X)
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            setFromAbsX(input.Position.X)
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-end
-
-local function createLabel(parent, order, texto, cor, altura)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, altura or 40)
-    lbl.BackgroundColor3 = BG_ROW
-    lbl.BorderSizePixel = 0
-    lbl.Text = texto
-    lbl.Font = Enum.Font.Code
-    lbl.TextSize = 12
-    lbl.TextColor3 = cor or TEXT_DIM
-    lbl.LayoutOrder = order
-    lbl.TextWrapped = true
-    lbl.TextXAlignment = Enum.TextXAlignment.Center
-    lbl.TextYAlignment = Enum.TextYAlignment.Center
-    lbl.Parent = parent
-    Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 10)
-    return lbl
-end
-
--- Helpers
-local function getHRP()
-    local c = LocalPlayer.Character
-    if not c then return nil end
-    return c:FindFirstChild("HumanoidRootPart")
-end
-
-local function getHumanoid()
-    local c = LocalPlayer.Character
-    if not c then return nil end
-    return c:FindFirstChildOfClass("Humanoid")
-end
-
-local function salvarPosicao()
-    local hrp = getHRP()
-    if not hrp then return false end
-    posicaoSalva = hrp.Position
-    return true
-end
-
-local function pararMovimento()
-    andandoAtivo = false
-    local hum = getHumanoid()
-    if hum then
-        hum.WalkSpeed = 16
-        local hrp = getHRP()
-        if hrp then pcall(function() hum:MoveTo(hrp.Position) end) end
+    if maxItems and n > maxItems then
+        L(string.format("%s  ... mais %d atributos", prefixo, n - maxItems))
     end
 end
 
-local function comecarCaminhada()
-    if andandoAtivo then return end
-    if not posicaoSalva then return end
-    andandoAtivo = true
+local function coletar()
+    linhas = {}
+    L("═══════════════════════════════════════════")
+    L("   AKZ DIAGNÓSTICO — Steal an Egg")
+    L("   Gerado em: " .. os.date("%d/%m/%Y %H:%M:%S"))
+    L("═══════════════════════════════════════════")
+    L("")
 
-    task.spawn(function()
-        local tempoParado = 0
-        local ultimaPos = nil
+    -- JOGADOR LOCAL
+    L("━━━ 1) JOGADOR LOCAL ━━━")
+    L("Nome: " .. LocalPlayer.Name)
+    L("DisplayName: " .. LocalPlayer.DisplayName)
+    L("UserId: " .. LocalPlayer.UserId)
+    L("AccountAge: " .. LocalPlayer.AccountAge .. " dias")
+    pcall(function() L("Team: " .. tostring(LocalPlayer.Team)) end)
+    pcall(function() L("TeamColor: " .. tostring(LocalPlayer.TeamColor)) end)
+    L("")
 
-        while andandoAtivo do
-            local char = LocalPlayer.Character
-            local hum = getHumanoid()
-            local hrp = getHRP()
-
-            if not char or not hum or not hrp or hum.Health <= 0 then
-                pararMovimento()
-                break
+    -- CHARACTER ATRIBUTES
+    L("━━━ 2) CHARACTER ATRIBUTES ━━━")
+    local char = LocalPlayer.Character
+    if char then
+        L("Character: " .. char.Name)
+        scanAttributes(char, "  ")
+        L("  ─── filhos ───")
+        for _, o in ipairs(char:GetChildren()) do
+            L("  • " .. o.Name .. " [" .. o.ClassName .. "]")
+            if o:IsA("ValueBase") then
+                L("    = " .. tostring(o.Value))
             end
+        end
+    else
+        L("(sem character)")
+    end
+    L("")
 
-            hum.WalkSpeed = speedWalk
+    -- HUMANOID
+    L("━━━ 3) HUMANOID ━━━")
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            L("WalkSpeed: " .. hum.WalkSpeed)
+            L("JumpPower: " .. hum.JumpPower)
+            L("MaxHealth: " .. hum.MaxHealth)
+            L("Health: " .. hum.Health)
+            L("UseJumpPower: " .. tostring(hum.UseJumpPower))
+        end
+    end
+    L("")
 
-            local posAtual = hrp.Position
-            local dist = (posAtual - posicaoSalva).Magnitude
+    -- LEADERSTATS
+    L("━━━ 4) LEADERSTATS ━━━")
+    local ls = LocalPlayer:FindFirstChild("leaderstats")
+    if ls then
+        for _, v in ipairs(ls:GetChildren()) do
+            L("• " .. v.Name .. " = " .. tostring(v.Value) .. " [" .. v.ClassName .. "]")
+        end
+    else
+        L("(sem leaderstats)")
+    end
+    L("")
 
-            if dist <= chegadaDist then
-                pararMovimento()
-                break
+    -- TODOS OS PLAYERS
+    L("━━━ 5) TODOS OS PLAYERS (" .. #Players:GetPlayers() .. ") ━━━")
+    for _, p in ipairs(Players:GetPlayers()) do
+        local tag = (p == LocalPlayer) and " [EU]" or ""
+        L("• " .. p.Name .. tag)
+        if p.Character then
+            local ch = p.Character
+            local h = ch:FindFirstChildOfClass("Humanoid")
+            if h then
+                L("    Health: " .. h.Health .. "/" .. h.MaxHealth)
+                L("    WalkSpeed: " .. h.WalkSpeed)
             end
+        end
+    end
+    L("")
 
-            local direcao = (posicaoSalva - posAtual)
-            local wp
-            if direcao.Magnitude <= waypointDist then
-                wp = posicaoSalva
-            else
-                wp = posAtual + direcao.Unit * waypointDist
+    -- TEAMS
+    L("━━━ 6) TEAMS ━━━")
+    local teams = Teams:GetTeams()
+    if #teams == 0 then L("(nenhum)") end
+    for _, t in ipairs(teams) do
+        L("• " .. t.Name .. " | " .. tostring(t.TeamColor))
+    end
+    L("")
+
+    -- WORKSPACE ESTRUTURA
+    L("━━━ 7) WORKSPACE ━━━")
+    L("Children:")
+    for _, o in ipairs(Workspace:GetChildren()) do
+        L("  • " .. o.Name .. " [" .. o.ClassName .. "]")
+    end
+    L("")
+    L("Attributes do Workspace:")
+    scanAttributes(Workspace, "  ")
+    L("")
+
+    -- WORKSPACE: procurar coisas chave
+    L("━━━ 8) WORKSPACE — PROCURA ━━━")
+    local chaves = {"speed", "walk", "treadmill", "esteira", "egg", "ovo", "coin", "pet", "base", "plot", "sell", "shop", "timer", "round", "spawn", "portal", "biome", "shop"}
+    for _, chave in ipairs(chaves) do
+        local achou = {}
+        for _, o in ipairs(Workspace:GetDescendants()) do
+            if o.Name:lower():find(chave, 1, true) then
+                table.insert(achou, o)
+                if #achou >= 5 then break end
             end
+        end
+        if #achou > 0 then
+            L("● '" .. chave .. "':")
+            for _, o in ipairs(achou) do
+                L("   " .. o:GetFullName() .. " [" .. o.ClassName .. "]")
+            end
+        end
+    end
+    L("")
 
-            pcall(function() hum:MoveTo(wp) end)
+    -- REPLICATEDSTORAGE
+    L("━━━ 9) REPLICATEDSTORAGE ━━━")
+    for _, o in ipairs(ReplicatedStorage:GetChildren()) do
+        L("• " .. o.Name .. " [" .. o.ClassName .. "]")
+    end
+    L("")
 
-            if ultimaPos then
-                local moveu = (posAtual - ultimaPos).Magnitude
-                if moveu < 0.5 then
-                    tempoParado = tempoParado + 0.1
-                    if tempoParado > 2 then
-                        local lat = Vector3.new(direcao.Unit.Z, 0, -direcao.Unit.X)
-                        pcall(function() hum:MoveTo(posAtual + lat * 15 + direcao.Unit * 10) end)
-                        tempoParado = 0
+    -- REMOTES (RemoteEvent / RemoteFunction)
+    L("━━━ 10) REMOTES ━━━")
+    local remotes = {}
+    for _, o in ipairs(ReplicatedStorage:GetDescendants()) do
+        if o:IsA("RemoteEvent") or o:IsA("RemoteFunction") or o:IsA("UnreliableRemoteEvent") then
+            table.insert(remotes, o)
+        end
+    end
+    L("Total: " .. #remotes)
+    for _, r in ipairs(remotes) do
+        L("• " .. r:GetFullName() .. " [" .. r.ClassName .. "]")
+    end
+    L("")
+
+    -- PROCURAR REMOTES ESPECÍFICOS
+    L("━━━ 11) REMOTES — POSSÍVEIS FUNÇÕES ━━━")
+    for _, r in ipairs(remotes) do
+        local n = r.Name:lower()
+        if n:find("speed") or n:find("walk") or n:find("egg") or n:find("steal")
+        or n:find("hatch") or n:find("sell") or n:find("pet") or n:find("buy")
+        or n:find("spawn") or n:find("tp") or n:find("teleport") or n:find("coin")
+        or n:find("click") or n:find("claim") or n:find("reward") or n:find("cash")
+        or n:find("money") or n:find("upgrade") or n:find("treadmill") or n:find("place") then
+            L("★ " .. r:GetFullName() .. " [" .. r.ClassName .. "]")
+        end
+    end
+    L("")
+
+    -- STARTERGUI
+    L("━━━ 12) STARTERGUI ━━━")
+    for _, o in ipairs(StarterGui:GetChildren()) do
+        L("• " .. o.Name .. " [" .. o.ClassName .. "]")
+    end
+    L("")
+
+    -- PLAYERGUI ATUAL
+    L("━━━ 13) PLAYERGUI ━━━")
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        for _, o in ipairs(pg:GetChildren()) do
+            if o.Name ~= "AKZ_Diag_SAE" then
+                L("• " .. o.Name .. " [" .. o.ClassName .. "]")
+                if o:IsA("ScreenGui") then
+                    -- procurar textos importantes
+                    for _, d in ipairs(o:GetDescendants()) do
+                        if d:IsA("TextLabel") and d.Text ~= "" and #d.Text < 30 then
+                            local t = d.Text:lower()
+                            if t:find("speed") or t:find("veloc") or t:find("egg")
+                            or t:find("ovo") or t:find("pet") or t:find("coin")
+                            or t:find("moeda") or t:find("level") or t:find("cash")
+                            or t:find("$") or t:find("buy") or t:find("comprar") then
+                                L("   └ txt: " .. d.Text)
+                            end
+                        end
                     end
-                else
-                    tempoParado = 0
                 end
             end
-            ultimaPos = posAtual
-
-            task.wait(0.1)
         end
-    end)
+    end
+    L("")
+
+    -- LIGHTING
+    L("━━━ 14) LIGHTING ━━━")
+    L("Ambient: " .. tostring(Lighting.Ambient))
+    L("Brightness: " .. tostring(Lighting.Brightness))
+    L("ClockTime: " .. tostring(Lighting.ClockTime))
+    L("FogEnd: " .. tostring(Lighting.FogEnd))
+    L("")
+
+    -- SOUNDSERVICE
+    L("━━━ 15) SOUNDSERVICE ━━━")
+    for _, o in ipairs(SoundService:GetChildren()) do
+        L("• " .. o.Name .. " [" .. o.ClassName .. "]")
+    end
+    L("")
+
+    -- STRUCTURAS ESPECIAIS
+    L("━━━ 16) ESTRUTURAS ESPECIAIS ━━━")
+    local function procuraInstancia(nome)
+        for _, o in ipairs(Workspace:GetDescendants()) do
+            if o.Name:lower():find(nome, 1, true) then
+                return o:GetFullName() .. " [" .. o.ClassName .. "]"
+            end
+        end
+        return "não encontrado"
+    end
+    L("Base/Plot: " .. procuraInstancia("base"))
+    L("Plot: " .. procuraInstancia("plot"))
+    L("Timer: " .. procuraInstancia("timer"))
+    L("Round: " .. procuraInstancia("round"))
+    L("Egg/Ovo: " .. procuraInstancia("egg"))
+    L("Treadmill/Esteira: " .. procuraInstancia("treadmill"))
+    L("Coin/Moeda: " .. procuraInstancia("coin"))
+    L("")
+
+    -- MÓDULOS
+    L("━━━ 17) MÓDULOS ━━━")
+    for _, o in ipairs(ReplicatedStorage:GetDescendants()) do
+        if o:IsA("ModuleScript") then
+            L("• " .. o:GetFullName())
+        end
+    end
+    L("")
+
+    L("═══════════════════════════════════════════")
+    L("   FIM DO DIAGNÓSTICO")
+    L("   Total de linhas: " .. tostring(#linhas))
+    L("═══════════════════════════════════════════")
 end
 
--- Aba 1: Posição
-local posTab = createTab("Posição")
-local posStatus = createLabel(posTab.content, 1, "Nenhuma posição salva", TEXT_DIM, 50)
+-- ═══════════════════════════════════════════════════════════════
+-- BOTÃO ATIVAR
+-- ═══════════════════════════════════════════════════════════════
+ativar.MouseButton1Click:Connect(function()
+    ativar.Text = "ESCANEANDO..."
+    statusLbl.Text = "Coletando dados..."
+    statusLbl.TextColor3 = Color3.fromRGB(255, 190, 60)
 
-createButton(posTab.content, 2, "📌  Salvar posição atual", function()
-    if salvarPosicao() then
-        local p = posicaoSalva
-        posStatus.Text = string.format("✔ Salvo\n(%.1f, %.1f, %.1f)", p.X, p.Y, p.Z)
-        posStatus.TextColor3 = SUCCESS
-    else
-        posStatus.Text = "✗ Sem personagem"
-        posStatus.TextColor3 = DANGER
+    task.wait(0.1)
+
+    local ok, err = pcall(coletar)
+    if not ok then
+        linhas = {"ERRO: " .. tostring(err)}
     end
+
+    -- Preview: só as primeiras 100 linhas
+    local previewMax = 100
+    local previewLinhas = {}
+    for i = 1, math.min(#linhas, previewMax) do
+        table.insert(previewLinhas, linhas[i])
+    end
+    if #linhas > previewMax then
+        table.insert(previewLinhas, "")
+        table.insert(previewLinhas, "... mais " .. (#linhas - previewMax) .. " linhas.")
+        table.insert(previewLinhas, "Use COPIAR TUDO para pegar o resultado completo.")
+    end
+
+    previewText.Text = table.concat(previewLinhas, "\n")
+
+    ativar.Text = "✔ CONCLUIDO"
+    statusLbl.Text = tostring(#linhas) .. " linhas • Pronto"
+    statusLbl.TextColor3 = Color3.fromRGB(120, 220, 140)
+
+    task.delay(2, function()
+        ativar.Text = "ATIVAR"
+    end)
 end)
 
--- Aba 2: Iniciar
-local initTab = createTab("Iniciar")
-
-createSlider(initTab.content, 1, "⚡ Velocidade", 20, 55, speedWalk, function(v)
-    speedWalk = v
-    local hum = getHumanoid()
-    if hum and andandoAtivo then hum.WalkSpeed = v end
-end)
-
-createButton(initTab.content, 2, "🟢  Ativar botão flutuante", function()
-    abrirBotaoFlutuante()
-end)
-
-createLabel(initTab.content, 3, "Waypoints de 20 studs\nSpeed seguro: 20 a 55", TEXT_DIM, 55)
-
--- Botão flutuante
-local floatingBtn = nil
-
-function abrirBotaoFlutuante()
-    if floatingBtn and floatingBtn.Parent then
-        floatingBtn.Visible = true
+-- ═══════════════════════════════════════════════════════════════
+-- BOTÃO COPIAR
+-- ═══════════════════════════════════════════════════════════════
+copiar.MouseButton1Click:Connect(function()
+    if #linhas == 0 then
+        copiar.Text = "RODE PRIMEIRO"
+        task.delay(1.5, function() copiar.Text = "COPIAR TUDO" end)
         return
     end
 
-    floatingBtn = Instance.new("TextButton")
-    floatingBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-    floatingBtn.Size = UDim2.new(0, 150, 0, 52)
-    floatingBtn.Position = UDim2.new(0.5, 0, 0.85, 0)
-    floatingBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
-    floatingBtn.BorderSizePixel = 0
-    floatingBtn.Text = "INICIAR"
-    floatingBtn.Font = Enum.Font.GothamBlack
-    floatingBtn.TextSize = 17
-    floatingBtn.TextColor3 = Accent
-    floatingBtn.AutoButtonColor = false
-    floatingBtn.Active = true
-    floatingBtn.ZIndex = 50
-    floatingBtn.Parent = screenGui
+    local txt = table.concat(linhas, "\n")
+    local ok = pcall(function() setclipboard(txt) end)
+    if ok then
+        copiar.Text = "✔ COPIADO!"
+        statusLbl.Text = "Resultado completo copiado"
+        statusLbl.TextColor3 = Color3.fromRGB(120, 220, 140)
+    else
+        copiar.Text = "✗ FALHOU"
+        statusLbl.Text = "Não foi possível copiar"
+        statusLbl.TextColor3 = Color3.fromRGB(230, 90, 90)
+    end
 
-    Instance.new("UICorner", floatingBtn).CornerRadius = UDim.new(0, 14)
-    local st = Instance.new("UIStroke", floatingBtn)
-    st.Color = Accent
-    st.Thickness = 2
-    st.Transparency = 0.1
-
-    local dragging = false
-    local dragStart, startPos, moved = nil, nil, false
-
-    floatingBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            moved = false
-            dragStart = input.Position
-            startPos = floatingBtn.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if not moved then
-                        if not posicaoSalva then
-                            floatingBtn.Text = "✗ SEM POSIÇÃO"
-                            floatingBtn.TextColor3 = DANGER
-                            task.delay(1.5, function()
-                                if floatingBtn and floatingBtn.Parent then
-                                    floatingBtn.Text = "INICIAR"
-                                    floatingBtn.TextColor3 = Accent
-                                end
-                            end)
-                            return
-                        end
-
-                        if andandoAtivo then
-                            pararMovimento()
-                            floatingBtn.Text = "PARADO"
-                            floatingBtn.TextColor3 = WARN
-                            task.delay(1, function()
-                                if floatingBtn and floatingBtn.Parent then
-                                    floatingBtn.Text = "INICIAR"
-                                    floatingBtn.TextColor3 = Accent
-                                end
-                            end)
-                        else
-                            comecarCaminhada()
-                            floatingBtn.Text = "ANDANDO..."
-                            floatingBtn.TextColor3 = SUCCESS
-                            task.spawn(function()
-                                while andandoAtivo and floatingBtn and floatingBtn.Parent do
-                                    task.wait(0.2)
-                                end
-                                if floatingBtn and floatingBtn.Parent then
-                                    floatingBtn.Text = "INICIAR"
-                                    floatingBtn.TextColor3 = Accent
-                                end
-                            end)
-                        end
-                    end
-                end
-            end)
-        end
+    task.delay(2, function()
+        copiar.Text = "COPIAR TUDO"
+        statusLbl.Text = "Pronto"
+        statusLbl.TextColor3 = Color3.fromRGB(140, 140, 150)
     end)
+end)
 
-    UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            local delta = input.Position - dragStart
-            if math.abs(delta.X) > 4 or math.abs(delta.Y) > 4 then moved = true end
-            floatingBtn.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y
-            )
-        end
-    end)
-end
-
--- Open / Close
-local menuOpen = false
-
-local function openMenu()
-    if menuOpen then return end
-    menuOpen = true
-    menuFrame.Visible = true
-end
-
-local function closeMenu()
-    if not menuOpen then return end
-    menuOpen = false
-    menuFrame.Visible = false
-end
-
-closeBtn.MouseButton1Click:Connect(closeMenu)
-
--- Drag logo
-local logoDragging = false
-local logoDragStart, logoStartPos, logoMoved = nil, nil, false
-
-logo.InputBegan:Connect(function(input)
+-- Drag pelo título
+local UserInputService = game:GetService("UserInputService")
+local dragging = false
+local dragStart, startPos
+titulo.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        logoDragging = true
-        logoMoved = false
-        logoDragStart = input.Position
-        logoStartPos = logo.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                logoDragging = false
-                if not logoMoved then
-                    if menuOpen then closeMenu() else openMenu() end
-                end
-            end
-        end)
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
-    if not logoDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        local delta = input.Position - logoDragStart
-        if math.abs(delta.X) > 4 or math.abs(delta.Y) > 4 then logoMoved = true end
-        logo.Position = UDim2.new(
-            logoStartPos.X.Scale, logoStartPos.X.Offset + delta.X,
-            logoStartPos.Y.Scale, logoStartPos.Y.Offset + delta.Y
-        )
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local d = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
     end
 end)
-
--- Drag menu
-local menuDragging = false
-local menuDragStart, menuStartPos = nil, nil
-
-header.InputBegan:Connect(function(input)
+UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        menuDragging = true
-        menuDragStart = input.Position
-        menuStartPos = menuFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                menuDragging = false
-            end
-        end)
+        dragging = false
     end
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if not menuDragging then return end
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        local delta = input.Position - menuDragStart
-        menuFrame.Position = UDim2.new(
-            menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-selectTab("Posição")
-
-print("[AKZ MENU] v1 carregado")
+print("[AKZ DIAGNOSTICO] Pronto. Toque em ATIVAR.")
