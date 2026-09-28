@@ -1,10 +1,9 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU [FPS] Defusal — v2.1
-   Aimbot • ESP • Speed • JumpPower • FullBright • Anti-AFK
+   AKZ MENU [FPS] Defusal — v3.0
+   Team check real via Character:GetAttribute("TeamColor")
    
-   Base: AKZ MENU mm2 (mesma engine de ESP/Aimbot)
-   Fundo: banner AKIRA SCRIPTS (com overlay profissional)
+   Dev: Akira007p
 ═══════════════════════════════════════════════════════════════
 --]]
 
@@ -41,14 +40,13 @@ local Config = {
     Skeleton = false,
     ShowName = false,
     ShowTracer = false,
-    ESPTeamCheck = true,
+    ESPTeamCheck = true,      -- Só mostra inimigos (recomendado)
 
     -- Aimbot
     AimbotEnabled = false,
     AimbotShowFOV = true,
     AimbotFOV = 120,
     AimbotFOVAlpha = 0.6,
-    AimbotFOVColor = Color3.fromRGB(255,255,255),
     AimbotPart = "Head",
     AimbotTeamCheck = true,
     AimbotWallCheck = true,
@@ -68,12 +66,12 @@ local Config = {
 }
 
 -- ═══════════════════════════════════════════════════════════════
--- IMAGEM DE FUNDO DO MENU
+-- IMAGEM DE FUNDO
 -- ═══════════════════════════════════════════════════════════════
 local IMG_FUNDO = "rbxassetid://81914403640519"
 
 -- ═══════════════════════════════════════════════════════════════
--- TEMA (idêntico ao MM2)
+-- TEMA
 -- ═══════════════════════════════════════════════════════════════
 local Theme = {
     Accent    = Color3.fromRGB(240, 240, 245),
@@ -95,47 +93,54 @@ local SUCCESS_CLR = Color3.fromRGB(120, 220, 140)
 local DANGER_CLR  = Color3.fromRGB(230, 90, 90)
 
 local LAYOUTS = {
-    ["Em pé"]   = UDim2.new(0, 480, 0, 420),
-    ["Deitado"] = UDim2.new(0, 680, 0, 340),
+    ["Em pé"]   = UDim2.new(0, 480, 0, 440),
+    ["Deitado"] = UDim2.new(0, 680, 0, 360),
 }
 local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
--- TEAM CHECK
+-- TEAM CHECK (o pulo do gato!)
+-- No Defusal, o time fica em: Character:GetAttribute("TeamColor")
+-- Formato: "0.28, 0.67, 0.89" (RGB normalizado)
 -- ═══════════════════════════════════════════════════════════════
-local function getPlayerTeam(player)
+local function getTeamString(player)
     if not player then return nil end
-    local ok, team = pcall(function() return player.Team end)
-    if ok and team then return team end
-    local ok2, tc = pcall(function() return player.TeamColor end)
-    if ok2 and tc then return tc end
     local char = player.Character
-    if char then
-        local sv = char:FindFirstChild("Team")
-        if sv and (sv:IsA("StringValue") or sv:IsA("ObjectValue")) then
-            return sv.Value
-        end
+    if not char then return nil end
+    local ok, val = pcall(function() return char:GetAttribute("TeamColor") end)
+    if ok and val then return tostring(val) end
+    return nil
+end
+
+local function parseRGB(s)
+    if not s then return nil end
+    local r, g, b = s:match("([%d%.]+),%s*([%d%.]+),%s*([%d%.]+)")
+    if r and g and b then
+        return Color3.new(tonumber(r) or 1, tonumber(g) or 1, tonumber(b) or 1)
     end
     return nil
 end
 
 local function isAlly(player)
     if not player or player == LocalPlayer then return false end
-    local mine  = getPlayerTeam(LocalPlayer)
-    local their = getPlayerTeam(player)
-    if mine == nil or their == nil then return false end
-    return mine == their
+    local myTeam = getTeamString(LocalPlayer)
+    local theirTeam = getTeamString(player)
+    if not myTeam or not theirTeam then return false end
+    return myTeam == theirTeam
 end
 
 local function getTeamColor(player)
+    if player == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
     if isAlly(player) then return Color3.fromRGB(80, 170, 255) end
-    local ok, tc = pcall(function() return player.TeamColor end)
-    if ok and tc and tc.Color then return tc.Color end
+    -- Inimigo: pega a cor real do time dele
+    local s = getTeamString(player)
+    local cor = parseRGB(s)
+    if cor then return cor end
     return Color3.fromRGB(220, 40, 40)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- UI: Gui principal
+-- UI
 -- ═══════════════════════════════════════════════════════════════
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AKZ_Defusal_Menu"
@@ -145,6 +150,7 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 pcall(function() screenGui.Parent = CoreGui end)
 if not screenGui.Parent then screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
+-- Toast
 local toastGui = Instance.new("ScreenGui")
 toastGui.Name = "AKZ_Toast_Defusal"
 toastGui.ResetOnSpawn = false
@@ -224,7 +230,7 @@ fovCircle.ZIndex = 0
 fovCircle.Parent = screenGui
 Instance.new("UICorner", fovCircle).CornerRadius = UDim.new(1, 0)
 local fovStroke = Instance.new("UIStroke", fovCircle)
-fovStroke.Color = Config.AimbotFOVColor
+fovStroke.Color = Color3.fromRGB(255, 255, 255)
 fovStroke.Thickness = 1.5
 fovStroke.Transparency = 1 - Config.AimbotFOVAlpha
 
@@ -234,7 +240,7 @@ if hasDrawing then
         AimFovDrawing = Drawing.new("Circle")
         AimFovDrawing.Visible = false
         AimFovDrawing.Thickness = 1.5
-        AimFovDrawing.Color = Config.AimbotFOVColor
+        AimFovDrawing.Color = Color3.fromRGB(255,255,255)
         AimFovDrawing.Filled = false
         AimFovDrawing.NumSides = 60
         AimFovDrawing.Radius = Config.AimbotFOV
@@ -249,11 +255,9 @@ end
 local function refreshFov()
     if AimFovDrawing then
         AimFovDrawing.Radius = Config.AimbotFOV
-        AimFovDrawing.Color = Config.AimbotFOVColor
         AimFovDrawing.Transparency = 1 - Config.AimbotFOVAlpha
     end
     fovCircle.Size = UDim2.fromOffset(Config.AimbotFOV * 2, Config.AimbotFOV * 2)
-    fovStroke.Color = Config.AimbotFOVColor
     fovStroke.Transparency = 1 - Config.AimbotFOVAlpha
 end
 refreshFov()
@@ -274,7 +278,6 @@ Instance.new("UICorner", logo).CornerRadius = UDim.new(1, 0)
 local logoStroke = Instance.new("UIStroke", logo)
 logoStroke.Color = Theme.Accent
 logoStroke.Thickness = 2
-
 local knifeIcon = Instance.new("TextLabel", logo)
 knifeIcon.Size = UDim2.new(1, 0, 1, 0)
 knifeIcon.BackgroundTransparency = 1
@@ -313,15 +316,11 @@ local menuStroke = Instance.new("UIStroke", menuFrame)
 menuStroke.Color = STROKE_CLR
 menuStroke.Thickness = 1
 
--- ═══════════════════════════════════════════════════════════════
--- FUNDO PROFISSIONAL (imagem + overlay escuro)
--- ═══════════════════════════════════════════════════════════════
+-- Fundo com imagem + overlay
 if IMG_FUNDO ~= "" then
-    -- 1) Imagem de fundo (embaixo de tudo)
     local bgImage = Instance.new("ImageLabel")
     bgImage.Name = "BGImage"
     bgImage.Size = UDim2.new(1, 0, 1, 0)
-    bgImage.Position = UDim2.new(0, 0, 0, 0)
     bgImage.BackgroundTransparency = 1
     bgImage.Image = IMG_FUNDO
     bgImage.ScaleType = Enum.ScaleType.Crop
@@ -329,11 +328,9 @@ if IMG_FUNDO ~= "" then
     bgImage.Parent = menuFrame
     Instance.new("UICorner", bgImage).CornerRadius = UDim.new(0, 12)
 
-    -- 2) Overlay escuro (deixa a imagem sutil e o texto legível)
     local bgOverlay = Instance.new("Frame")
     bgOverlay.Name = "BGOverlay"
     bgOverlay.Size = UDim2.new(1, 0, 1, 0)
-    bgOverlay.Position = UDim2.new(0, 0, 0, 0)
     bgOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     bgOverlay.BackgroundTransparency = 0.55
     bgOverlay.BorderSizePixel = 0
@@ -341,7 +338,6 @@ if IMG_FUNDO ~= "" then
     bgOverlay.Parent = menuFrame
     Instance.new("UICorner", bgOverlay).CornerRadius = UDim.new(0, 12)
 
-    -- 3) Frame principal transparente
     menuFrame.BackgroundTransparency = 1
 end
 
@@ -673,8 +669,36 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     return { Set = function(v) setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X) end, Get = function() return value end }
 end
 
+local function createButton(parent, order, label, onClick)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = Color3.fromRGB(34, 34, 42)
+    btn.BackgroundTransparency = 0.15
+    btn.BorderSizePixel = 0
+    btn.Text = label
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 12
+    btn.TextColor3 = TEXT
+    btn.AutoButtonColor = false
+    btn.LayoutOrder = order
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    local st = Instance.new("UIStroke", btn)
+    st.Color = Theme.Accent
+    st.Thickness = 1
+    st.Transparency = 0.6
+    btn.MouseButton1Click:Connect(function()
+        TweenService:Create(st, TweenInfo.new(0.1), {Transparency = 0}):Play()
+        task.delay(0.15, function()
+            TweenService:Create(st, TweenInfo.new(0.2), {Transparency = 0.6}):Play()
+        end)
+        if onClick then onClick() end
+    end)
+    return btn
+end
+
 -- ═══════════════════════════════════════════════════════════════
--- ESP (mesma engine do MM2)
+-- ESP (engine MM2)
 -- ═══════════════════════════════════════════════════════════════
 local HL_TAG = "AKZ_HL"
 local SKELETON_R15 = {
@@ -746,6 +770,8 @@ end
 
 local function updatePlayerESP(player)
     if player == LocalPlayer then return end
+
+    -- TEAM CHECK: se for aliado, não mostra
     if Config.ESPTeamCheck and isAlly(player) then
         clearESPForPlayer(player)
         return
@@ -807,10 +833,9 @@ local function updatePlayerESP(player)
         cache.billboard:Destroy(); cache.billboard = nil
     end
 
-    -- Drawing: Box / Skeleton / Tracer
+    -- Drawing
     if hasDrawing then
         local top, bottom = get2DBounds(char)
-
         if Config.Box and top and bottom then
             if not cache.drawings.box then
                 local sq = Drawing.new("Square")
@@ -874,7 +899,7 @@ local function updatePlayerESP(player)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- AIMBOT (mesma engine do MM2 + team check)
+-- AIMBOT
 -- ═══════════════════════════════════════════════════════════════
 local function getAimPart(char)
     if not char then return nil end
@@ -1044,6 +1069,23 @@ do
             showToast("ANTI-AFK", "Ativado", SUCCESS_CLR)
         end
     end)
+
+    createSection(c, 5, "INFO")
+    local infoLbl = Instance.new("TextLabel")
+    infoLbl.Size = UDim2.new(1, 0, 0, 60)
+    infoLbl.BackgroundColor3 = BG_ROW
+    infoLbl.BackgroundTransparency = 0.15
+    infoLbl.BorderSizePixel = 0
+    infoLbl.LayoutOrder = 6
+    infoLbl.Text = "AKZ MENU [FPS] Defusal v3.0\nTeam check real via attribute\nDev: Akira007p"
+    infoLbl.Font = Enum.Font.Code
+    infoLbl.TextSize = 11
+    infoLbl.TextColor3 = TEXT_DIM
+    infoLbl.TextXAlignment = Enum.TextXAlignment.Center
+    infoLbl.TextYAlignment = Enum.TextYAlignment.Center
+    infoLbl.TextWrapped = true
+    infoLbl.Parent = c
+    Instance.new("UICorner", infoLbl).CornerRadius = UDim.new(0, 8)
 end
 
 selectTab("ESP")
@@ -1065,7 +1107,6 @@ end)
 
 local wasEnabled = false
 RunService.RenderStepped:Connect(function()
-    -- FOV circle
     local showFov = Config.AimbotEnabled and Config.AimbotShowFOV
     local centro = getScreenCenter()
     if AimFovDrawing then
@@ -1077,7 +1118,6 @@ RunService.RenderStepped:Connect(function()
         if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
 
-    -- ESP loop
     if not Config.ESPEnabled then
         if wasEnabled then clearAllESP() end
         wasEnabled = false
@@ -1088,13 +1128,11 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Aimbot
     if Config.AimbotEnabled and Config.Aiming then
         local target = getAimbotTarget()
         if target then lockOn(target) end
     end
 
-    -- Movimento
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1114,7 +1152,7 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 -- ═══════════════════════════════════════════════════════════════
--- OPEN/CLOSE MENU
+-- OPEN/CLOSE
 -- ═══════════════════════════════════════════════════════════════
 local menuOpen = false
 
@@ -1144,7 +1182,6 @@ end
 
 closeBtn.MouseButton1Click:Connect(closeMenu)
 
--- Logo drag + click
 local logoDragging, logoDragStart, logoStartPos, logoMoved = false, nil, nil, false
 logo.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1170,7 +1207,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- Header drag
 local menuDragging, menuDragStart, menuStartPos = false, nil, nil
 header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -1191,4 +1227,8 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU [FPS] Defusal] v2.1 carregado 🎯")
+-- Abre o menu automaticamente
+openMenu()
+
+print("[AKZ MENU [FPS] Defusal] v3.0 carregado 🎯")
+print("[TEAM CHECK] Lendo Character:GetAttribute('TeamColor')")
