@@ -1,8 +1,8 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU [FPS] Defusal — v3.1
+   AKZ MENU [FPS] Defusal — v1
    
-   Aimbot sempre ativo (sem keybind) • Team check real
+   Aimbot sempre ativo • Team check real via atributo
    ESP com cor de time • Speed • JumpPower • FullBright
    
    Dev: Akira007p
@@ -64,6 +64,10 @@ local Config = {
     FullBright = false,
     AntiAFK = false,
 }
+
+-- Valores padrão do Roblox (pra restaurar ao desligar)
+local DEFAULT_WALKSPEED = 16
+local DEFAULT_JUMPPOWER = 50
 
 -- ═══════════════════════════════════════════════════════════════
 -- IMAGEM DE FUNDO
@@ -350,7 +354,7 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -80, 1, 0)
 headerTitle.Position = UDim2.new(0, 16, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "AKZ MENU [FPS] Defusal"
+headerTitle.Text = "AKZ MENU [FPS] Defusal v1"
 headerTitle.Font = Enum.Font.GothamBold
 headerTitle.TextSize = 15
 headerTitle.TextColor3 = Theme.Accent
@@ -768,7 +772,6 @@ end
 local function updatePlayerESP(player)
     if player == LocalPlayer then return end
 
-    -- TEAM CHECK: se for aliado, não mostra
     if Config.ESPTeamCheck and isAlly(player) then
         clearESPForPlayer(player)
         return
@@ -896,7 +899,7 @@ local function updatePlayerESP(player)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- AIMBOT (igual ao MM2 + team check real)
+-- AIMBOT
 -- ═══════════════════════════════════════════════════════════════
 local function getAimPart(char)
     if not char then return nil end
@@ -908,7 +911,6 @@ local function getAimPart(char)
     end
 end
 
--- Wall check: exclui meu char, a câmera E o char do alvo
 local function hasWallBetween(fromPos, toPos, alvoChar)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
@@ -923,13 +925,11 @@ local function hasWallBetween(fromPos, toPos, alvoChar)
     return false
 end
 
--- getAimbotTarget — igual ao MM2, mas com team check do Defusal
 local function getAimbotTarget()
     local nearest, nearestDist = nil, math.huge
     local centro = getScreenCenter()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
-            -- TEAM CHECK: pula aliado
             if not (Config.AimbotTeamCheck and isAlly(p)) then
                 local char = p.Character
                 if char then
@@ -971,6 +971,26 @@ local function lockOn(targetPart)
     else
         local alpha = math.clamp(1 - Config.AimbotSmooth, 0.05, 1)
         Camera.CFrame = Camera.CFrame:Lerp(targetCF, alpha)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- HELPERS DE MOVIMENTO
+-- ═══════════════════════════════════════════════════════════════
+local function resetSpeed()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = DEFAULT_WALKSPEED end
+end
+
+local function resetJump()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.UseJumpPower = true
+        hum.JumpPower = DEFAULT_JUMPPOWER
     end
 end
 
@@ -1028,12 +1048,42 @@ local moveTab = createTab("Movimento")
 do
     local c = moveTab.content
     createSection(c, 1, "VELOCIDADE")
-    createToggle(c, 2, "Speed Ativado", Config.SpeedEnabled, function(v) Config.SpeedEnabled = v end)
-    createSlider(c, 3, "Velocidade", 16, 200, Config.SpeedValue, false, function(v) Config.SpeedValue = math.floor(v) end)
+    createToggle(c, 2, "Speed Ativado", Config.SpeedEnabled, function(v)
+        Config.SpeedEnabled = v
+        -- Se desativou, reseta o WalkSpeed AO VIVO (sem delay)
+        if not v then resetSpeed() end
+    end)
+    createSlider(c, 3, "Velocidade", 16, 200, Config.SpeedValue, false, function(v)
+        Config.SpeedValue = math.floor(v)
+        -- Se tiver ativo, aplica na hora também
+        if Config.SpeedEnabled then
+            local char = LocalPlayer.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then hum.WalkSpeed = Config.SpeedValue end
+            end
+        end
+    end)
 
     createSection(c, 4, "PULO")
-    createToggle(c, 5, "JumpPower Ativado", Config.JumpEnabled, function(v) Config.JumpEnabled = v end)
-    createSlider(c, 6, "JumpPower", 50, 300, Config.JumpValue, false, function(v) Config.JumpValue = math.floor(v) end)
+    createToggle(c, 5, "JumpPower Ativado", Config.JumpEnabled, function(v)
+        Config.JumpEnabled = v
+        -- Se desativou, reseta o JumpPower AO VIVO (sem delay)
+        if not v then resetJump() end
+    end)
+    createSlider(c, 6, "JumpPower", 50, 300, Config.JumpValue, false, function(v)
+        Config.JumpValue = math.floor(v)
+        if Config.JumpEnabled then
+            local char = LocalPlayer.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum.UseJumpPower = true
+                    hum.JumpPower = Config.JumpValue
+                end
+            end
+        end
+    end)
 end
 
 local miscTab = createTab("Misc")
@@ -1082,7 +1132,7 @@ do
     infoLbl.BackgroundTransparency = 0.15
     infoLbl.BorderSizePixel = 0
     infoLbl.LayoutOrder = 6
-    infoLbl.Text = "AKZ MENU [FPS] Defusal v3.1\nAimbot sempre ativo\nTeam check via atributo\nDev: Akira007p"
+    infoLbl.Text = "AKZ MENU [FPS] Defusal v1\nAimbot sempre ativo\nTeam check via atributo\nDev: Akira007p"
     infoLbl.Font = Enum.Font.Code
     infoLbl.TextSize = 11
     infoLbl.TextColor3 = TEXT_DIM
@@ -1131,18 +1181,20 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- AIMBOT — sempre ativo quando ligado (igual MM2)
+    -- AIMBOT
     if Config.AimbotEnabled then
         local target = getAimbotTarget()
         if target then lockOn(target) end
     end
 
-    -- Movimento
+    -- Movimento (aplica APENAS se estiver ligado)
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then
-            if Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue end
+            if Config.SpeedEnabled then
+                hum.WalkSpeed = Config.SpeedValue
+            end
             if Config.JumpEnabled then
                 hum.UseJumpPower = true
                 hum.JumpPower = Config.JumpValue
@@ -1232,6 +1284,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU [FPS] Defusal] v3.1 carregado 🎯")
-print("[AIMBOT] Modo sempre-ativo (sem keybind)")
+print("[AKZ MENU [FPS] Defusal] v1 carregado 🎯")
+print("[MOVIMENTO] Speed/JumpPower resetam ao desligar")
 print("[TEAM CHECK] Lendo Character:GetAttribute('TeamColor')")
