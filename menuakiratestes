@@ -1,7 +1,9 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU [FPS] Defusal — v3.0
-   Team check real via Character:GetAttribute("TeamColor")
+   AKZ MENU [FPS] Defusal — v3.1
+   
+   Aimbot sempre ativo (sem keybind) • Team check real
+   ESP com cor de time • Speed • JumpPower • FullBright
    
    Dev: Akira007p
 ═══════════════════════════════════════════════════════════════
@@ -40,7 +42,7 @@ local Config = {
     Skeleton = false,
     ShowName = false,
     ShowTracer = false,
-    ESPTeamCheck = true,      -- Só mostra inimigos (recomendado)
+    ESPTeamCheck = true,
 
     -- Aimbot
     AimbotEnabled = false,
@@ -51,8 +53,6 @@ local Config = {
     AimbotTeamCheck = true,
     AimbotWallCheck = true,
     AimbotSmooth = 0.15,
-    AimbotKey = Enum.KeyCode.E,
-    Aiming = false,
 
     -- Movimento
     SpeedEnabled = false,
@@ -99,9 +99,7 @@ local LAYOUTS = {
 local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
--- TEAM CHECK (o pulo do gato!)
--- No Defusal, o time fica em: Character:GetAttribute("TeamColor")
--- Formato: "0.28, 0.67, 0.89" (RGB normalizado)
+-- TEAM CHECK — lê Character:GetAttribute("TeamColor")
 -- ═══════════════════════════════════════════════════════════════
 local function getTeamString(player)
     if not player then return nil end
@@ -132,7 +130,6 @@ end
 local function getTeamColor(player)
     if player == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
     if isAlly(player) then return Color3.fromRGB(80, 170, 255) end
-    -- Inimigo: pega a cor real do time dele
     local s = getTeamString(player)
     local cor = parseRGB(s)
     if cor then return cor end
@@ -833,7 +830,7 @@ local function updatePlayerESP(player)
         cache.billboard:Destroy(); cache.billboard = nil
     end
 
-    -- Drawing
+    -- Drawing: Box / Skeleton / Tracer
     if hasDrawing then
         local top, bottom = get2DBounds(char)
         if Config.Box and top and bottom then
@@ -899,7 +896,7 @@ local function updatePlayerESP(player)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- AIMBOT
+-- AIMBOT (igual ao MM2 + team check real)
 -- ═══════════════════════════════════════════════════════════════
 local function getAimPart(char)
     if not char then return nil end
@@ -911,10 +908,13 @@ local function getAimPart(char)
     end
 end
 
-local function hasWallBetween(fromPos, toPos)
+-- Wall check: exclui meu char, a câmera E o char do alvo
+local function hasWallBetween(fromPos, toPos, alvoChar)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    local filtros = { LocalPlayer.Character, Camera }
+    if alvoChar then table.insert(filtros, alvoChar) end
+    params.FilterDescendantsInstances = filtros
     local dir = toPos - fromPos
     local result = workspace:Raycast(fromPos, dir, params)
     if result and result.Instance then
@@ -923,11 +923,13 @@ local function hasWallBetween(fromPos, toPos)
     return false
 end
 
+-- getAimbotTarget — igual ao MM2, mas com team check do Defusal
 local function getAimbotTarget()
     local nearest, nearestDist = nil, math.huge
     local centro = getScreenCenter()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
+            -- TEAM CHECK: pula aliado
             if not (Config.AimbotTeamCheck and isAlly(p)) then
                 local char = p.Character
                 if char then
@@ -940,7 +942,7 @@ local function getAimbotTarget()
                                 local d = (Vector2.new(sp.X, sp.Y) - centro).Magnitude
                                 if d <= Config.AimbotFOV and d < nearestDist then
                                     if Config.AimbotWallCheck then
-                                        if not hasWallBetween(Camera.CFrame.Position, part.Position) then
+                                        if not hasWallBetween(Camera.CFrame.Position, part.Position, char) then
                                             nearest = part
                                             nearestDist = d
                                         end
@@ -1003,7 +1005,10 @@ local aimTab = createTab("Aimbot")
 do
     local c = aimTab.content
     createSection(c, 1, "AIMBOT")
-    createToggle(c, 2, "Aimbot Ativado", Config.AimbotEnabled, function(v) Config.AimbotEnabled = v end)
+    createToggle(c, 2, "Aimbot Ativado", Config.AimbotEnabled, function(v)
+        Config.AimbotEnabled = v
+        showToast("AIMBOT", v and "Ativado" or "Desativado", v and SUCCESS_CLR or DANGER_CLR)
+    end)
     createToggle(c, 3, "Mostrar FOV", Config.AimbotShowFOV, function(v) Config.AimbotShowFOV = v end)
     createToggle(c, 4, "Não mirar em aliados", Config.AimbotTeamCheck, function(v) Config.AimbotTeamCheck = v end)
     createToggle(c, 5, "Não atravessar parede", Config.AimbotWallCheck, function(v) Config.AimbotWallCheck = v end)
@@ -1077,7 +1082,7 @@ do
     infoLbl.BackgroundTransparency = 0.15
     infoLbl.BorderSizePixel = 0
     infoLbl.LayoutOrder = 6
-    infoLbl.Text = "AKZ MENU [FPS] Defusal v3.0\nTeam check real via attribute\nDev: Akira007p"
+    infoLbl.Text = "AKZ MENU [FPS] Defusal v3.1\nAimbot sempre ativo\nTeam check via atributo\nDev: Akira007p"
     infoLbl.Font = Enum.Font.Code
     infoLbl.TextSize = 11
     infoLbl.TextColor3 = TEXT_DIM
@@ -1095,18 +1100,15 @@ selectTab("ESP")
 -- ═══════════════════════════════════════════════════════════════
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    if input.KeyCode == Config.AimbotKey then Config.Aiming = true end
     if input.KeyCode == Enum.KeyCode.V then
         Config.ESPEnabled = not Config.ESPEnabled
         if not Config.ESPEnabled then clearAllESP() end
     end
 end)
-UserInputService.InputEnded:Connect(function(input, gp)
-    if input.KeyCode == Config.AimbotKey then Config.Aiming = false end
-end)
 
 local wasEnabled = false
 RunService.RenderStepped:Connect(function()
+    -- FOV circle
     local showFov = Config.AimbotEnabled and Config.AimbotShowFOV
     local centro = getScreenCenter()
     if AimFovDrawing then
@@ -1118,6 +1120,7 @@ RunService.RenderStepped:Connect(function()
         if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
 
+    -- ESP loop
     if not Config.ESPEnabled then
         if wasEnabled then clearAllESP() end
         wasEnabled = false
@@ -1128,11 +1131,13 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    if Config.AimbotEnabled and Config.Aiming then
+    -- AIMBOT — sempre ativo quando ligado (igual MM2)
+    if Config.AimbotEnabled then
         local target = getAimbotTarget()
         if target then lockOn(target) end
     end
 
+    -- Movimento
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1227,8 +1232,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- Abre o menu automaticamente
-openMenu()
-
-print("[AKZ MENU [FPS] Defusal] v3.0 carregado 🎯")
+print("[AKZ MENU [FPS] Defusal] v3.1 carregado 🎯")
+print("[AIMBOT] Modo sempre-ativo (sem keybind)")
 print("[TEAM CHECK] Lendo Character:GetAttribute('TeamColor')")
