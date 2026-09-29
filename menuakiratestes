@@ -1,8 +1,9 @@
 --[[
 ═══════════════════════════════════════════════════════════════
-   AKZ MENU FPS — Universal v1.2
+   AKZ MENU FPS — Universal v1
    
-   • Detecção de time visual (cards, sem debug)
+   • Aba Principal com créditos, Discord, Temas e Configurações
+   • Detecção de time visual
    • Speed/JumpPower com save/restore
    • Aimbot lock-on • ESP profissional
    
@@ -29,6 +30,13 @@ pcall(function()
     Drawing = getfenv().Drawing
     hasDrawing = Drawing ~= nil
 end)
+
+-- ═══════════════════════════════════════════════════════════════
+-- CRÉDITOS / DISCORD
+-- ═══════════════════════════════════════════════════════════════
+local DISCORD_LINK = "https://discord.gg/kc7myVSq3"
+local DEV_NAME = "Akira007p"
+local VERSION = "v1"
 
 -- ═══════════════════════════════════════════════════════════════
 -- CONFIG
@@ -69,6 +77,8 @@ local Config = {
 
     FullBright = false,
     AntiAFK = false,
+
+    MenuTransparent = false,
 }
 
 local DEFAULT_WALKSPEED = 16
@@ -81,6 +91,127 @@ local MState = {
     SavedJump = nil,
     SavedUseJump = true,
 }
+
+-- ═══════════════════════════════════════════════════════════════
+-- TEMAS (real themes, não cores fixas)
+-- ═══════════════════════════════════════════════════════════════
+local THEMES = {
+    ["Padrão"] = {
+        Accent    = Color3.fromRGB(240, 240, 245),
+        BG        = Color3.fromRGB(12, 12, 14),
+        BG_HEADER = Color3.fromRGB(18, 18, 22),
+        BG_TAB    = Color3.fromRGB(8, 8, 10),
+        BG_ROW    = Color3.fromRGB(22, 22, 26),
+        BG_BLOCK  = Color3.fromRGB(16, 16, 20),
+        TEXT      = Color3.fromRGB(240, 240, 245),
+        TEXT_DIM  = Color3.fromRGB(140, 140, 150),
+        STROKE    = Color3.fromRGB(40, 40, 48),
+    },
+    ["Azul"] = {
+        Accent    = Color3.fromRGB(80, 170, 255),
+        BG        = Color3.fromRGB(8, 12, 20),
+        BG_HEADER = Color3.fromRGB(12, 18, 30),
+        BG_TAB    = Color3.fromRGB(6, 10, 16),
+        BG_ROW    = Color3.fromRGB(18, 26, 40),
+        BG_BLOCK  = Color3.fromRGB(12, 18, 28),
+        TEXT      = Color3.fromRGB(230, 240, 255),
+        TEXT_DIM  = Color3.fromRGB(120, 150, 190),
+        STROKE    = Color3.fromRGB(30, 50, 80),
+    },
+    ["Vermelho"] = {
+        Accent    = Color3.fromRGB(255, 80, 80),
+        BG        = Color3.fromRGB(18, 8, 8),
+        BG_HEADER = Color3.fromRGB(30, 12, 12),
+        BG_TAB    = Color3.fromRGB(14, 6, 6),
+        BG_ROW    = Color3.fromRGB(36, 18, 18),
+        BG_BLOCK  = Color3.fromRGB(26, 12, 12),
+        TEXT      = Color3.fromRGB(255, 235, 235),
+        TEXT_DIM  = Color3.fromRGB(180, 120, 120),
+        STROKE    = Color3.fromRGB(70, 30, 30),
+    },
+    ["Verde"] = {
+        Accent    = Color3.fromRGB(80, 220, 130),
+        BG        = Color3.fromRGB(8, 16, 10),
+        BG_HEADER = Color3.fromRGB(12, 26, 16),
+        BG_TAB    = Color3.fromRGB(6, 12, 8),
+        BG_ROW    = Color3.fromRGB(18, 34, 22),
+        BG_BLOCK  = Color3.fromRGB(12, 24, 16),
+        TEXT      = Color3.fromRGB(230, 255, 235),
+        TEXT_DIM  = Color3.fromRGB(120, 180, 140),
+        STROKE    = Color3.fromRGB(30, 60, 40),
+    },
+    ["Roxo"] = {
+        Accent    = Color3.fromRGB(180, 120, 255),
+        BG        = Color3.fromRGB(12, 8, 20),
+        BG_HEADER = Color3.fromRGB(20, 12, 32),
+        BG_TAB    = Color3.fromRGB(10, 6, 16),
+        BG_ROW    = Color3.fromRGB(28, 18, 44),
+        BG_BLOCK  = Color3.fromRGB(18, 12, 30),
+        TEXT      = Color3.fromRGB(240, 230, 255),
+        TEXT_DIM  = Color3.fromRGB(160, 130, 200),
+        STROKE    = Color3.fromRGB(60, 40, 90),
+    },
+    ["Rosa"] = {
+        Accent    = Color3.fromRGB(255, 120, 190),
+        BG        = Color3.fromRGB(18, 8, 14),
+        BG_HEADER = Color3.fromRGB(30, 12, 22),
+        BG_TAB    = Color3.fromRGB(14, 6, 10),
+        BG_ROW    = Color3.fromRGB(38, 18, 28),
+        BG_BLOCK  = Color3.fromRGB(26, 12, 20),
+        TEXT      = Color3.fromRGB(255, 235, 245),
+        TEXT_DIM  = Color3.fromRGB(200, 130, 170),
+        STROKE    = Color3.fromRGB(80, 40, 60),
+    },
+    ["Laranja"] = {
+        Accent    = Color3.fromRGB(255, 150, 60),
+        BG        = Color3.fromRGB(18, 12, 6),
+        BG_HEADER = Color3.fromRGB(30, 20, 10),
+        BG_TAB    = Color3.fromRGB(14, 8, 4),
+        BG_ROW    = Color3.fromRGB(38, 26, 14),
+        BG_BLOCK  = Color3.fromRGB(26, 18, 10),
+        TEXT      = Color3.fromRGB(255, 245, 230),
+        TEXT_DIM  = Color3.fromRGB(200, 160, 110),
+        STROKE    = Color3.fromRGB(80, 50, 25),
+    },
+    ["Ciano"] = {
+        Accent    = Color3.fromRGB(80, 230, 220),
+        BG        = Color3.fromRGB(6, 16, 18),
+        BG_HEADER = Color3.fromRGB(10, 26, 28),
+        BG_TAB    = Color3.fromRGB(4, 12, 14),
+        BG_ROW    = Color3.fromRGB(16, 34, 36),
+        BG_BLOCK  = Color3.fromRGB(10, 24, 26),
+        TEXT      = Color3.fromRGB(225, 255, 255),
+        TEXT_DIM  = Color3.fromRGB(120, 180, 180),
+        STROKE    = Color3.fromRGB(25, 60, 60),
+    },
+}
+local CurrentThemeName = "Padrão"
+local CurrentTheme = THEMES[CurrentThemeName]
+
+-- ═══════════════════════════════════════════════════════════════
+-- TEMA ATUAL (variáveis locais)
+-- ═══════════════════════════════════════════════════════════════
+local Theme = { Accent = CurrentTheme.Accent, AccentDim = CurrentTheme.Accent:Lerp(Color3.new(0,0,0), 0.35) }
+local BG          = CurrentTheme.BG
+local BG_HEADER   = CurrentTheme.BG_HEADER
+local BG_TAB      = CurrentTheme.BG_TAB
+local BG_ROW      = CurrentTheme.BG_ROW
+local BG_BLOCK    = CurrentTheme.BG_BLOCK
+local TEXT        = CurrentTheme.TEXT
+local TEXT_DIM    = CurrentTheme.TEXT_DIM
+local STROKE_CLR  = CurrentTheme.STROKE
+local OFF_CLR     = Color3.fromRGB(55, 55, 65)
+local KNOB_OFF    = Color3.fromRGB(180, 180, 190)
+local KNOB_ON     = Color3.fromRGB(15, 15, 18)
+local WARN_CLR    = Color3.fromRGB(255, 190, 60)
+local SUCCESS_CLR = Color3.fromRGB(120, 220, 140)
+local DANGER_CLR  = Color3.fromRGB(230, 90, 90)
+
+local LAYOUTS = {
+    ["Em pé"]   = UDim2.new(0, 520, 0, 460),
+    ["Deitado"] = UDim2.new(0, 720, 0, 380),
+}
+local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
 -- TEAM DETECTION
@@ -123,7 +254,6 @@ local function getPlayerTeam(p)
     elseif TeamDetect.method == "StringValue" then
         local v = getTeamViaStringValue(p); if v then return v end
     end
-    -- Fallback
     local t = getTeamViaTeam(p); if t then return t end
     local s = getTeamViaAttribute(p); if s then return s end
     local v = getTeamViaStringValue(p); if v then return v end
@@ -137,7 +267,6 @@ local function detectTeamSystem()
         if getTeamViaAttribute(p) then cAttr = cAttr + 1 end
         if getTeamViaStringValue(p) then cSV = cSV + 1 end
     end
-
     local method = nil
     if cTeam > 0 then method = "Team"
     elseif cAttr > 0 then method = "Attribute"
@@ -145,23 +274,17 @@ local function detectTeamSystem()
     end
     TeamDetect.method = method
 
-    -- Agrupa por time com cor
     local teams = {}
     if method then
         for _, p in ipairs(Players:GetPlayers()) do
             local key, display = nil, nil
             if method == "Team" then
                 local t = getTeamViaTeam(p)
-                if t then
-                    key = t.Name
-                    display = t.Name
-                end
+                if t then key = t.Name; display = t.Name end
             elseif method == "Attribute" then
-                key = getTeamViaAttribute(p)
-                display = "Time " .. tostring(key)
+                key = getTeamViaAttribute(p); display = "Time " .. tostring(key)
             elseif method == "StringValue" then
-                key = tostring(getTeamViaStringValue(p))
-                display = tostring(key)
+                key = tostring(getTeamViaStringValue(p)); display = tostring(key)
             end
             if key then
                 teams[key] = teams[key] or { name = display, players = {}, color = getTeamColorFor(p) }
@@ -169,7 +292,6 @@ local function detectTeamSystem()
             end
         end
     end
-
     return method, teams
 end
 
@@ -183,17 +305,14 @@ local function parseRGB(s)
 end
 
 local function getTeamColorFor(p)
-    -- Attribute RGB (Defusal)
     local s = getTeamViaAttribute(p)
     local cor = parseRGB(s)
     if cor then return cor end
-    -- Team.TeamColor
     local t = getTeamViaTeam(p)
     if t then
         local ok, tc = pcall(function() return t.TeamColor end)
         if ok and tc and tc.Color then return tc.Color end
     end
-    -- Player.TeamColor
     local ok, tc = pcall(function() return p.TeamColor end)
     if ok and tc and tc.Color then return tc.Color end
     return Color3.fromRGB(200, 200, 200)
@@ -214,34 +333,6 @@ local function getTeamColor(p)
     if c then return c end
     return Color3.fromRGB(220, 40, 40)
 end
-
--- ═══════════════════════════════════════════════════════════════
--- TEMA
--- ═══════════════════════════════════════════════════════════════
-local Theme = {
-    Accent    = Color3.fromRGB(240, 240, 245),
-    AccentDim = Color3.fromRGB(180, 180, 190),
-}
-local BG          = Color3.fromRGB(12, 12, 14)
-local BG_HEADER   = Color3.fromRGB(18, 18, 22)
-local BG_TAB      = Color3.fromRGB(8, 8, 10)
-local BG_ROW      = Color3.fromRGB(22, 22, 26)
-local BG_BLOCK    = Color3.fromRGB(16, 16, 20)
-local TEXT        = Color3.fromRGB(240, 240, 245)
-local TEXT_DIM    = Color3.fromRGB(140, 140, 150)
-local STROKE_CLR  = Color3.fromRGB(40, 40, 48)
-local OFF_CLR     = Color3.fromRGB(55, 55, 65)
-local KNOB_OFF    = Color3.fromRGB(180, 180, 190)
-local KNOB_ON     = Color3.fromRGB(15, 15, 18)
-local WARN_CLR    = Color3.fromRGB(255, 190, 60)
-local SUCCESS_CLR = Color3.fromRGB(120, 220, 140)
-local DANGER_CLR  = Color3.fromRGB(230, 90, 90)
-
-local LAYOUTS = {
-    ["Em pé"]   = UDim2.new(0, 520, 0, 460),
-    ["Deitado"] = UDim2.new(0, 720, 0, 380),
-}
-local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
 -- UI
@@ -427,7 +518,7 @@ local headerTitle = Instance.new("TextLabel")
 headerTitle.Size = UDim2.new(1, -80, 1, 0)
 headerTitle.Position = UDim2.new(0, 16, 0, 0)
 headerTitle.BackgroundTransparency = 1
-headerTitle.Text = "AKZ MENU FPS"
+headerTitle.Text = "AKZ MENU FPS " .. VERSION
 headerTitle.Font = Enum.Font.GothamBold
 headerTitle.TextSize = 15
 headerTitle.TextColor3 = Theme.Accent
@@ -742,10 +833,10 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     return { Set = function(v) setFromAbsX(bar.AbsolutePosition.X + (v - minV) / (maxV - minV) * bar.AbsoluteSize.X) end, Get = function() return value end }
 end
 
-local function createButton(parent, order, label, onClick)
+local function createButton(parent, order, label, onClick, bgColorOverride)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(34, 34, 42)
+    btn.BackgroundColor3 = bgColorOverride or Color3.fromRGB(34, 34, 42)
     btn.BorderSizePixel = 0
     btn.Text = label
     btn.Font = Enum.Font.GothamBold
@@ -769,14 +860,134 @@ local function createButton(parent, order, label, onClick)
     return btn
 end
 
+-- Texto centralizado (info card)
+local function createInfoLabel(parent, order, texto, altura)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, altura or 26)
+    lbl.BackgroundColor3 = BG_ROW
+    lbl.BorderSizePixel = 0
+    lbl.Text = texto
+    lbl.Font = Enum.Font.Code
+    lbl.TextSize = 11
+    lbl.TextColor3 = TEXT_DIM
+    lbl.LayoutOrder = order
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextYAlignment = Enum.TextYAlignment.Center
+    lbl.Parent = parent
+    Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 6)
+    local pad = Instance.new("UIPadding", lbl)
+    pad.PaddingLeft = UDim.new(0, 12)
+    pad.PaddingRight = UDim.new(0, 12)
+    return lbl
+end
+
 -- ═══════════════════════════════════════════════════════════════
--- PAINEL DE TIMES (visual, sem debug)
+-- SISTEMA DE TEMA (swap de cores)
 -- ═══════════════════════════════════════════════════════════════
-local TeamPanel = {
-    frame = nil,
-    list = nil,
-    emptyLbl = nil,
-}
+local function applyNewTheme(newThemeName)
+    local newTheme = THEMES[newThemeName]
+    if not newTheme then return end
+    if newThemeName == CurrentThemeName then return end
+
+    local old = CurrentTheme
+    local swaps = {
+        [old.Accent]    = newTheme.Accent,
+        [old.BG]        = newTheme.BG,
+        [old.BG_HEADER] = newTheme.BG_HEADER,
+        [old.BG_TAB]    = newTheme.BG_TAB,
+        [old.BG_ROW]    = newTheme.BG_ROW,
+        [old.BG_BLOCK]  = newTheme.BG_BLOCK,
+        [old.TEXT]      = newTheme.TEXT,
+        [old.TEXT_DIM]  = newTheme.TEXT_DIM,
+        [old.STROKE]    = newTheme.STROKE,
+    }
+
+    local function swapIn(root)
+        for _, d in ipairs(root:GetDescendants()) do
+            pcall(function()
+                if d:IsA("GuiObject") then
+                    if d.BackgroundColor3 and swaps[d.BackgroundColor3] then
+                        d.BackgroundColor3 = swaps[d.BackgroundColor3]
+                    end
+                    if d.TextColor3 and swaps[d.TextColor3] then
+                        d.TextColor3 = swaps[d.TextColor3]
+                    end
+                end
+                if d:IsA("UIStroke") and swaps[d.Color] then
+                    d.Color = swaps[d.Color]
+                end
+                if d:IsA("ScrollingFrame") and swaps[d.ScrollBarImageColor3] then
+                    d.ScrollBarImageColor3 = swaps[d.ScrollBarImageColor3]
+                end
+            end)
+        end
+    end
+    swapIn(screenGui)
+    swapIn(toastGui)
+
+    CurrentTheme = newTheme
+    CurrentThemeName = newThemeName
+    Theme.Accent = newTheme.Accent
+    Theme.AccentDim = newTheme.Accent:Lerp(Color3.new(0,0,0), 0.35)
+    BG          = newTheme.BG
+    BG_HEADER   = newTheme.BG_HEADER
+    BG_TAB      = newTheme.BG_TAB
+    BG_ROW      = newTheme.BG_ROW
+    BG_BLOCK    = newTheme.BG_BLOCK
+    TEXT        = newTheme.TEXT
+    TEXT_DIM    = newTheme.TEXT_DIM
+    STROKE_CLR  = newTheme.STROKE
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- TRANSPARÊNCIA
+-- ═══════════════════════════════════════════════════════════════
+local function setMenuTransparent(on)
+    Config.MenuTransparent = on
+    if on then
+        for _, d in ipairs(menuFrame:GetDescendants()) do
+            if d:IsA("GuiObject") then
+                if d:GetAttribute("AKZ_OrigBT") == nil then
+                    d:SetAttribute("AKZ_OrigBT", d.BackgroundTransparency)
+                end
+                local orig = d:GetAttribute("AKZ_OrigBT") or 0
+                if orig < 0.85 then
+                    d.BackgroundTransparency = math.min(0.75, orig + 0.4)
+                end
+            end
+        end
+        menuFrame.BackgroundTransparency = 0.4
+        menuStroke.Transparency = 0.6
+    else
+        for _, d in ipairs(menuFrame:GetDescendants()) do
+            if d:IsA("GuiObject") then
+                local orig = d:GetAttribute("AKZ_OrigBT")
+                if orig then
+                    d.BackgroundTransparency = orig
+                    d:SetAttribute("AKZ_OrigBT", nil)
+                end
+            end
+        end
+        menuFrame.BackgroundTransparency = 0
+        menuStroke.Transparency = 0
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- LAYOUT
+-- ═══════════════════════════════════════════════════════════════
+local function setLayout(modo)
+    if not LAYOUTS[modo] then return end
+    CurrentLayout = modo
+    TweenService:Create(menuFrame, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Size = LAYOUTS[modo]
+    }):Play()
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- PAINEL DE TIMES
+-- ═══════════════════════════════════════════════════════════════
+local TeamPanel = { frame = nil, emptyLbl = nil }
 
 local function createTeamPanel(parent, order)
     local panel = Instance.new("Frame")
@@ -813,12 +1024,10 @@ local function createTeamPanel(parent, order)
     empty.Parent = panel
 
     TeamPanel.frame = panel
-    TeamPanel.list = list
     TeamPanel.emptyLbl = empty
     return panel
 end
 
--- Cria um "card" visual de time
 local function createTeamCard(parent, order, teamName, players, isMyTeam, cor)
     local card = Instance.new("Frame")
     card.Size = UDim2.new(1, 0, 0, 0)
@@ -843,7 +1052,6 @@ local function createTeamCard(parent, order, teamName, players, isMyTeam, cor)
     lay.Padding = UDim.new(0, 4)
     lay.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- Linha topo: bolinha + nome + badge
     local top = Instance.new("Frame", card)
     top.Size = UDim2.new(1, 0, 0, 22)
     top.BackgroundTransparency = 1
@@ -881,7 +1089,6 @@ local function createTeamCard(parent, order, teamName, players, isMyTeam, cor)
         Instance.new("UICorner", badge).CornerRadius = UDim.new(0, 5)
     end
 
-    -- Lista de players
     local playersFrame = Instance.new("Frame", card)
     playersFrame.Size = UDim2.new(1, 0, 0, 0)
     playersFrame.AutomaticSize = Enum.AutomaticSize.Y
@@ -903,18 +1110,12 @@ local function createTeamCard(parent, order, teamName, players, isMyTeam, cor)
         row.TextXAlignment = Enum.TextXAlignment.Left
         row.LayoutOrder = i
     end
-
     return card
 end
 
 local function refreshTeamPanel()
-    -- Limpa
     for _, child in ipairs(TeamPanel.frame:GetChildren()) do
-        if child:IsA("Frame") or child == TeamPanel.emptyLbl then
-            if child ~= TeamPanel.emptyLbl then
-                child:Destroy()
-            end
-        end
+        if child:IsA("Frame") then child:Destroy() end
     end
 
     local method, teams = detectTeamSystem()
@@ -927,15 +1128,10 @@ local function refreshTeamPanel()
 
     TeamPanel.emptyLbl.Visible = false
 
-    -- Pega o time do LocalPlayer pra marcar "SEU TIME"
     local myTeam = getPlayerTeam(LocalPlayer)
-
     local order = 1
     for key, data in pairs(teams) do
-        local isMine = false
-        if myTeam ~= nil and tostring(myTeam) == tostring(key) then
-            isMine = true
-        end
+        local isMine = (myTeam ~= nil and tostring(myTeam) == tostring(key))
         createTeamCard(TeamPanel.frame, order, data.name, data.players, isMine, data.color)
         order = order + 1
     end
@@ -1015,8 +1211,7 @@ end
 local function updatePlayerESP(player)
     if player == LocalPlayer then return end
     if Config.ESPTeamCheck and isAlly(player) then
-        clearESPForPlayer(player)
-        return
+        clearESPForPlayer(player); return
     end
     local char = player.Character
     if not char then clearESPForPlayer(player); return end
@@ -1168,7 +1363,6 @@ end
 
 local function getAimbotTarget()
     local centro = getScreenCenter()
-
     if Config.LockedTarget and Config.LockedTarget.Parent then
         local part = Config.LockedTarget
         local char = part.Parent
@@ -1358,10 +1552,132 @@ local function applyWeaponMods()
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- ABAS
+-- ABA PRINCIPAL
 -- ═══════════════════════════════════════════════════════════════
+local principalTab = createTab("Principal")
+do
+    local c = principalTab.content
 
--- ESP
+    createSection(c, 1, "INFORMAÇÕES")
+
+    -- Pega o nome do executor
+    local executorName = "Desconhecido"
+    pcall(function()
+        if identifyexecutor then executorName = identifyexecutor() end
+    end)
+
+    createInfoLabel(c, 2, "👤  Usuário: " .. LocalPlayer.DisplayName)
+    createInfoLabel(c, 3, "⚙️  Executor: " .. executorName)
+    createInfoLabel(c, 4, "📦  Versão do menu: " .. VERSION)
+
+    createSection(c, 5, "COMUNIDADE")
+    createButton(c, 6, "💬  Comunidade Discord", function()
+        pcall(function() setclipboard(DISCORD_LINK) end)
+        pcall(function() game:GetService("GuiService"):OpenBrowserWindow(DISCORD_LINK) end)
+        showToast("DISCORD", "Link copiado + navegador aberto", Color3.fromRGB(88, 101, 242))
+    end, Color3.fromRGB(88, 101, 242))
+
+    createSection(c, 7, "APARÊNCIA")
+    createToggle(c, 8, "Menu Transparente", Config.MenuTransparent, function(v)
+        setMenuTransparent(v)
+    end)
+    createOptionRow(c, 9, "Formato", {"Em pé", "Deitado"}, CurrentLayout, function(v)
+        setLayout(v)
+        showToast("FORMATO", "Menu agora: " .. v, SUCCESS_CLR)
+    end)
+
+    createSection(c, 10, "TEMA DO MENU")
+    -- Grid de temas
+    local themeGrid = Instance.new("Frame", c)
+    themeGrid.Size = UDim2.new(1, -8, 0, 0)
+    themeGrid.AutomaticSize = Enum.AutomaticSize.Y
+    themeGrid.BackgroundTransparency = 1
+    themeGrid.LayoutOrder = 11
+
+    local themeGridLayout = Instance.new("UIGridLayout", themeGrid)
+    themeGridLayout.CellSize = UDim2.new(0.32, -4, 0, 34)
+    themeGridLayout.CellPadding = UDim2.new(0.01, 0, 0, 6)
+    themeGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    themeGridLayout.FillDirectionMaxCells = 3
+
+    local themeRefs = {}
+
+    local function refreshThemeBorders()
+        for _, r in ipairs(themeRefs) do
+            local active = r.name == CurrentThemeName
+            r.btn.BackgroundColor3 = r.theme.BG_ROW
+            r.stroke.Color = active and r.theme.Accent or r.theme.STROKE
+            r.stroke.Thickness = active and 2 or 1
+            r.stroke.Transparency = active and 0 or 0.5
+            r.lbl.TextColor3 = active and r.theme.Accent or r.theme.TEXT_DIM
+        end
+    end
+
+    for i, tName in ipairs({"Padrão","Azul","Vermelho","Verde","Roxo","Rosa","Laranja","Ciano"}) do
+        local theme = THEMES[tName]
+        local b = Instance.new("TextButton")
+        b.BackgroundColor3 = theme.BG_ROW
+        b.BorderSizePixel = 0
+        b.Text = ""
+        b.AutoButtonColor = false
+        b.LayoutOrder = i
+        b.Parent = themeGrid
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+
+        local st = Instance.new("UIStroke", b)
+        st.Color = theme.STROKE
+        st.Thickness = 1
+        st.Transparency = 0.5
+
+        -- Bolinha colorida
+        local dot = Instance.new("Frame", b)
+        dot.Size = UDim2.new(0, 10, 0, 10)
+        dot.Position = UDim2.new(0, 10, 0.5, -5)
+        dot.BackgroundColor3 = theme.Accent
+        dot.BorderSizePixel = 0
+        dot.ZIndex = 2
+        Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+        local lbl = Instance.new("TextLabel", b)
+        lbl.Size = UDim2.new(1, -30, 1, 0)
+        lbl.Position = UDim2.new(0, 26, 0, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = tName
+        lbl.Font = Enum.Font.GothamBold
+        lbl.TextSize = 11
+        lbl.TextColor3 = theme.TEXT_DIM
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        themeRefs[#themeRefs + 1] = { name = tName, btn = b, stroke = st, lbl = lbl, theme = theme }
+
+        b.MouseButton1Click:Connect(function()
+            applyNewTheme(tName)
+            refreshThemeBorders()
+            showToast("TEMA", "Aplicado: " .. tName, SUCCESS_CLR)
+        end)
+    end
+    refreshThemeBorders()
+
+    createSection(c, 12, "CRÉDITOS")
+    local creditsLbl = Instance.new("TextLabel")
+    creditsLbl.Size = UDim2.new(1, 0, 0, 60)
+    creditsLbl.BackgroundColor3 = BG_ROW
+    creditsLbl.BorderSizePixel = 0
+    creditsLbl.LayoutOrder = 13
+    creditsLbl.Text = "AKZ MENU FPS " .. VERSION .. "\nDesenvolvido por " .. DEV_NAME .. "\nTodos os direitos reservados"
+    creditsLbl.Font = Enum.Font.Code
+    creditsLbl.TextSize = 11
+    creditsLbl.TextColor3 = TEXT_DIM
+    creditsLbl.TextXAlignment = Enum.TextXAlignment.Center
+    creditsLbl.TextYAlignment = Enum.TextYAlignment.Center
+    creditsLbl.TextWrapped = true
+    creditsLbl.Parent = c
+    Instance.new("UICorner", creditsLbl).CornerRadius = UDim.new(0, 8)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+-- ABA ESP
+-- ═══════════════════════════════════════════════════════════════
 local espTab = createTab("ESP")
 do
     local c = espTab.content
@@ -1372,7 +1688,7 @@ do
     end)
 
     createSection(c, 3, "TIMES")
-    local panel = createTeamPanel(c, 4)
+    createTeamPanel(c, 4)
 
     createButton(c, 5, "🔍  Detectar Times", function()
         refreshTeamPanel()
@@ -1398,9 +1714,29 @@ do
     createToggle(c, 15, "Nome", Config.ShowName, function(v) Config.ShowName = v end)
     createToggle(c, 16, "Distância", Config.ShowDistance, function(v) Config.ShowDistance = v end)
     createToggle(c, 17, "Tracer", Config.ShowTracer, function(v) Config.ShowTracer = v end)
+
+    createSection(c, 18, "VISUAL")
+    createToggle(c, 19, "FullBright", Config.FullBright, function(v)
+        Config.FullBright = v
+        if v then
+            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 12
+            Lighting.FogEnd = 100000
+            Lighting.GlobalShadows = false
+        else
+            Lighting.Ambient = Color3.fromRGB(70, 70, 70)
+            Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+            Lighting.Brightness = 1
+            Lighting.GlobalShadows = true
+        end
+    end)
 end
 
--- AIMBOT
+-- ═══════════════════════════════════════════════════════════════
+-- ABA AIMBOT
+-- ═══════════════════════════════════════════════════════════════
 local aimTab = createTab("Aimbot")
 do
     local c = aimTab.content
@@ -1428,7 +1764,9 @@ do
     createSlider(c, 12, "Smoothness (0 = snap)", 0, 0.95, Config.AimbotSmooth, true, function(v) Config.AimbotSmooth = v end)
 end
 
--- MOVIMENTO
+-- ═══════════════════════════════════════════════════════════════
+-- ABA MOVIMENTO
+-- ═══════════════════════════════════════════════════════════════
 local moveTab = createTab("Movimento")
 do
     local c = moveTab.content
@@ -1484,7 +1822,9 @@ do
     end)
 end
 
--- ARMAS
+-- ═══════════════════════════════════════════════════════════════
+-- ABA ARMAS
+-- ═══════════════════════════════════════════════════════════════
 local armTab = createTab("Armas")
 do
     local c = armTab.content
@@ -1499,46 +1839,7 @@ do
     end)
 end
 
--- MISC
-local miscTab = createTab("Misc")
-do
-    local c = miscTab.content
-    createSection(c, 1, "VISUAL")
-    createToggle(c, 2, "FullBright", Config.FullBright, function(v)
-        Config.FullBright = v
-        if v then
-            Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-            Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-            Lighting.Brightness = 2
-            Lighting.ClockTime = 12
-            Lighting.FogEnd = 100000
-            Lighting.GlobalShadows = false
-        else
-            Lighting.Ambient = Color3.fromRGB(70, 70, 70)
-            Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
-            Lighting.Brightness = 1
-            Lighting.GlobalShadows = true
-        end
-    end)
-
-    createSection(c, 3, "INFO")
-    local infoLbl = Instance.new("TextLabel")
-    infoLbl.Size = UDim2.new(1, 0, 0, 60)
-    infoLbl.BackgroundColor3 = BG_ROW
-    infoLbl.BorderSizePixel = 0
-    infoLbl.LayoutOrder = 4
-    infoLbl.Text = "AKZ MENU FPS v1.2\nAuto Team Detect\nDev: Akira007p"
-    infoLbl.Font = Enum.Font.Code
-    infoLbl.TextSize = 11
-    infoLbl.TextColor3 = TEXT_DIM
-    infoLbl.TextXAlignment = Enum.TextXAlignment.Center
-    infoLbl.TextYAlignment = Enum.TextYAlignment.Center
-    infoLbl.TextWrapped = true
-    infoLbl.Parent = c
-    Instance.new("UICorner", infoLbl).CornerRadius = UDim.new(0, 8)
-end
-
-selectTab("ESP")
+selectTab("Principal")
 
 -- ═══════════════════════════════════════════════════════════════
 -- INPUT
@@ -1593,9 +1894,7 @@ RunService.RenderStepped:Connect(function(dt)
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then
-            if Config.SpeedEnabled then
-                hum.WalkSpeed = Config.SpeedValue
-            end
+            if Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue end
             if Config.JumpEnabled then
                 hum.UseJumpPower = true
                 hum.JumpPower = Config.JumpValue
@@ -1696,4 +1995,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-print("[AKZ MENU FPS] v1.2 carregado 🎯")
+print("[AKZ MENU FPS] " .. VERSION .. " carregado 🎯")
