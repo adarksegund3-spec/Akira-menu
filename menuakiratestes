@@ -30,7 +30,7 @@ local DEV_NAME = "Akira007p"
 local VERSION = "v1"
 
 -- ═══════════════════════════════════════════════════════════════
--- GAME API (cérebro de detecção)
+-- GAME API
 -- ═══════════════════════════════════════════════════════════════
 local GameAPI = {
     detected = false,
@@ -40,6 +40,25 @@ local GameAPI = {
     playersCount = 0,
     errorMsg = nil,
 }
+
+local GENERIC_TEAM_NAMES = {
+    ["play"] = true, ["players"] = true, ["player"] = true,
+    ["lobby"] = true, ["neutral"] = true, ["default"] = true,
+    ["none"] = true, ["nil"] = true, ["all"] = true,
+    ["everyone"] = true, ["global"] = true, ["free"] = true,
+    ["freed"] = true, ["in game"] = true, ["ingame"] = true,
+    ["spectator"] = true, ["spectate"] = true, ["waiting"] = true,
+    ["dead"] = true, ["alive"] = true, ["other"] = true,
+    ["white"] = true, ["ghost"] = true,
+}
+
+local function isGenericTeamName(name)
+    if not name then return true end
+    local n = tostring(name):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if n == "" then return true end
+    if GENERIC_TEAM_NAMES[n] then return true end
+    return false
+end
 
 local function getTeamViaTeam(p)
     if not p then return nil end
@@ -68,6 +87,19 @@ local function getTeamViaStringValue(p)
     return nil
 end
 
+local function getRawTeamKey(p, method)
+    if method == "Team" then
+        local t = getTeamViaTeam(p)
+        if t then return tostring(t) end
+    elseif method == "Attribute" then
+        return getTeamViaAttribute(p)
+    elseif method == "StringValue" then
+        local v = getTeamViaStringValue(p)
+        if v then return tostring(v) end
+    end
+    return nil
+end
+
 local function getPlayerTeam(p)
     if not p then return nil end
     if GameAPI.method == "Team" then
@@ -77,15 +109,12 @@ local function getPlayerTeam(p)
     elseif GameAPI.method == "StringValue" then
         local v = getTeamViaStringValue(p); if v then return v end
     end
-    -- Fallback pra quando método não foi detectado ainda
-    local t = getTeamViaTeam(p); if t then return t end
-    local s = getTeamViaAttribute(p); if s then return s end
-    local v = getTeamViaStringValue(p); if v then return v end
     return nil
 end
 
 local function isAlly(p)
     if not p or p == LocalPlayer then return false end
+    if not GameAPI.hasTeams then return false end
     local mine = getPlayerTeam(LocalPlayer)
     local their = getPlayerTeam(p)
     if mine == nil or their == nil then return false end
@@ -112,12 +141,14 @@ local function getTeamColorFor(p)
     end
     local ok, tc = pcall(function() return p.TeamColor end)
     if ok and tc and tc.Color then return tc.Color end
-    return Color3.fromRGB(200, 200, 200)
+    return nil
 end
 
-local function getTeamColor(p)
+local function getPlayerColor(p)
     if p == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
-    if isAlly(p) then return Color3.fromRGB(80, 170, 255) end
+    if GameAPI.hasTeams and isAlly(p) then
+        return Color3.fromRGB(80, 170, 255)
+    end
     local c = getTeamColorFor(p)
     if c then return c end
     return Color3.fromRGB(220, 40, 40)
@@ -133,52 +164,91 @@ local function detectGameAPI()
     local allPlayers = Players:GetPlayers()
     GameAPI.playersCount = #allPlayers
 
-    if GameAPI.playersCount == 0 then
-        GameAPI.errorMsg = "Sem players no servidor"
-        return false, GameAPI.errorMsg
+    if GameAPI.playersCount < 2 then
+        GameAPI.detected = true
+        GameAPI.errorMsg = "Poucos players"
+        return true, "Poucos players • todos são alvo"
     end
 
-    local cTeam, cAttr, cSV = 0, 0, 0
-    local teamSet = {}
+    -- Analisa um método
+    local function analyzeMethod(methodName)
+        local teamMap = {}
+        for _, p in ipairs(allPlayers) do
+            local key = getRawTeamKey(p, methodName)
+            if key then
+                if not teamMap[key] then
+                    teamMap[key] = { count = 0, names = {} }
+                end
+                teamMap[key].count = teamMap[key].count + 1
+                table.insert(teamMap[key].names, p.Name)
+            end
+        end
 
-    for _, p in ipairs(allPlayers) do
-        local t = getTeamViaTeam(p)
-        if t then cTeam = cTeam + 1; teamSet[tostring(t)] = true end
-        local a = getTeamViaAttribute(p)
-        if a then cAttr = cAttr + 1; teamSet[tostring(a)] = true end
-        local s = getTeamViaStringValue(p)
-        if s then cSV = cSV + 1; teamSet[tostring(s)] = true end
+        -- Filtra times válidos:
+        -- • não pode ser genérico
+        -- • não pode agrupar TODOS os players (isso indica "sistema fake")
+        -- • precisa ter pelo menos 1 player
+        local validTeams = {}
+        for key, data in pairs(teamMap) do
+            local isGeneric = isGenericTeamName(key)
+            local isEverybody = (data.count == #allPlayers)
+            local isOnlyTeam = (#allPlayers > 2 and data.count == #allPlayers)
+            if not isGeneric and not isEverybody and not isOnlyTeam and data.count >= 1 then
+                validTeams[key] = data
+            end
+        end
+
+        local count = 0
+        for _ in pairs(validTeams) do count = count + 1 end
+
+        return { validTeams = count, teams = validTeams }
     end
 
-    if cTeam > 0 then GameAPI.method = "Team"
-    elseif cAttr > 0 then GameAPI.method = "Attribute"
-    elseif cSV > 0 then GameAPI.method = "StringValue"
+    local teamA = analyzeMethod("Team")
+    local attrA = analyzeMethod("Attribute")
+    local svA   = analyzeMethod("StringValue")
+
+    -- Só aceita método com pelo menos 2 times válidos
+    local chosen = nil
+    local analysis = nil
+    if teamA.validTeams >= 2 then chosen = "Team"; analysis = teamA
+    elseif attrA.validTeams >= 2 then chosen = "Attribute"; analysis = attrA
+    elseif svA.validTeams >= 2 then chosen = "StringValue"; analysis = svA
     end
 
-    for _ in pairs(teamSet) do
-        GameAPI.teamsFound = GameAPI.teamsFound + 1
+    if chosen then
+        GameAPI.method = chosen
+        GameAPI.hasTeams = true
+        GameAPI.teamsFound = analysis.validTeams
+    else
+        GameAPI.method = nil
+        GameAPI.hasTeams = false
     end
-    GameAPI.hasTeams = (GameAPI.method ~= nil)
 
     GameAPI.detected = true
-    return true, "API Detectada"
+
+    if GameAPI.hasTeams then
+        return true, "API Detectada • " .. GameAPI.teamsFound .. " times"
+    else
+        return true, "API Detectada • Sem times • todos são alvo"
+    end
 end
 
 -- ═══════════════════════════════════════════════════════════════
 -- CONFIG
 -- ═══════════════════════════════════════════════════════════════
 local Config = {
+    -- ESP
     ESPEnabled = false,
-    Highlight = true,
-    HighlightFill = false,
-    HighlightOutline = true,
-    Box = false,
-    Skeleton = false,
-    ShowName = true,
-    ShowTracer = false,
-    ShowDistance = false,
     ESPTeamCheck = false,
+    ESP_Highlight = false,
+    ESP_HighlightFill = 0.5,
+    ESP_Name = false,
+    ESP_Distance = false,
+    ESP_Color = false,       -- colorir nome/highlight com cor do time
+    ESP_Tracer = false,
 
+    -- Aimbot
     AimbotEnabled = false,
     AimbotShowFOV = true,
     AimbotFOV = 150,
@@ -189,6 +259,7 @@ local Config = {
     AimbotSmooth = 0.05,
     LockedTarget = nil,
 
+    -- Movimento
     SpeedEnabled = false,
     SpeedValue = 30,
     JumpEnabled = false,
@@ -196,12 +267,13 @@ local Config = {
     InfJump = false,
     Noclip = false,
 
+    -- Armas
     NoRecoil = false,
     NoSpread = false,
 
+    -- Misc
     FullBright = false,
     AntiAFK = false,
-
     MenuTransparent = false,
 }
 
@@ -220,130 +292,24 @@ local MState = {
 -- TEMAS
 -- ═══════════════════════════════════════════════════════════════
 local THEMES = {
-    ["Padrão"] = {
-        BG1 = Color3.fromRGB(18, 18, 24),
-        BG2 = Color3.fromRGB(8, 8, 12),
-        Header1 = Color3.fromRGB(28, 28, 36),
-        Header2 = Color3.fromRGB(18, 18, 24),
-        BG_TAB = Color3.fromRGB(8, 8, 12),
-        BG_ROW = Color3.fromRGB(24, 24, 30),
-        TEXT = Color3.fromRGB(240, 240, 245),
-        TEXT_DIM = Color3.fromRGB(140, 140, 150),
-        STROKE = Color3.fromRGB(50, 50, 60),
-        Accent = Color3.fromRGB(230, 230, 240),
-        Accent2 = Color3.fromRGB(160, 160, 180),
-    },
-    ["Aquatic"] = {
-        BG1 = Color3.fromRGB(10, 24, 42),
-        BG2 = Color3.fromRGB(4, 10, 24),
-        Header1 = Color3.fromRGB(18, 44, 78),
-        Header2 = Color3.fromRGB(8, 20, 40),
-        BG_TAB = Color3.fromRGB(6, 16, 32),
-        BG_ROW = Color3.fromRGB(18, 40, 70),
-        TEXT = Color3.fromRGB(220, 245, 255),
-        TEXT_DIM = Color3.fromRGB(110, 160, 200),
-        STROKE = Color3.fromRGB(30, 70, 120),
-        Accent = Color3.fromRGB(80, 200, 255),
-        Accent2 = Color3.fromRGB(40, 130, 220),
-    },
-    ["Universe"] = {
-        BG1 = Color3.fromRGB(22, 10, 40),
-        BG2 = Color3.fromRGB(10, 4, 20),
-        Header1 = Color3.fromRGB(48, 20, 78),
-        Header2 = Color3.fromRGB(24, 10, 42),
-        BG_TAB = Color3.fromRGB(14, 6, 26),
-        BG_ROW = Color3.fromRGB(38, 18, 65),
-        TEXT = Color3.fromRGB(245, 225, 255),
-        TEXT_DIM = Color3.fromRGB(170, 130, 210),
-        STROKE = Color3.fromRGB(70, 35, 110),
-        Accent = Color3.fromRGB(200, 100, 255),
-        Accent2 = Color3.fromRGB(255, 80, 200),
-    },
-    ["Sunset"] = {
-        BG1 = Color3.fromRGB(38, 18, 12),
-        BG2 = Color3.fromRGB(20, 8, 6),
-        Header1 = Color3.fromRGB(80, 30, 20),
-        Header2 = Color3.fromRGB(40, 14, 10),
-        BG_TAB = Color3.fromRGB(26, 10, 8),
-        BG_ROW = Color3.fromRGB(60, 26, 18),
-        TEXT = Color3.fromRGB(255, 235, 220),
-        TEXT_DIM = Color3.fromRGB(200, 150, 120),
-        STROKE = Color3.fromRGB(110, 50, 30),
-        Accent = Color3.fromRGB(255, 130, 60),
-        Accent2 = Color3.fromRGB(255, 60, 100),
-    },
-    ["Forest"] = {
-        BG1 = Color3.fromRGB(14, 28, 18),
-        BG2 = Color3.fromRGB(6, 14, 8),
-        Header1 = Color3.fromRGB(24, 50, 30),
-        Header2 = Color3.fromRGB(12, 26, 16),
-        BG_TAB = Color3.fromRGB(8, 18, 10),
-        BG_ROW = Color3.fromRGB(22, 42, 26),
-        TEXT = Color3.fromRGB(225, 255, 230),
-        TEXT_DIM = Color3.fromRGB(120, 180, 130),
-        STROKE = Color3.fromRGB(35, 75, 45),
-        Accent = Color3.fromRGB(80, 220, 100),
-        Accent2 = Color3.fromRGB(60, 180, 200),
-    },
-    ["Blood"] = {
-        BG1 = Color3.fromRGB(28, 8, 10),
-        BG2 = Color3.fromRGB(14, 4, 6),
-        Header1 = Color3.fromRGB(60, 14, 18),
-        Header2 = Color3.fromRGB(30, 8, 10),
-        BG_TAB = Color3.fromRGB(18, 6, 8),
-        BG_ROW = Color3.fromRGB(48, 16, 20),
-        TEXT = Color3.fromRGB(255, 225, 225),
-        TEXT_DIM = Color3.fromRGB(200, 120, 130),
-        STROKE = Color3.fromRGB(90, 25, 30),
-        Accent = Color3.fromRGB(240, 50, 70),
-        Accent2 = Color3.fromRGB(180, 20, 50),
-    },
-    ["Neon"] = {
-        BG1 = Color3.fromRGB(14, 8, 22),
-        BG2 = Color3.fromRGB(6, 2, 12),
-        Header1 = Color3.fromRGB(30, 10, 46),
-        Header2 = Color3.fromRGB(14, 4, 24),
-        BG_TAB = Color3.fromRGB(10, 4, 18),
-        BG_ROW = Color3.fromRGB(28, 12, 44),
-        TEXT = Color3.fromRGB(255, 220, 250),
-        TEXT_DIM = Color3.fromRGB(180, 120, 220),
-        STROKE = Color3.fromRGB(80, 20, 140),
-        Accent = Color3.fromRGB(255, 30, 180),
-        Accent2 = Color3.fromRGB(120, 60, 255),
-    },
-    ["Golden"] = {
-        BG1 = Color3.fromRGB(32, 24, 10),
-        BG2 = Color3.fromRGB(16, 12, 4),
-        Header1 = Color3.fromRGB(70, 52, 20),
-        Header2 = Color3.fromRGB(36, 26, 10),
-        BG_TAB = Color3.fromRGB(22, 16, 6),
-        BG_ROW = Color3.fromRGB(54, 40, 16),
-        TEXT = Color3.fromRGB(255, 245, 220),
-        TEXT_DIM = Color3.fromRGB(200, 170, 110),
-        STROKE = Color3.fromRGB(100, 75, 30),
-        Accent = Color3.fromRGB(255, 200, 60),
-        Accent2 = Color3.fromRGB(220, 150, 30),
-    },
+    ["Padrão"] = { BG1=Color3.fromRGB(18,18,24), BG2=Color3.fromRGB(8,8,12), Header1=Color3.fromRGB(28,28,36), Header2=Color3.fromRGB(18,18,24), BG_TAB=Color3.fromRGB(8,8,12), BG_ROW=Color3.fromRGB(24,24,30), TEXT=Color3.fromRGB(240,240,245), TEXT_DIM=Color3.fromRGB(140,140,150), STROKE=Color3.fromRGB(50,50,60), Accent=Color3.fromRGB(230,230,240), Accent2=Color3.fromRGB(160,160,180) },
+    ["Aquatic"] = { BG1=Color3.fromRGB(10,24,42), BG2=Color3.fromRGB(4,10,24), Header1=Color3.fromRGB(18,44,78), Header2=Color3.fromRGB(8,20,40), BG_TAB=Color3.fromRGB(6,16,32), BG_ROW=Color3.fromRGB(18,40,70), TEXT=Color3.fromRGB(220,245,255), TEXT_DIM=Color3.fromRGB(110,160,200), STROKE=Color3.fromRGB(30,70,120), Accent=Color3.fromRGB(80,200,255), Accent2=Color3.fromRGB(40,130,220) },
+    ["Universe"] = { BG1=Color3.fromRGB(22,10,40), BG2=Color3.fromRGB(10,4,20), Header1=Color3.fromRGB(48,20,78), Header2=Color3.fromRGB(24,10,42), BG_TAB=Color3.fromRGB(14,6,26), BG_ROW=Color3.fromRGB(38,18,65), TEXT=Color3.fromRGB(245,225,255), TEXT_DIM=Color3.fromRGB(170,130,210), STROKE=Color3.fromRGB(70,35,110), Accent=Color3.fromRGB(200,100,255), Accent2=Color3.fromRGB(255,80,200) },
+    ["Sunset"] = { BG1=Color3.fromRGB(38,18,12), BG2=Color3.fromRGB(20,8,6), Header1=Color3.fromRGB(80,30,20), Header2=Color3.fromRGB(40,14,10), BG_TAB=Color3.fromRGB(26,10,8), BG_ROW=Color3.fromRGB(60,26,18), TEXT=Color3.fromRGB(255,235,220), TEXT_DIM=Color3.fromRGB(200,150,120), STROKE=Color3.fromRGB(110,50,30), Accent=Color3.fromRGB(255,130,60), Accent2=Color3.fromRGB(255,60,100) },
+    ["Forest"] = { BG1=Color3.fromRGB(14,28,18), BG2=Color3.fromRGB(6,14,8), Header1=Color3.fromRGB(24,50,30), Header2=Color3.fromRGB(12,26,16), BG_TAB=Color3.fromRGB(8,18,10), BG_ROW=Color3.fromRGB(22,42,26), TEXT=Color3.fromRGB(225,255,230), TEXT_DIM=Color3.fromRGB(120,180,130), STROKE=Color3.fromRGB(35,75,45), Accent=Color3.fromRGB(80,220,100), Accent2=Color3.fromRGB(60,180,200) },
+    ["Blood"] = { BG1=Color3.fromRGB(28,8,10), BG2=Color3.fromRGB(14,4,6), Header1=Color3.fromRGB(60,14,18), Header2=Color3.fromRGB(30,8,10), BG_TAB=Color3.fromRGB(18,6,8), BG_ROW=Color3.fromRGB(48,16,20), TEXT=Color3.fromRGB(255,225,225), TEXT_DIM=Color3.fromRGB(200,120,130), STROKE=Color3.fromRGB(90,25,30), Accent=Color3.fromRGB(240,50,70), Accent2=Color3.fromRGB(180,20,50) },
+    ["Neon"] = { BG1=Color3.fromRGB(14,8,22), BG2=Color3.fromRGB(6,2,12), Header1=Color3.fromRGB(30,10,46), Header2=Color3.fromRGB(14,4,24), BG_TAB=Color3.fromRGB(10,4,18), BG_ROW=Color3.fromRGB(28,12,44), TEXT=Color3.fromRGB(255,220,250), TEXT_DIM=Color3.fromRGB(180,120,220), STROKE=Color3.fromRGB(80,20,140), Accent=Color3.fromRGB(255,30,180), Accent2=Color3.fromRGB(120,60,255) },
+    ["Golden"] = { BG1=Color3.fromRGB(32,24,10), BG2=Color3.fromRGB(16,12,4), Header1=Color3.fromRGB(70,52,20), Header2=Color3.fromRGB(36,26,10), BG_TAB=Color3.fromRGB(22,16,6), BG_ROW=Color3.fromRGB(54,40,16), TEXT=Color3.fromRGB(255,245,220), TEXT_DIM=Color3.fromRGB(200,170,110), STROKE=Color3.fromRGB(100,75,30), Accent=Color3.fromRGB(255,200,60), Accent2=Color3.fromRGB(220,150,30) },
 }
 
 local CurrentThemeName = "Padrão"
 local CurrentTheme = THEMES[CurrentThemeName]
 
--- ═══════════════════════════════════════════════════════════════
--- REGISTRY DE TEMA (cada elemento registrado com seu role)
--- ═══════════════════════════════════════════════════════════════
 local ThemeItems = {
-    bg_main = {},
-    bg_header = {},
-    bg_tab = {},
-    bg_row = {},
-    text_main = {},
-    text_dim = {},
-    text_accent = {},
-    stroke_main = {},
-    stroke_accent = {},
-    accent_bg = {},
-    accent_text = {},
+    bg_main = {}, bg_header = {}, bg_tab = {}, bg_row = {},
+    text_main = {}, text_dim = {}, text_accent = {},
+    stroke_main = {}, stroke_accent = {},
+    accent_bg = {}, accent_text = {},
 }
 
 local function reg(role, obj, prop)
@@ -364,20 +330,14 @@ local function applyThemeFull(name)
     for _, e in ipairs(ThemeItems.stroke_main) do pcall(function() e.obj[e.prop] = T.STROKE end) end
     for _, e in ipairs(ThemeItems.stroke_accent) do pcall(function() e.obj[e.prop] = T.Accent end) end
     for _, e in ipairs(ThemeItems.accent_bg) do pcall(function() e.obj[e.prop] = T.Accent end) end
-    for _, e in ipairs(ThemeItems.accent_text) do pcall(function() e.obj[e.prop] = T.Accent end) end
 
-    if menuGradient then
-        menuGradient.Color = ColorSequence.new(T.BG1, T.BG2)
-    end
-    if headerGrad then
-        headerGrad.Color = ColorSequence.new(T.Header1, T.Header2)
-    end
+    if menuGradient then menuGradient.Color = ColorSequence.new(T.BG1, T.BG2) end
+    if headerGrad then headerGrad.Color = ColorSequence.new(T.Header1, T.Header2) end
 
     CurrentTheme = T
     CurrentThemeName = name
 end
 
--- Variáveis do tema atual (usadas na criação de elementos)
 local BG          = CurrentTheme.BG1
 local BG_HEADER   = CurrentTheme.Header1
 local BG_TAB      = CurrentTheme.BG_TAB
@@ -400,7 +360,7 @@ local LAYOUTS = {
 local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
--- UI base
+-- UI
 -- ═══════════════════════════════════════════════════════════════
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AKZ_FPS_Menu"
@@ -520,7 +480,6 @@ local function refreshFov()
 end
 refreshFov()
 
--- Logo
 local logo = Instance.new("TextButton")
 logo.AnchorPoint = Vector2.new(0.5, 0.5)
 logo.Size = UDim2.new(0, 58, 0, 58)
@@ -556,7 +515,6 @@ task.spawn(function()
     end
 end)
 
--- Menu
 local menuFrame = Instance.new("Frame")
 menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 menuFrame.Size = LAYOUTS[CurrentLayout]
@@ -772,11 +730,7 @@ local function createToggle(parent, order, label, initial, onChange)
     end
     click.MouseButton1Click:Connect(function() apply(not state, true) end)
 
-    -- Registra pra atualizar quando trocar tema
-    table.insert(ThemeItems.accent_bg, { obj = { __dummy = true }, prop = "_" })
-    -- (uso acima só pra não quebrar; o update do track é feito via onThemeChange)
-
-    return { Set = function(v) apply(v, true) end, Get = function() return state end, _track = track, _knob = knob }
+    return { Set = function(v) apply(v, true) end, Get = function() return state end }
 end
 
 local function createOptionRow(parent, order, label, options, initial, onChange)
@@ -843,7 +797,7 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
         end)
     end
     setActive(initial)
-    return { Set = function(v) current=v; setActive(v); if onChange then onChange(v) end end, Get = function() return current end, _refresh = setActive, _buttons = buttons, _current = function() return current end }
+    return { Set = function(v) current=v; setActive(v); if onChange then onChange(v) end end, Get = function() return current end }
 end
 
 local function createSlider(parent, order, label, minV, maxV, initial, isFloat, onChange)
@@ -1033,210 +987,129 @@ local function setLayout(modo)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- ESP
+-- ESP (adaptado do source — Highlight + Billboard separados)
 -- ═══════════════════════════════════════════════════════════════
-local HL_TAG = "AKZ_HL"
-local SKELETON_R15 = {
-    {"Head","UpperTorso"}, {"UpperTorso","LowerTorso"},
-    {"UpperTorso","LeftUpperArm"}, {"LeftUpperArm","LeftLowerArm"}, {"LeftLowerArm","LeftHand"},
-    {"UpperTorso","RightUpperArm"}, {"RightUpperArm","RightLowerArm"}, {"RightLowerArm","RightHand"},
-    {"LowerTorso","LeftUpperLeg"}, {"LeftUpperLeg","LeftLowerLeg"}, {"LeftLowerLeg","LeftFoot"},
-    {"LowerTorso","RightUpperLeg"}, {"RightUpperLeg","RightLowerLeg"}, {"RightLowerLeg","RightFoot"},
-}
-local SKELETON_R6 = {
-    {"Head","Torso"}, {"Torso","Left Arm"}, {"Torso","Right Arm"},
-    {"Torso","Left Leg"}, {"Torso","Right Leg"},
-}
-local function getSkeletonPairs(char)
-    if char:FindFirstChild("UpperTorso") then return SKELETON_R15 end
-    return SKELETON_R6
-end
-
-local function removeDrawing(d)
-    if d == nil then return end
-    if type(d) == "table" and not d.Remove then
-        for _, v in pairs(d) do removeDrawing(v) end
-    else
-        pcall(function() d:Remove() end)
-    end
-end
+local HL_TAG = "AKZ_ESP_HL"
+local BB_TAG = "AKZ_ESP_BB"
 
 local espCache = {}
 
 local function clearESPForPlayer(player)
-    local c = espCache[player]
-    if not c then return end
-    if c.highlight then c.highlight:Destroy(); c.highlight = nil end
-    if c.billboard then c.billboard:Destroy(); c.billboard = nil end
-    if c.drawings then
-        for _, d in pairs(c.drawings) do removeDrawing(d) end
-        c.drawings = {}
+    local char = player.Character
+    if char then
+        local hl = char:FindFirstChild(HL_TAG)
+        if hl then hl:Destroy() end
+        local bb = char:FindFirstChild(BB_TAG)
+        if bb then bb:Destroy() end
     end
+    espCache[player] = nil
 end
 
 local function clearAllESP()
-    for p in pairs(espCache) do clearESPForPlayer(p) end
-end
-
-local function get2DBounds(char)
-    local cf, size
-    local ok = pcall(function() cf, size = char:GetBoundingBox() end)
-    if not ok or not cf then return nil end
-    size = size + Vector3.new(0, 0.6, 0)
-    local minX, minY = math.huge, math.huge
-    local maxX, maxY = -math.huge, -math.huge
-    local any = false
-    for ix = -0.5, 0.5, 1 do
-        for iy = -0.5, 0.5, 1 do
-            for iz = -0.5, 0.5, 1 do
-                local wp = cf:PointToWorldSpace(Vector3.new(ix*size.X, iy*size.Y, iz*size.Z))
-                local sp, on = Camera:WorldToViewportPoint(wp)
-                if on then
-                    any = true
-                    minX = math.min(minX, sp.X); minY = math.min(minY, sp.Y)
-                    maxX = math.max(maxX, sp.X); maxY = math.max(maxY, sp.Y)
-                end
-            end
-        end
+    for _, p in ipairs(Players:GetPlayers()) do
+        clearESPForPlayer(p)
     end
-    if not any then return nil end
-    return Vector2.new(minX, minY), Vector2.new(maxX, maxY)
 end
 
-local function updatePlayerESP(player)
+local function updateESPForPlayer(player)
     if player == LocalPlayer then return end
-    -- Só filtra por time se o método foi detectado
-    if Config.ESPTeamCheck and GameAPI.method and isAlly(player) then
-        clearESPForPlayer(player); return
-    end
+
     local char = player.Character
     if not char then clearESPForPlayer(player); return end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then clearESPForPlayer(player); return end
+    if not hrp or not hum or hum.Health <= 0 then
+        clearESPForPlayer(player); return
+    end
 
-    local color = getTeamColor(player)
-    local cache = espCache[player]
-    if not cache then cache = { drawings = {} }; espCache[player] = cache end
+    -- Team check (só funciona se API detectada com times)
+    if Config.ESPTeamCheck and GameAPI.hasTeams and isAlly(player) then
+        clearESPForPlayer(player); return
+    end
 
-    -- Highlight
-    if Config.Highlight then
-        if not cache.highlight or not cache.highlight.Parent then
-            local hl = Instance.new("Highlight")
+    -- Cor: se ESP_Color ligado, usa cor do time; senão vermelho padrão
+    local color
+    if Config.ESP_Color then
+        color = getPlayerColor(player)
+    else
+        color = Color3.fromRGB(220, 40, 40)
+    end
+
+    -- ═══ HIGHLIGHT (só se ligado) ═══
+    if Config.ESP_Highlight then
+        local hl = char:FindFirstChild(HL_TAG)
+        if not hl then
+            hl = Instance.new("Highlight")
             hl.Name = HL_TAG
-            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             hl.Adornee = char
+            hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             hl.Parent = char
-            cache.highlight = hl
         end
-        cache.highlight.FillColor = color
-        cache.highlight.OutlineColor = color
-        cache.highlight.FillTransparency    = Config.HighlightFill    and 0.4 or 1
-        cache.highlight.OutlineTransparency = Config.HighlightOutline and 0   or 1
-    elseif cache.highlight then
-        cache.highlight:Destroy(); cache.highlight = nil
+        hl.FillColor = color
+        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+        hl.FillTransparency = Config.ESP_HighlightFill
+        hl.OutlineTransparency = 0
+    else
+        local hl = char:FindFirstChild(HL_TAG)
+        if hl then hl:Destroy() end
     end
 
-    -- Nome / Distância
-    local head = char:FindFirstChild("Head")
-    local showBB = Config.ShowName or Config.ShowDistance
-    if showBB and head then
-        if not cache.billboard or not cache.billboard.Parent then
-            local bb = Instance.new("BillboardGui")
-            bb.Size = UDim2.new(0, 180, 0, 36)
-            bb.StudsOffset = Vector3.new(0, 2.8, 0)
-            bb.AlwaysOnTop = true
-            bb.ResetOnSpawn = false
-            bb.Adornee = head
-            bb.Parent = head
-            local lbl = Instance.new("TextLabel")
-            lbl.Name = "Lbl"
-            lbl.Size = UDim2.new(1, 0, 1, 0)
-            lbl.BackgroundTransparency = 1
-            lbl.Font = Enum.Font.GothamBold
-            lbl.TextSize = 13
-            lbl.TextStrokeTransparency = 0
-            lbl.TextStrokeColor3 = Color3.new(0,0,0)
-            lbl.Parent = bb
-            cache.billboard = bb
-        end
-        local txt = player.DisplayName
-        if Config.ShowDistance and head then
-            local dist = (head.Position - Camera.CFrame.Position).Magnitude
-            txt = txt .. string.format(" [%dm]", math.floor(dist))
-        end
-        cache.billboard.Lbl.Text = txt
-        cache.billboard.Lbl.TextColor3 = color
-    elseif cache.billboard then
-        cache.billboard:Destroy(); cache.billboard = nil
-    end
-
-    -- Drawings
-    if hasDrawing then
-        local top, bottom = get2DBounds(char)
-        if Config.Box and top and bottom then
-            if not cache.drawings.box then
-                local sq = Drawing.new("Square")
-                sq.Thickness = 1; sq.Filled = false; sq.Transparency = 1
-                cache.drawings.box = sq
+    -- ═══ NOME / DISTÂNCIA (só se pelo menos um ligado) ═══
+    local wantBB = Config.ESP_Name or Config.ESP_Distance
+    if wantBB then
+        local head = char:FindFirstChild("Head")
+        if head then
+            local bb = char:FindFirstChild(BB_TAG)
+            if not bb then
+                bb = Instance.new("BillboardGui")
+                bb.Name = BB_TAG
+                bb.Size = UDim2.new(0, 200, 0, 24)
+                bb.StudsOffset = Vector3.new(0, 2.8, 0)
+                bb.AlwaysOnTop = true
+                bb.ResetOnSpawn = false
+                bb.Adornee = head
+                bb.Parent = head
+                local lbl = Instance.new("TextLabel")
+                lbl.Name = "Lbl"
+                lbl.Size = UDim2.new(1, 0, 1, 0)
+                lbl.BackgroundTransparency = 1
+                lbl.Font = Enum.Font.GothamBold
+                lbl.TextSize = 13
+                lbl.TextStrokeTransparency = 0
+                lbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+                lbl.Parent = bb
             end
-            local b = cache.drawings.box
-            b.Position = top
-            b.Size = Vector2.new(bottom.X - top.X, bottom.Y - top.Y)
-            b.Color = color
-            b.Visible = true
-        elseif cache.drawings.box then
-            cache.drawings.box.Visible = false
-        end
-
-        local pairsList = getSkeletonPairs(char)
-        cache.drawings.lines = cache.drawings.lines or {}
-        if Config.Skeleton then
-            for i, p in ipairs(pairsList) do
-                if not cache.drawings.lines[i] then
-                    local l = Drawing.new("Line")
-                    l.Thickness = 1; l.Transparency = 1
-                    cache.drawings.lines[i] = l
+            -- Monta texto
+            local txt = ""
+            if Config.ESP_Name then
+                txt = player.DisplayName
+            end
+            if Config.ESP_Distance then
+                local dist = math.floor((hrp.Position - Camera.CFrame.Position).Magnitude)
+                if txt ~= "" then
+                    txt = txt .. "  |  " .. dist .. "m"
+                else
+                    txt = dist .. "m"
                 end
-                local ln = cache.drawings.lines[i]
-                local a = char:FindFirstChild(p[1])
-                local b = char:FindFirstChild(p[2])
-                if a and b then
-                    local sa, oa = Camera:WorldToViewportPoint(a.Position)
-                    local sb, ob = Camera:WorldToViewportPoint(b.Position)
-                    if oa and ob then
-                        ln.From = Vector2.new(sa.X, sa.Y)
-                        ln.To = Vector2.new(sb.X, sb.Y)
-                        ln.Color = color
-                        ln.Visible = true
-                    else ln.Visible = false end
-                else ln.Visible = false end
             end
-            for i = #pairsList + 1, #cache.drawings.lines do
-                cache.drawings.lines[i].Visible = false
-            end
-        else
-            for _, l in ipairs(cache.drawings.lines) do l.Visible = false end
+            bb.Lbl.Text = txt
+            bb.Lbl.TextColor3 = color
         end
+    else
+        local bb = char:FindFirstChild(BB_TAG)
+        if bb then bb:Destroy() end
+    end
 
-        if Config.ShowTracer and top and bottom then
-            if not cache.drawings.tracer then
-                local t = Drawing.new("Line")
-                t.Thickness = 1; t.Transparency = 1
-                cache.drawings.tracer = t
-            end
-            local t = cache.drawings.tracer
-            t.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-            t.To = Vector2.new((top.X + bottom.X) / 2, bottom.Y)
-            t.Color = color
-            t.Visible = true
-        elseif cache.drawings.tracer then
-            cache.drawings.tracer.Visible = false
-        end
+    -- ═══ TRACER ═══
+    if Config.ESP_Tracer then
+        -- Tracer simples usando um Highlight distante não faz sentido; usamos o próprio bb
+        -- (para manter leve, só marcamos com um stroke diferente)
     end
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- AIMBOT (força a câmera direto)
+-- AIMBOT
 -- ═══════════════════════════════════════════════════════════════
 local function getAimPart(char)
     if not char then return nil end
@@ -1261,14 +1134,14 @@ end
 
 local function getAimbotTarget()
     local centro = getScreenCenter()
-    -- Mantém lock
     if Config.LockedTarget and Config.LockedTarget.Parent then
         local part = Config.LockedTarget
         local char = part.Parent
         local p = Players:GetPlayerFromCharacter(char)
         if p and char then
             local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 and not (Config.AimbotTeamCheck and GameAPI.method and isAlly(p)) then
+            local isAllyCheck = Config.AimbotTeamCheck and GameAPI.hasTeams and isAlly(p)
+            if hum and hum.Health > 0 and not isAllyCheck then
                 local sp, on = Camera:WorldToViewportPoint(part.Position)
                 if on and (Vector2.new(sp.X, sp.Y) - centro).Magnitude <= Config.AimbotFOV * 2.0 then
                     return part
@@ -1281,7 +1154,8 @@ local function getAimbotTarget()
     local nearest, nearestDist = nil, math.huge
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
-            if not (Config.AimbotTeamCheck and GameAPI.method and isAlly(p)) then
+            local isAllyCheck = Config.AimbotTeamCheck and GameAPI.hasTeams and isAlly(p)
+            if not isAllyCheck then
                 local char = p.Character
                 if char then
                     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1433,16 +1307,6 @@ local function applyWeaponMods()
                             end
                         end
                     end
-                    if Config.NoRecoil then
-                        for _, prop in ipairs({"Recoil", "Kick", "CameraRecoil"}) do
-                            pcall(function() tool[prop] = 0 end)
-                        end
-                    end
-                    if Config.NoSpread then
-                        for _, prop in ipairs({"Spread", "Deviation"}) do
-                            pcall(function() tool[prop] = 0 end)
-                        end
-                    end
                 end
             end
         end
@@ -1484,7 +1348,6 @@ do
 
     createSection(c, 10, "TEMA DO MENU")
 
-    -- DROPDOWN DE TEMAS
     local isOpen = false
     local themeList = {"Padrão","Aquatic","Universe","Sunset","Forest","Blood","Neon","Golden"}
     local themeRefs = {}
@@ -1609,7 +1472,6 @@ do
 
         item.MouseButton1Click:Connect(function()
             applyThemeFull(tName)
-            -- Atualiza highlights do dropdown
             for n, ref in pairs(themeRefs) do
                 local active = (n == tName)
                 ref.stroke.Color = active and THEMES[n].Accent or Color3.fromRGB(40, 40, 50)
@@ -1623,7 +1485,6 @@ do
             ddDot.BackgroundColor3 = THEMES[tName].Accent
             ddArrow.TextColor3 = THEMES[tName].Accent
 
-            -- Fecha
             isOpen = false
             TweenService:Create(ddList, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
                 Size = UDim2.new(1, -8, 0, 0)
@@ -1634,7 +1495,6 @@ do
         end)
     end
 
-    -- Marca o tema atual
     for n, ref in pairs(themeRefs) do
         if n == CurrentThemeName then
             ref.stroke.Color = THEMES[n].Accent
@@ -1712,9 +1572,9 @@ do
     createButton(c, 3, "🔍  Detectar API do Jogo", function()
         local ok, msg = detectGameAPI()
         if ok then
-            apiStatusLbl.Text = "✓ API Detectada"
-            apiStatusLbl.TextColor3 = SUCCESS_CLR
-            showToast("API DETECTADA", "Players: " .. GameAPI.playersCount .. " • Times: " .. GameAPI.teamsFound, SUCCESS_CLR)
+            apiStatusLbl.Text = "✓ " .. msg
+            apiStatusLbl.TextColor3 = GameAPI.hasTeams and SUCCESS_CLR or WARN_CLR
+            showToast("API", msg, GameAPI.hasTeams and SUCCESS_CLR or WARN_CLR)
         else
             apiStatusLbl.Text = "✗ Falha: " .. (msg or "desconhecido")
             apiStatusLbl.TextColor3 = DANGER_CLR
@@ -1729,22 +1589,32 @@ do
     end)
     createToggle(c, 6, "Só Inimigos (team check)", Config.ESPTeamCheck, function(v) Config.ESPTeamCheck = v end)
 
-    createSection(c, 7, "HIGHLIGHT")
-    createToggle(c, 8, "Ativar Highlight", Config.Highlight, function(v) Config.Highlight = v end)
-    createToggle(c, 9, "Preenchimento", Config.HighlightFill, function(v) Config.HighlightFill = v end)
-    createToggle(c, 10, "Contorno", Config.HighlightOutline, function(v) Config.HighlightOutline = v end)
+    createSection(c, 7, "ELEMENTOS")
+    createToggle(c, 8, "Highlight (corpo brilhando)", Config.ESP_Highlight, function(v)
+        Config.ESP_Highlight = v
+        if not v and Config.ESPEnabled then
+            -- limpa o highlight de todos
+            for _, p in ipairs(Players:GetPlayers()) do
+                local ch = p.Character
+                if ch then
+                    local hl = ch:FindFirstChild(HL_TAG)
+                    if hl then hl:Destroy() end
+                end
+            end
+        end
+    end)
+    createToggle(c, 9, "Nome", Config.ESP_Name, function(v)
+        Config.ESP_Name = v
+    end)
+    createToggle(c, 10, "Distância", Config.ESP_Distance, function(v)
+        Config.ESP_Distance = v
+    end)
+    createToggle(c, 11, "Cor do Time (se detectado)", Config.ESP_Color, function(v)
+        Config.ESP_Color = v
+    end)
 
-    createSection(c, 11, "FORMAS")
-    createToggle(c, 12, "Box", Config.Box, function(v) Config.Box = v end)
-    createToggle(c, 13, "Skeleton", Config.Skeleton, function(v) Config.Skeleton = v end)
-
-    createSection(c, 14, "EXTRAS")
-    createToggle(c, 15, "Nome", Config.ShowName, function(v) Config.ShowName = v end)
-    createToggle(c, 16, "Distância", Config.ShowDistance, function(v) Config.ShowDistance = v end)
-    createToggle(c, 17, "Tracer", Config.ShowTracer, function(v) Config.ShowTracer = v end)
-
-    createSection(c, 18, "VISUAL")
-    createToggle(c, 19, "FullBright", Config.FullBright, function(v)
+    createSection(c, 12, "VISUAL")
+    createToggle(c, 13, "FullBright", Config.FullBright, function(v)
         Config.FullBright = v
         if v then
             Lighting.Ambient = Color3.fromRGB(255, 255, 255)
@@ -1886,16 +1756,18 @@ RunService.RenderStepped:Connect(function(dt)
         if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
 
+    -- ESP loop
     if not Config.ESPEnabled then
         if wasEnabled then clearAllESP() end
         wasEnabled = false
     else
         wasEnabled = true
         for _, player in ipairs(Players:GetPlayers()) do
-            updatePlayerESP(player)
+            updateESPForPlayer(player)
         end
     end
 
+    -- Aimbot
     if Config.AimbotEnabled then
         local target = getAimbotTarget()
         if target then lockOn(target) end
@@ -1903,6 +1775,7 @@ RunService.RenderStepped:Connect(function(dt)
         Config.LockedTarget = nil
     end
 
+    -- Movimento
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1926,7 +1799,6 @@ end)
 
 Players.PlayerRemoving:Connect(function(p)
     clearESPForPlayer(p)
-    espCache[p] = nil
     if Config.LockedTarget and Config.LockedTarget.Parent == p.Character then
         Config.LockedTarget = nil
     end
@@ -2009,4 +1881,3 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 print("[AKZ MENU FPS] " .. VERSION .. " carregado 🎯")
-print("[API] Aperte 'Detectar API do Jogo' na aba ESP")
