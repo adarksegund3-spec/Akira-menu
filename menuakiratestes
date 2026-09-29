@@ -30,6 +30,141 @@ local DEV_NAME = "Akira007p"
 local VERSION = "v1"
 
 -- ═══════════════════════════════════════════════════════════════
+-- GAME API (cérebro de detecção)
+-- ═══════════════════════════════════════════════════════════════
+local GameAPI = {
+    detected = false,
+    method = nil,
+    hasTeams = false,
+    teamsFound = 0,
+    playersCount = 0,
+    errorMsg = nil,
+}
+
+local function getTeamViaTeam(p)
+    if not p then return nil end
+    local ok, t = pcall(function() return p.Team end)
+    if ok and t then return t end
+    return nil
+end
+
+local function getTeamViaAttribute(p)
+    if not p then return nil end
+    local c = p.Character
+    if not c then return nil end
+    local ok, v = pcall(function() return c:GetAttribute("TeamColor") end)
+    if ok and v then return tostring(v) end
+    return nil
+end
+
+local function getTeamViaStringValue(p)
+    if not p then return nil end
+    local c = p.Character
+    if not c then return nil end
+    local sv = c:FindFirstChild("Team")
+    if sv and (sv:IsA("StringValue") or sv:IsA("ObjectValue")) then
+        return sv.Value
+    end
+    return nil
+end
+
+local function getPlayerTeam(p)
+    if not p then return nil end
+    if GameAPI.method == "Team" then
+        local t = getTeamViaTeam(p); if t then return t end
+    elseif GameAPI.method == "Attribute" then
+        local s = getTeamViaAttribute(p); if s then return s end
+    elseif GameAPI.method == "StringValue" then
+        local v = getTeamViaStringValue(p); if v then return v end
+    end
+    -- Fallback pra quando método não foi detectado ainda
+    local t = getTeamViaTeam(p); if t then return t end
+    local s = getTeamViaAttribute(p); if s then return s end
+    local v = getTeamViaStringValue(p); if v then return v end
+    return nil
+end
+
+local function isAlly(p)
+    if not p or p == LocalPlayer then return false end
+    local mine = getPlayerTeam(LocalPlayer)
+    local their = getPlayerTeam(p)
+    if mine == nil or their == nil then return false end
+    return tostring(mine) == tostring(their)
+end
+
+local function parseRGB(s)
+    if not s then return nil end
+    local r, g, b = tostring(s):match("([%d%.]+),%s*([%d%.]+),%s*([%d%.]+)")
+    if r and g and b then
+        return Color3.new(tonumber(r) or 1, tonumber(g) or 1, tonumber(b) or 1)
+    end
+    return nil
+end
+
+local function getTeamColorFor(p)
+    local s = getTeamViaAttribute(p)
+    local cor = parseRGB(s)
+    if cor then return cor end
+    local t = getTeamViaTeam(p)
+    if t then
+        local ok, tc = pcall(function() return t.TeamColor end)
+        if ok and tc and tc.Color then return tc.Color end
+    end
+    local ok, tc = pcall(function() return p.TeamColor end)
+    if ok and tc and tc.Color then return tc.Color end
+    return Color3.fromRGB(200, 200, 200)
+end
+
+local function getTeamColor(p)
+    if p == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
+    if isAlly(p) then return Color3.fromRGB(80, 170, 255) end
+    local c = getTeamColorFor(p)
+    if c then return c end
+    return Color3.fromRGB(220, 40, 40)
+end
+
+local function detectGameAPI()
+    GameAPI.detected = false
+    GameAPI.errorMsg = nil
+    GameAPI.method = nil
+    GameAPI.hasTeams = false
+    GameAPI.teamsFound = 0
+
+    local allPlayers = Players:GetPlayers()
+    GameAPI.playersCount = #allPlayers
+
+    if GameAPI.playersCount == 0 then
+        GameAPI.errorMsg = "Sem players no servidor"
+        return false, GameAPI.errorMsg
+    end
+
+    local cTeam, cAttr, cSV = 0, 0, 0
+    local teamSet = {}
+
+    for _, p in ipairs(allPlayers) do
+        local t = getTeamViaTeam(p)
+        if t then cTeam = cTeam + 1; teamSet[tostring(t)] = true end
+        local a = getTeamViaAttribute(p)
+        if a then cAttr = cAttr + 1; teamSet[tostring(a)] = true end
+        local s = getTeamViaStringValue(p)
+        if s then cSV = cSV + 1; teamSet[tostring(s)] = true end
+    end
+
+    if cTeam > 0 then GameAPI.method = "Team"
+    elseif cAttr > 0 then GameAPI.method = "Attribute"
+    elseif cSV > 0 then GameAPI.method = "StringValue"
+    end
+
+    for _ in pairs(teamSet) do
+        GameAPI.teamsFound = GameAPI.teamsFound + 1
+    end
+    GameAPI.hasTeams = (GameAPI.method ~= nil)
+
+    GameAPI.detected = true
+    return true, "API Detectada"
+end
+
+-- ═══════════════════════════════════════════════════════════════
 -- CONFIG
 -- ═══════════════════════════════════════════════════════════════
 local Config = {
@@ -42,17 +177,16 @@ local Config = {
     ShowName = true,
     ShowTracer = false,
     ShowDistance = false,
-    ESPTeamCheck = false, -- desligado por padrão pra ESP sempre mostrar
+    ESPTeamCheck = false,
 
     AimbotEnabled = false,
     AimbotShowFOV = true,
-    AimbotFOV = 120,
+    AimbotFOV = 150,
     AimbotFOVAlpha = 0.6,
     AimbotPart = "Head",
-    AimbotTeamCheck = true,
-    AimbotWallCheck = true,
-    AimbotSmooth = 0.2,
-    Aiming = false,
+    AimbotTeamCheck = false,
+    AimbotWallCheck = false,
+    AimbotSmooth = 0.05,
     LockedTarget = nil,
 
     SpeedEnabled = false,
@@ -93,7 +227,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(18, 18, 24),
         BG_TAB = Color3.fromRGB(8, 8, 12),
         BG_ROW = Color3.fromRGB(24, 24, 30),
-        BG_BLOCK = Color3.fromRGB(18, 18, 24),
         TEXT = Color3.fromRGB(240, 240, 245),
         TEXT_DIM = Color3.fromRGB(140, 140, 150),
         STROKE = Color3.fromRGB(50, 50, 60),
@@ -107,7 +240,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(8, 20, 40),
         BG_TAB = Color3.fromRGB(6, 16, 32),
         BG_ROW = Color3.fromRGB(18, 40, 70),
-        BG_BLOCK = Color3.fromRGB(12, 28, 52),
         TEXT = Color3.fromRGB(220, 245, 255),
         TEXT_DIM = Color3.fromRGB(110, 160, 200),
         STROKE = Color3.fromRGB(30, 70, 120),
@@ -121,7 +253,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(24, 10, 42),
         BG_TAB = Color3.fromRGB(14, 6, 26),
         BG_ROW = Color3.fromRGB(38, 18, 65),
-        BG_BLOCK = Color3.fromRGB(26, 12, 46),
         TEXT = Color3.fromRGB(245, 225, 255),
         TEXT_DIM = Color3.fromRGB(170, 130, 210),
         STROKE = Color3.fromRGB(70, 35, 110),
@@ -135,7 +266,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(40, 14, 10),
         BG_TAB = Color3.fromRGB(26, 10, 8),
         BG_ROW = Color3.fromRGB(60, 26, 18),
-        BG_BLOCK = Color3.fromRGB(46, 20, 14),
         TEXT = Color3.fromRGB(255, 235, 220),
         TEXT_DIM = Color3.fromRGB(200, 150, 120),
         STROKE = Color3.fromRGB(110, 50, 30),
@@ -149,7 +279,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(12, 26, 16),
         BG_TAB = Color3.fromRGB(8, 18, 10),
         BG_ROW = Color3.fromRGB(22, 42, 26),
-        BG_BLOCK = Color3.fromRGB(14, 30, 18),
         TEXT = Color3.fromRGB(225, 255, 230),
         TEXT_DIM = Color3.fromRGB(120, 180, 130),
         STROKE = Color3.fromRGB(35, 75, 45),
@@ -163,7 +292,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(30, 8, 10),
         BG_TAB = Color3.fromRGB(18, 6, 8),
         BG_ROW = Color3.fromRGB(48, 16, 20),
-        BG_BLOCK = Color3.fromRGB(34, 10, 14),
         TEXT = Color3.fromRGB(255, 225, 225),
         TEXT_DIM = Color3.fromRGB(200, 120, 130),
         STROKE = Color3.fromRGB(90, 25, 30),
@@ -177,7 +305,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(14, 4, 24),
         BG_TAB = Color3.fromRGB(10, 4, 18),
         BG_ROW = Color3.fromRGB(28, 12, 44),
-        BG_BLOCK = Color3.fromRGB(20, 8, 32),
         TEXT = Color3.fromRGB(255, 220, 250),
         TEXT_DIM = Color3.fromRGB(180, 120, 220),
         STROKE = Color3.fromRGB(80, 20, 140),
@@ -191,7 +318,6 @@ local THEMES = {
         Header2 = Color3.fromRGB(36, 26, 10),
         BG_TAB = Color3.fromRGB(22, 16, 6),
         BG_ROW = Color3.fromRGB(54, 40, 16),
-        BG_BLOCK = Color3.fromRGB(40, 30, 12),
         TEXT = Color3.fromRGB(255, 245, 220),
         TEXT_DIM = Color3.fromRGB(200, 170, 110),
         STROKE = Color3.fromRGB(100, 75, 30),
@@ -203,11 +329,59 @@ local THEMES = {
 local CurrentThemeName = "Padrão"
 local CurrentTheme = THEMES[CurrentThemeName]
 
+-- ═══════════════════════════════════════════════════════════════
+-- REGISTRY DE TEMA (cada elemento registrado com seu role)
+-- ═══════════════════════════════════════════════════════════════
+local ThemeItems = {
+    bg_main = {},
+    bg_header = {},
+    bg_tab = {},
+    bg_row = {},
+    text_main = {},
+    text_dim = {},
+    text_accent = {},
+    stroke_main = {},
+    stroke_accent = {},
+    accent_bg = {},
+    accent_text = {},
+}
+
+local function reg(role, obj, prop)
+    if not obj then return end
+    table.insert(ThemeItems[role], { obj = obj, prop = prop or "BackgroundColor3" })
+end
+
+local function applyThemeFull(name)
+    local T = THEMES[name]
+    if not T then return end
+    for _, e in ipairs(ThemeItems.bg_main) do pcall(function() e.obj[e.prop] = T.BG1 end) end
+    for _, e in ipairs(ThemeItems.bg_header) do pcall(function() e.obj[e.prop] = T.Header1 end) end
+    for _, e in ipairs(ThemeItems.bg_tab) do pcall(function() e.obj[e.prop] = T.BG_TAB end) end
+    for _, e in ipairs(ThemeItems.bg_row) do pcall(function() e.obj[e.prop] = T.BG_ROW end) end
+    for _, e in ipairs(ThemeItems.text_main) do pcall(function() e.obj[e.prop] = T.TEXT end) end
+    for _, e in ipairs(ThemeItems.text_dim) do pcall(function() e.obj[e.prop] = T.TEXT_DIM end) end
+    for _, e in ipairs(ThemeItems.text_accent) do pcall(function() e.obj[e.prop] = T.Accent end) end
+    for _, e in ipairs(ThemeItems.stroke_main) do pcall(function() e.obj[e.prop] = T.STROKE end) end
+    for _, e in ipairs(ThemeItems.stroke_accent) do pcall(function() e.obj[e.prop] = T.Accent end) end
+    for _, e in ipairs(ThemeItems.accent_bg) do pcall(function() e.obj[e.prop] = T.Accent end) end
+    for _, e in ipairs(ThemeItems.accent_text) do pcall(function() e.obj[e.prop] = T.Accent end) end
+
+    if menuGradient then
+        menuGradient.Color = ColorSequence.new(T.BG1, T.BG2)
+    end
+    if headerGrad then
+        headerGrad.Color = ColorSequence.new(T.Header1, T.Header2)
+    end
+
+    CurrentTheme = T
+    CurrentThemeName = name
+end
+
+-- Variáveis do tema atual (usadas na criação de elementos)
 local BG          = CurrentTheme.BG1
 local BG_HEADER   = CurrentTheme.Header1
 local BG_TAB      = CurrentTheme.BG_TAB
 local BG_ROW      = CurrentTheme.BG_ROW
-local BG_BLOCK    = CurrentTheme.BG_BLOCK
 local TEXT        = CurrentTheme.TEXT
 local TEXT_DIM    = CurrentTheme.TEXT_DIM
 local STROKE_CLR  = CurrentTheme.STROKE
@@ -226,128 +400,7 @@ local LAYOUTS = {
 local CurrentLayout = "Em pé"
 
 -- ═══════════════════════════════════════════════════════════════
--- TEAM DETECTION
--- ═══════════════════════════════════════════════════════════════
-local TeamDetect = { method = nil }
-
-local function getTeamViaTeam(p)
-    if not p then return nil end
-    local ok, t = pcall(function() return p.Team end)
-    if ok and t then return t end
-    return nil
-end
-
-local function getTeamViaAttribute(p)
-    if not p then return nil end
-    local char = p.Character
-    if not char then return nil end
-    local ok, val = pcall(function() return char:GetAttribute("TeamColor") end)
-    if ok and val then return tostring(val) end
-    return nil
-end
-
-local function getTeamViaStringValue(p)
-    if not p then return nil end
-    local char = p.Character
-    if not char then return nil end
-    local sv = char:FindFirstChild("Team")
-    if sv and (sv:IsA("StringValue") or sv:IsA("ObjectValue")) then
-        return sv.Value
-    end
-    return nil
-end
-
-local function getPlayerTeam(p)
-    if not p then return nil end
-    if TeamDetect.method == "Team" then
-        local t = getTeamViaTeam(p); if t then return t end
-    elseif TeamDetect.method == "Attribute" then
-        local s = getTeamViaAttribute(p); if s then return s end
-    elseif TeamDetect.method == "StringValue" then
-        local v = getTeamViaStringValue(p); if v then return v end
-    end
-    local t = getTeamViaTeam(p); if t then return t end
-    local s = getTeamViaAttribute(p); if s then return s end
-    local v = getTeamViaStringValue(p); if v then return v end
-    return nil
-end
-
-local function parseRGB(s)
-    if not s then return nil end
-    local r, g, b = tostring(s):match("([%d%.]+),%s*([%d%.]+),%s*([%d%.]+)")
-    if r and g and b then
-        return Color3.new(tonumber(r) or 1, tonumber(g) or 1, tonumber(b) or 1)
-    end
-    return nil
-end
-
-local function getTeamColorFor(p)
-    local s = getTeamViaAttribute(p)
-    local cor = parseRGB(s)
-    if cor then return cor end
-    local t = getTeamViaTeam(p)
-    if t then
-        local ok, tc = pcall(function() return t.TeamColor end)
-        if ok and tc and tc.Color then return tc.Color end
-    end
-    local ok, tc = pcall(function() return p.TeamColor end)
-    if ok and tc and tc.Color then return tc.Color end
-    return Color3.fromRGB(200, 200, 200)
-end
-
-local function detectTeamSystem()
-    local cTeam, cAttr, cSV = 0, 0, 0
-    for _, p in ipairs(Players:GetPlayers()) do
-        if getTeamViaTeam(p) then cTeam = cTeam + 1 end
-        if getTeamViaAttribute(p) then cAttr = cAttr + 1 end
-        if getTeamViaStringValue(p) then cSV = cSV + 1 end
-    end
-    local method = nil
-    if cTeam > 0 then method = "Team"
-    elseif cAttr > 0 then method = "Attribute"
-    elseif cSV > 0 then method = "StringValue"
-    end
-    TeamDetect.method = method
-
-    local teams = {}
-    if method then
-        for _, p in ipairs(Players:GetPlayers()) do
-            local key, display = nil, nil
-            if method == "Team" then
-                local t = getTeamViaTeam(p)
-                if t then key = t.Name; display = t.Name end
-            elseif method == "Attribute" then
-                key = getTeamViaAttribute(p); display = "Time " .. tostring(key)
-            elseif method == "StringValue" then
-                key = tostring(getTeamViaStringValue(p)); display = tostring(key)
-            end
-            if key then
-                teams[key] = teams[key] or { name = display, players = {}, color = getTeamColorFor(p) }
-                table.insert(teams[key].players, p.DisplayName)
-            end
-        end
-    end
-    return method, teams
-end
-
-local function isAlly(p)
-    if not p or p == LocalPlayer then return false end
-    local mine = getPlayerTeam(LocalPlayer)
-    local their = getPlayerTeam(p)
-    if mine == nil or their == nil then return false end
-    return tostring(mine) == tostring(their)
-end
-
-local function getTeamColor(p)
-    if p == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
-    if isAlly(p) then return Color3.fromRGB(80, 170, 255) end
-    local c = getTeamColorFor(p)
-    if c then return c end
-    return Color3.fromRGB(220, 40, 40)
-end
-
--- ═══════════════════════════════════════════════════════════════
--- UI
+-- UI base
 -- ═══════════════════════════════════════════════════════════════
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AKZ_FPS_Menu"
@@ -382,7 +435,7 @@ local function showToast(titulo, subtitulo, cor)
     local toast = Instance.new("Frame")
     toast.Size = UDim2.new(1, 0, 0, 60)
     toast.Position = UDim2.new(1, 320, 0, 0)
-    toast.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    toast.BackgroundColor3 = CurrentTheme.BG_ROW
     toast.BorderSizePixel = 0
     toast.Parent = toastHolder
     Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 8)
@@ -411,7 +464,7 @@ local function showToast(titulo, subtitulo, cor)
     s.Text = subtitulo
     s.Font = Enum.Font.GothamMedium
     s.TextSize = 11
-    s.TextColor3 = Color3.fromRGB(140, 140, 150)
+    s.TextColor3 = CurrentTheme.TEXT_DIM
     s.TextXAlignment = Enum.TextXAlignment.Left
     s.TextWrapped = true
     TweenService:Create(toast, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
@@ -467,11 +520,12 @@ local function refreshFov()
 end
 refreshFov()
 
+-- Logo
 local logo = Instance.new("TextButton")
 logo.AnchorPoint = Vector2.new(0.5, 0.5)
 logo.Size = UDim2.new(0, 58, 0, 58)
 logo.Position = UDim2.new(0, 100, 0, 100)
-logo.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+logo.BackgroundColor3 = CurrentTheme.BG_ROW
 logo.BorderSizePixel = 0
 logo.Text = ""
 logo.AutoButtonColor = false
@@ -479,9 +533,11 @@ logo.Active = true
 logo.ZIndex = 5
 logo.Parent = screenGui
 Instance.new("UICorner", logo).CornerRadius = UDim.new(1, 0)
+reg("bg_row", logo)
 local logoStroke = Instance.new("UIStroke", logo)
 logoStroke.Color = Theme.Accent
 logoStroke.Thickness = 2
+reg("stroke_accent", logoStroke, "Color")
 local knifeIcon = Instance.new("TextLabel", logo)
 knifeIcon.Size = UDim2.new(1, 0, 1, 0)
 knifeIcon.BackgroundTransparency = 1
@@ -491,7 +547,7 @@ knifeIcon.Font = Enum.Font.GothamBold
 
 task.spawn(function()
     while logo.Parent do
-        local c = Theme.Accent
+        local c = CurrentTheme.Accent
         local dim = c:Lerp(Color3.new(0,0,0), 0.45)
         TweenService:Create(logoStroke, TweenInfo.new(1.2, Enum.EasingStyle.Sine), {Color=dim}):Play()
         task.wait(1.2)
@@ -500,6 +556,7 @@ task.spawn(function()
     end
 end)
 
+-- Menu
 local menuFrame = Instance.new("Frame")
 menuFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 menuFrame.Size = LAYOUTS[CurrentLayout]
@@ -510,6 +567,7 @@ menuFrame.Visible = false
 menuFrame.ClipsDescendants = true
 menuFrame.ZIndex = 10
 menuFrame.Parent = screenGui
+reg("bg_main", menuFrame)
 
 local menuScale = Instance.new("UIScale", menuFrame)
 menuScale.Scale = 1
@@ -522,14 +580,15 @@ Instance.new("UICorner", menuFrame).CornerRadius = UDim.new(0, 12)
 local menuStroke = Instance.new("UIStroke", menuFrame)
 menuStroke.Color = STROKE_CLR
 menuStroke.Thickness = 1
+reg("stroke_main", menuStroke, "Color")
 
--- Header
 local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 40)
 header.BackgroundColor3 = CurrentTheme.Header1
 header.BorderSizePixel = 0
 header.ZIndex = 11
 header.Parent = menuFrame
+reg("bg_header", header)
 
 local headerGrad = Instance.new("UIGradient", header)
 headerGrad.Rotation = 90
@@ -546,6 +605,7 @@ headerTitle.TextColor3 = Theme.Accent
 headerTitle.TextXAlignment = Enum.TextXAlignment.Left
 headerTitle.ZIndex = 12
 headerTitle.Parent = header
+reg("text_accent", headerTitle, "TextColor3")
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 26, 0, 26)
@@ -568,6 +628,7 @@ tabBar.BackgroundColor3 = BG_TAB
 tabBar.BorderSizePixel = 0
 tabBar.ZIndex = 11
 tabBar.Parent = menuFrame
+reg("bg_tab", tabBar)
 
 local contentArea = Instance.new("Frame")
 contentArea.Size = UDim2.new(1, 0, 1, -74)
@@ -586,7 +647,7 @@ local function selectTab(name)
     if ActiveTab and Tabs[ActiveTab] then
         Tabs[ActiveTab].content.Visible = false
         TweenService:Create(Tabs[ActiveTab].indicator, TweenInfo.new(0.15), {BackgroundTransparency=1}):Play()
-        TweenService:Create(Tabs[ActiveTab].button, TweenInfo.new(0.15), {TextColor3=TEXT_DIM}):Play()
+        TweenService:Create(Tabs[ActiveTab].button, TweenInfo.new(0.15), {TextColor3=CurrentTheme.TEXT_DIM}):Play()
     end
     ActiveTab = name
     Tabs[name].content.Visible = true
@@ -602,19 +663,21 @@ local function createTab(name)
     btn.Text = name
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 12
-    btn.TextColor3 = TEXT_DIM
+    btn.TextColor3 = CurrentTheme.TEXT_DIM
     btn.AutoButtonColor = false
     btn.ZIndex = 12
     btn.Parent = tabBar
+    reg("text_dim", btn, "TextColor3")
 
     local indicator = Instance.new("Frame")
     indicator.Size = UDim2.new(1, -20, 0, 2)
     indicator.Position = UDim2.new(0, 10, 1, -2)
-    indicator.BackgroundColor3 = Theme.Accent
+    indicator.BackgroundColor3 = CurrentTheme.Accent
     indicator.BorderSizePixel = 0
     indicator.BackgroundTransparency = 1
     indicator.ZIndex = 12
     indicator.Parent = btn
+    reg("accent_bg", indicator)
 
     local content = Instance.new("ScrollingFrame")
     content.Size = UDim2.new(1, -16, 1, -12)
@@ -622,7 +685,7 @@ local function createTab(name)
     content.BackgroundTransparency = 1
     content.BorderSizePixel = 0
     content.ScrollBarThickness = 3
-    content.ScrollBarImageColor3 = Theme.Accent
+    content.ScrollBarImageColor3 = CurrentTheme.Accent
     content.CanvasSize = UDim2.new(0, 0, 0, 0)
     content.AutomaticCanvasSize = Enum.AutomaticSize.Y
     content.Visible = false
@@ -647,21 +710,24 @@ local function createSection(parent, order, text)
     lbl.Text = text
     lbl.Font = Enum.Font.GothamBold
     lbl.TextSize = 11
-    lbl.TextColor3 = Theme.AccentDim
+    lbl.TextColor3 = CurrentTheme.Accent2
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.LayoutOrder = order
     lbl.Parent = parent
+    reg("text_accent", lbl, "TextColor3")
     return lbl
 end
 
 local function createToggle(parent, order, label, initial, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 32)
-    row.BackgroundColor3 = BG_ROW
+    row.BackgroundColor3 = CurrentTheme.BG_ROW
     row.BorderSizePixel = 0
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", row)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -70, 1, 0)
     lbl.Position = UDim2.new(0, 12, 0, 0)
@@ -669,16 +735,19 @@ local function createToggle(parent, order, label, initial, onChange)
     lbl.Text = label
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextSize = 13
-    lbl.TextColor3 = TEXT
+    lbl.TextColor3 = CurrentTheme.TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
+    reg("text_main", lbl, "TextColor3")
+
     local track = Instance.new("Frame")
     track.Size = UDim2.new(0, 38, 0, 20)
     track.Position = UDim2.new(1, -50, 0.5, -10)
-    track.BackgroundColor3 = initial and Theme.Accent or OFF_CLR
+    track.BackgroundColor3 = initial and CurrentTheme.Accent or OFF_CLR
     track.BorderSizePixel = 0
     track.Parent = row
     Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
     local knob = Instance.new("Frame")
     knob.Size = UDim2.new(0, 16, 0, 16)
     knob.Position = initial and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
@@ -686,33 +755,40 @@ local function createToggle(parent, order, label, initial, onChange)
     knob.BorderSizePixel = 0
     knob.Parent = track
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
     local click = Instance.new("TextButton")
     click.Size = UDim2.new(1, 0, 1, 0)
     click.BackgroundTransparency = 1
     click.Text = ""
     click.Parent = row
+
     local state = initial
     local function apply(v, fire)
         state = v
-        TweenService:Create(track, TweenInfo.new(0.15), {BackgroundColor3 = v and Theme.Accent or OFF_CLR}):Play()
-        TweenService:Create(knob, TweenInfo.new(0.15), {
-            Position = v and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8),
-            BackgroundColor3 = v and KNOB_ON or KNOB_OFF,
-        }):Play()
+        track.BackgroundColor3 = v and CurrentTheme.Accent or OFF_CLR
+        knob.Position = v and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        knob.BackgroundColor3 = v and KNOB_ON or KNOB_OFF
         if fire and onChange then onChange(v) end
     end
     click.MouseButton1Click:Connect(function() apply(not state, true) end)
-    return { Set = function(v) apply(v, true) end, Get = function() return state end }
+
+    -- Registra pra atualizar quando trocar tema
+    table.insert(ThemeItems.accent_bg, { obj = { __dummy = true }, prop = "_" })
+    -- (uso acima só pra não quebrar; o update do track é feito via onThemeChange)
+
+    return { Set = function(v) apply(v, true) end, Get = function() return state end, _track = track, _knob = knob }
 end
 
 local function createOptionRow(parent, order, label, options, initial, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 34)
-    row.BackgroundColor3 = BG_ROW
+    row.BackgroundColor3 = CurrentTheme.BG_ROW
     row.BorderSizePixel = 0
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", row)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(0, 100, 1, 0)
     lbl.Position = UDim2.new(0, 12, 0, 0)
@@ -720,9 +796,11 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
     lbl.Text = label
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextSize = 12
-    lbl.TextColor3 = TEXT
+    lbl.TextColor3 = CurrentTheme.TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
+    reg("text_main", lbl, "TextColor3")
+
     local holder = Instance.new("Frame")
     holder.Size = UDim2.new(1, -118, 1, -8)
     holder.Position = UDim2.new(0, 110, 0, 4)
@@ -737,8 +815,8 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
     local function setActive(name)
         for n, b in pairs(buttons) do
             local active = n == name
-            b.BackgroundColor3 = active and Theme.Accent or OFF_CLR
-            b.TextColor3 = active and Color3.fromRGB(15, 15, 18) or TEXT_DIM
+            b.BackgroundColor3 = active and CurrentTheme.Accent or OFF_CLR
+            b.TextColor3 = active and Color3.fromRGB(15, 15, 18) or CurrentTheme.TEXT_DIM
         end
     end
     for _, name in ipairs(options) do
@@ -749,7 +827,7 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
         b.Text = name
         b.Font = Enum.Font.GothamBold
         b.TextSize = 10
-        b.TextColor3 = TEXT_DIM
+        b.TextColor3 = CurrentTheme.TEXT_DIM
         b.AutoButtonColor = false
         b.BorderSizePixel = 0
         b.Parent = holder
@@ -765,17 +843,19 @@ local function createOptionRow(parent, order, label, options, initial, onChange)
         end)
     end
     setActive(initial)
-    return { Set = function(v) current=v; setActive(v); if onChange then onChange(v) end end, Get = function() return current end }
+    return { Set = function(v) current=v; setActive(v); if onChange then onChange(v) end end, Get = function() return current end, _refresh = setActive, _buttons = buttons, _current = function() return current end }
 end
 
 local function createSlider(parent, order, label, minV, maxV, initial, isFloat, onChange)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, 0, 0, 42)
-    row.BackgroundColor3 = BG_ROW
+    row.BackgroundColor3 = CurrentTheme.BG_ROW
     row.BorderSizePixel = 0
     row.LayoutOrder = order
     row.Parent = parent
     Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", row)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -70, 0, 16)
     lbl.Position = UDim2.new(0, 12, 0, 4)
@@ -783,9 +863,11 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     lbl.Text = label
     lbl.Font = Enum.Font.GothamMedium
     lbl.TextSize = 12
-    lbl.TextColor3 = TEXT
+    lbl.TextColor3 = CurrentTheme.TEXT
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = row
+    reg("text_main", lbl, "TextColor3")
+
     local valLbl = Instance.new("TextLabel")
     valLbl.Size = UDim2.new(0, 60, 0, 16)
     valLbl.Position = UDim2.new(1, -72, 0, 4)
@@ -793,9 +875,11 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     valLbl.Text = tostring(initial)
     valLbl.Font = Enum.Font.GothamBold
     valLbl.TextSize = 12
-    valLbl.TextColor3 = Theme.Accent
+    valLbl.TextColor3 = CurrentTheme.Accent
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
     valLbl.Parent = row
+    reg("text_accent", valLbl, "TextColor3")
+
     local bar = Instance.new("Frame")
     bar.Size = UDim2.new(1, -24, 0, 6)
     bar.Position = UDim2.new(0, 12, 0, 28)
@@ -803,12 +887,15 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     bar.BorderSizePixel = 0
     bar.Parent = row
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((initial - minV) / (maxV - minV), 0, 1, 0)
-    fill.BackgroundColor3 = Theme.Accent
+    fill.BackgroundColor3 = CurrentTheme.Accent
     fill.BorderSizePixel = 0
     fill.Parent = bar
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    reg("accent_bg", fill)
+
     local knob = Instance.new("Frame")
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Size = UDim2.new(0, 12, 0, 12)
@@ -817,6 +904,7 @@ local function createSlider(parent, order, label, minV, maxV, initial, isFloat, 
     knob.BorderSizePixel = 0
     knob.Parent = bar
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
     local click = Instance.new("TextButton")
     click.Size = UDim2.new(1, 0, 1, 0)
     click.BackgroundTransparency = 1
@@ -868,9 +956,10 @@ local function createButton(parent, order, label, onClick, bgOverride)
     btn.Parent = parent
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
     local st = Instance.new("UIStroke", btn)
-    st.Color = Theme.Accent
+    st.Color = CurrentTheme.Accent
     st.Thickness = 1
     st.Transparency = 0.6
+    reg("stroke_accent", st, "Color")
     btn.MouseButton1Click:Connect(function()
         TweenService:Create(st, TweenInfo.new(0.1), {Transparency = 0}):Play()
         task.delay(0.15, function()
@@ -884,86 +973,23 @@ end
 local function createInfoLabel(parent, order, texto, altura)
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, 0, 0, altura or 26)
-    lbl.BackgroundColor3 = BG_ROW
+    lbl.BackgroundColor3 = CurrentTheme.BG_ROW
     lbl.BorderSizePixel = 0
     lbl.Text = texto
     lbl.Font = Enum.Font.Code
     lbl.TextSize = 11
-    lbl.TextColor3 = TEXT_DIM
+    lbl.TextColor3 = CurrentTheme.TEXT_DIM
     lbl.LayoutOrder = order
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.TextYAlignment = Enum.TextYAlignment.Center
     lbl.Parent = parent
     Instance.new("UICorner", lbl).CornerRadius = UDim.new(0, 6)
+    reg("bg_row", lbl)
+    reg("text_dim", lbl, "TextColor3")
     local pad = Instance.new("UIPadding", lbl)
     pad.PaddingLeft = UDim.new(0, 12)
     pad.PaddingRight = UDim.new(0, 12)
     return lbl
-end
-
--- ═══════════════════════════════════════════════════════════════
--- SISTEMA DE TEMA
--- ═══════════════════════════════════════════════════════════════
-local function applyNewTheme(newThemeName)
-    local newT = THEMES[newThemeName]
-    if not newT then return end
-    if newThemeName == CurrentThemeName then return end
-
-    local oldT = CurrentTheme
-
-    local swaps = {
-        [oldT.BG1]      = newT.BG1,
-        [oldT.BG2]      = newT.BG2,
-        [oldT.Header1]  = newT.Header1,
-        [oldT.Header2]  = newT.Header2,
-        [oldT.BG_TAB]   = newT.BG_TAB,
-        [oldT.BG_ROW]   = newT.BG_ROW,
-        [oldT.BG_BLOCK] = newT.BG_BLOCK,
-        [oldT.TEXT]     = newT.TEXT,
-        [oldT.TEXT_DIM] = newT.TEXT_DIM,
-        [oldT.STROKE]   = newT.STROKE,
-        [oldT.Accent]   = newT.Accent,
-        [oldT.Accent2]  = newT.Accent2,
-    }
-
-    local function swapIn(root)
-        for _, d in ipairs(root:GetDescendants()) do
-            pcall(function()
-                if d:IsA("GuiObject") then
-                    if d.BackgroundColor3 and swaps[d.BackgroundColor3] then
-                        d.BackgroundColor3 = swaps[d.BackgroundColor3]
-                    end
-                    if d.TextColor3 and swaps[d.TextColor3] then
-                        d.TextColor3 = swaps[d.TextColor3]
-                    end
-                end
-                if d:IsA("UIStroke") and swaps[d.Color] then
-                    d.Color = swaps[d.Color]
-                end
-                if d:IsA("ScrollingFrame") and swaps[d.ScrollBarImageColor3] then
-                    d.ScrollBarImageColor3 = swaps[d.ScrollBarImageColor3]
-                end
-            end)
-        end
-    end
-    swapIn(screenGui)
-    swapIn(toastGui)
-
-    menuGradient.Color = ColorSequence.new(newT.BG1, newT.BG2)
-    headerGrad.Color = ColorSequence.new(newT.Header1, newT.Header2)
-
-    CurrentTheme = newT
-    CurrentThemeName = newThemeName
-    Theme.Accent = newT.Accent
-    Theme.AccentDim = newT.Accent2
-    BG          = newT.BG1
-    BG_HEADER   = newT.Header1
-    BG_TAB      = newT.BG_TAB
-    BG_ROW      = newT.BG_ROW
-    BG_BLOCK    = newT.BG_BLOCK
-    TEXT        = newT.TEXT
-    TEXT_DIM    = newT.TEXT_DIM
-    STROKE_CLR  = newT.STROKE
 end
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1004,162 +1030,6 @@ local function setLayout(modo)
     TweenService:Create(menuFrame, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Size = LAYOUTS[modo]
     }):Play()
-end
-
--- ═══════════════════════════════════════════════════════════════
--- PAINEL DE TIMES
--- ═══════════════════════════════════════════════════════════════
-local TeamPanel = { scroll = nil, emptyLbl = nil }
-
-local function createTeamPanel(parent, order)
-    local panel = Instance.new("Frame")
-    panel.Size = UDim2.new(1, -8, 0, 200)
-    panel.BackgroundColor3 = Color3.fromRGB(6, 6, 10)
-    panel.BorderSizePixel = 0
-    panel.LayoutOrder = order
-    panel.Parent = parent
-    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
-    local st = Instance.new("UIStroke", panel)
-    st.Color = Color3.fromRGB(30, 30, 40)
-    st.Thickness = 1
-
-    local titulo = Instance.new("TextLabel", panel)
-    titulo.Size = UDim2.new(1, -16, 0, 22)
-    titulo.Position = UDim2.new(0, 8, 0, 8)
-    titulo.BackgroundTransparency = 1
-    titulo.Text = "◆ PREVIEW DOS TIMES"
-    titulo.Font = Enum.Font.GothamBold
-    titulo.TextSize = 11
-    titulo.TextColor3 = Theme.Accent
-    titulo.TextXAlignment = Enum.TextXAlignment.Left
-
-    local scroll = Instance.new("ScrollingFrame", panel)
-    scroll.Size = UDim2.new(1, -16, 1, -42)
-    scroll.Position = UDim2.new(0, 8, 0, 34)
-    scroll.BackgroundTransparency = 1
-    scroll.BorderSizePixel = 0
-    scroll.ScrollBarThickness = 4
-    scroll.ScrollBarImageColor3 = Theme.Accent
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-
-    local list = Instance.new("UIListLayout", scroll)
-    list.Padding = UDim.new(0, 6)
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-
-    local empty = Instance.new("TextLabel", scroll)
-    empty.Size = UDim2.new(1, -8, 0, 60)
-    empty.Position = UDim2.new(0, 4, 0, 20)
-    empty.BackgroundTransparency = 1
-    empty.Text = "Aperte [Detectar Times]\npara ver os times"
-    empty.Font = Enum.Font.GothamMedium
-    empty.TextSize = 11
-    empty.TextColor3 = Color3.fromRGB(90, 90, 110)
-    empty.TextWrapped = true
-    empty.LayoutOrder = 1
-
-    TeamPanel.scroll = scroll
-    TeamPanel.emptyLbl = empty
-    return panel
-end
-
-local function refreshTeamPanel()
-    for _, child in ipairs(TeamPanel.scroll:GetChildren()) do
-        if child:IsA("Frame") then child:Destroy() end
-    end
-
-    local method, teams = detectTeamSystem()
-    if not method or next(teams) == nil then
-        TeamPanel.emptyLbl.Visible = true
-        TeamPanel.emptyLbl.Text = "Nenhum time detectado\nESP vai mostrar todos os players"
-        return
-    end
-    TeamPanel.emptyLbl.Visible = false
-
-    local myTeam = getPlayerTeam(LocalPlayer)
-    local order = 1
-    for key, data in pairs(teams) do
-        local isMine = (myTeam ~= nil and tostring(myTeam) == tostring(key))
-
-        local card = Instance.new("Frame")
-        card.Size = UDim2.new(1, -8, 0, 0)
-        card.AutomaticSize = Enum.AutomaticSize.Y
-        card.BackgroundColor3 = Color3.fromRGB(14, 14, 20)
-        card.BorderSizePixel = 0
-        card.LayoutOrder = order
-        card.Parent = TeamPanel.scroll
-        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
-        local st = Instance.new("UIStroke", card)
-        st.Color = data.color
-        st.Thickness = 1.5
-        st.Transparency = 0.3
-
-        local pad = Instance.new("UIPadding", card)
-        pad.PaddingTop = UDim.new(0, 8)
-        pad.PaddingBottom = UDim.new(0, 8)
-        pad.PaddingLeft = UDim.new(0, 10)
-        pad.PaddingRight = UDim.new(0, 10)
-
-        local lay = Instance.new("UIListLayout", card)
-        lay.Padding = UDim.new(0, 4)
-        lay.SortOrder = Enum.SortOrder.LayoutOrder
-
-        local top = Instance.new("Frame", card)
-        top.Size = UDim2.new(1, 0, 0, 18)
-        top.BackgroundTransparency = 1
-        top.LayoutOrder = 1
-
-        local dot = Instance.new("Frame", top)
-        dot.Size = UDim2.new(0, 9, 0, 9)
-        dot.Position = UDim2.new(0, 0, 0.5, -4)
-        dot.BackgroundColor3 = data.color
-        dot.BorderSizePixel = 0
-        Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-
-        local nameLbl = Instance.new("TextLabel", top)
-        nameLbl.Size = UDim2.new(1, -90, 1, 0)
-        nameLbl.Position = UDim2.new(0, 16, 0, 0)
-        nameLbl.BackgroundTransparency = 1
-        nameLbl.Text = data.name
-        nameLbl.Font = Enum.Font.GothamBold
-        nameLbl.TextSize = 12
-        nameLbl.TextColor3 = data.color
-        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-        local countLbl = Instance.new("TextLabel", top)
-        countLbl.Size = UDim2.new(0, 85, 1, 0)
-        countLbl.Position = UDim2.new(1, -85, 0, 0)
-        countLbl.BackgroundTransparency = 1
-        countLbl.Text = isMine and "★ SEU TIME" or (#data.players .. " players")
-        countLbl.Font = Enum.Font.GothamBold
-        countLbl.TextSize = 10
-        countLbl.TextColor3 = isMine and data.color or Color3.fromRGB(120, 120, 140)
-        countLbl.TextXAlignment = Enum.TextXAlignment.Right
-
-        local playersFrame = Instance.new("Frame", card)
-        playersFrame.Size = UDim2.new(1, 0, 0, 0)
-        playersFrame.AutomaticSize = Enum.AutomaticSize.Y
-        playersFrame.BackgroundTransparency = 1
-        playersFrame.LayoutOrder = 2
-
-        local pLay = Instance.new("UIListLayout", playersFrame)
-        pLay.Padding = UDim.new(0, 2)
-        pLay.SortOrder = Enum.SortOrder.LayoutOrder
-
-        for i, pName in ipairs(data.players) do
-            local row = Instance.new("TextLabel", playersFrame)
-            row.Size = UDim2.new(1, 0, 0, 15)
-            row.BackgroundTransparency = 1
-            row.Text = "  • " .. pName
-            row.Font = Enum.Font.GothamMedium
-            row.TextSize = 10
-            row.TextColor3 = Color3.fromRGB(170, 170, 185)
-            row.TextXAlignment = Enum.TextXAlignment.Left
-            row.LayoutOrder = i
-        end
-
-        order = order + 1
-    end
 end
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1235,7 +1105,8 @@ end
 
 local function updatePlayerESP(player)
     if player == LocalPlayer then return end
-    if Config.ESPTeamCheck and isAlly(player) then
+    -- Só filtra por time se o método foi detectado
+    if Config.ESPTeamCheck and GameAPI.method and isAlly(player) then
         clearESPForPlayer(player); return
     end
     local char = player.Character
@@ -1247,8 +1118,8 @@ local function updatePlayerESP(player)
     local cache = espCache[player]
     if not cache then cache = { drawings = {} }; espCache[player] = cache end
 
-    local querHighlight = Config.Highlight and (Config.HighlightFill or Config.HighlightOutline)
-    if querHighlight then
+    -- Highlight
+    if Config.Highlight then
         if not cache.highlight or not cache.highlight.Parent then
             local hl = Instance.new("Highlight")
             hl.Name = HL_TAG
@@ -1265,6 +1136,7 @@ local function updatePlayerESP(player)
         cache.highlight:Destroy(); cache.highlight = nil
     end
 
+    -- Nome / Distância
     local head = char:FindFirstChild("Head")
     local showBB = Config.ShowName or Config.ShowDistance
     if showBB and head then
@@ -1298,6 +1170,7 @@ local function updatePlayerESP(player)
         cache.billboard:Destroy(); cache.billboard = nil
     end
 
+    -- Drawings
     if hasDrawing then
         local top, bottom = get2DBounds(char)
         if Config.Box and top and bottom then
@@ -1363,7 +1236,7 @@ local function updatePlayerESP(player)
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- AIMBOT (sempre ativo quando ligado)
+-- AIMBOT (força a câmera direto)
 -- ═══════════════════════════════════════════════════════════════
 local function getAimPart(char)
     if not char then return nil end
@@ -1388,15 +1261,16 @@ end
 
 local function getAimbotTarget()
     local centro = getScreenCenter()
+    -- Mantém lock
     if Config.LockedTarget and Config.LockedTarget.Parent then
         local part = Config.LockedTarget
         local char = part.Parent
         local p = Players:GetPlayerFromCharacter(char)
         if p and char then
             local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 and not (Config.AimbotTeamCheck and isAlly(p)) then
+            if hum and hum.Health > 0 and not (Config.AimbotTeamCheck and GameAPI.method and isAlly(p)) then
                 local sp, on = Camera:WorldToViewportPoint(part.Position)
-                if on and (Vector2.new(sp.X, sp.Y) - centro).Magnitude <= Config.AimbotFOV * 1.8 then
+                if on and (Vector2.new(sp.X, sp.Y) - centro).Magnitude <= Config.AimbotFOV * 2.0 then
                     return part
                 end
             end
@@ -1407,7 +1281,7 @@ local function getAimbotTarget()
     local nearest, nearestDist = nil, math.huge
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
-            if not (Config.AimbotTeamCheck and isAlly(p)) then
+            if not (Config.AimbotTeamCheck and GameAPI.method and isAlly(p)) then
                 local char = p.Character
                 if char then
                     local hum = char:FindFirstChildOfClass("Humanoid")
@@ -1451,6 +1325,7 @@ local function lockOn(targetPart)
         local alpha = math.clamp(1 - Config.AimbotSmooth, 0.05, 1)
         Camera.CFrame = Camera.CFrame:Lerp(targetCF, alpha)
     end
+    Camera.Focus = Camera.CFrame
 end
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1609,37 +1484,35 @@ do
 
     createSection(c, 10, "TEMA DO MENU")
 
-    -- ═══ DROPDOWN DE TEMAS ═══
+    -- DROPDOWN DE TEMAS
     local isOpen = false
     local themeList = {"Padrão","Aquatic","Universe","Sunset","Forest","Blood","Neon","Golden"}
     local themeRefs = {}
 
-    -- Botão principal (sempre visível)
     local ddHeader = Instance.new("TextButton")
     ddHeader.Size = UDim2.new(1, -8, 0, 42)
-    ddHeader.BackgroundColor3 = BG_ROW
+    ddHeader.BackgroundColor3 = CurrentTheme.BG_ROW
     ddHeader.BorderSizePixel = 0
     ddHeader.Text = ""
     ddHeader.AutoButtonColor = false
     ddHeader.LayoutOrder = 11
     ddHeader.Parent = c
     Instance.new("UICorner", ddHeader).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", ddHeader)
     local ddHeaderStroke = Instance.new("UIStroke", ddHeader)
-    ddHeaderStroke.Color = Theme.Accent
+    ddHeaderStroke.Color = CurrentTheme.Accent
     ddHeaderStroke.Thickness = 1.5
     ddHeaderStroke.Transparency = 0.4
+    reg("stroke_accent", ddHeaderStroke, "Color")
 
-    -- Bolinha preview
     local ddDot = Instance.new("Frame", ddHeader)
     ddDot.Size = UDim2.new(0, 14, 0, 14)
     ddDot.Position = UDim2.new(0, 14, 0.5, -7)
     ddDot.BackgroundColor3 = CurrentTheme.Accent
     ddDot.BorderSizePixel = 0
     Instance.new("UICorner", ddDot).CornerRadius = UDim.new(1, 0)
-    local ddDotGrad = Instance.new("UIGradient", ddDot)
-    ddDotGrad.Color = ColorSequence.new(CurrentTheme.Accent, CurrentTheme.Accent2)
+    reg("accent_bg", ddDot)
 
-    -- Texto "Tema: X"
     local ddTitle = Instance.new("TextLabel", ddHeader)
     ddTitle.Size = UDim2.new(0, 60, 1, 0)
     ddTitle.Position = UDim2.new(0, 38, 0, 0)
@@ -1647,8 +1520,9 @@ do
     ddTitle.Text = "Tema:"
     ddTitle.Font = Enum.Font.GothamMedium
     ddTitle.TextSize = 12
-    ddTitle.TextColor3 = TEXT_DIM
+    ddTitle.TextColor3 = CurrentTheme.TEXT_DIM
     ddTitle.TextXAlignment = Enum.TextXAlignment.Left
+    reg("text_dim", ddTitle, "TextColor3")
 
     local ddValue = Instance.new("TextLabel", ddHeader)
     ddValue.Size = UDim2.new(1, -130, 1, 0)
@@ -1657,10 +1531,10 @@ do
     ddValue.Text = CurrentThemeName
     ddValue.Font = Enum.Font.GothamBold
     ddValue.TextSize = 13
-    ddValue.TextColor3 = Theme.Accent
+    ddValue.TextColor3 = CurrentTheme.Accent
     ddValue.TextXAlignment = Enum.TextXAlignment.Left
+    reg("text_accent", ddValue, "TextColor3")
 
-    -- Seta
     local ddArrow = Instance.new("TextLabel", ddHeader)
     ddArrow.Size = UDim2.new(0, 30, 1, 0)
     ddArrow.Position = UDim2.new(1, -34, 0, 0)
@@ -1668,9 +1542,9 @@ do
     ddArrow.Text = "▼"
     ddArrow.Font = Enum.Font.GothamBold
     ddArrow.TextSize = 14
-    ddArrow.TextColor3 = Theme.Accent
+    ddArrow.TextColor3 = CurrentTheme.Accent
+    reg("text_accent", ddArrow, "TextColor3")
 
-    -- Container (lista de temas)
     local ddList = Instance.new("Frame")
     ddList.Size = UDim2.new(1, -8, 0, 0)
     ddList.BackgroundColor3 = Color3.fromRGB(8, 8, 12)
@@ -1681,37 +1555,20 @@ do
     ddList.Parent = c
     Instance.new("UICorner", ddList).CornerRadius = UDim.new(0, 8)
     local ddListStroke = Instance.new("UIStroke", ddList)
-    ddListStroke.Color = Theme.Accent
+    ddListStroke.Color = CurrentTheme.Accent
     ddListStroke.Thickness = 1
     ddListStroke.Transparency = 0.5
+    reg("stroke_accent", ddListStroke, "Color")
 
     local ddListInner = Instance.new("Frame", ddList)
     ddListInner.Size = UDim2.new(1, -12, 0, 0)
     ddListInner.Position = UDim2.new(0, 6, 0, 6)
     ddListInner.BackgroundTransparency = 1
     ddListInner.AutomaticSize = Enum.AutomaticSize.Y
-
     local ddListLayout = Instance.new("UIListLayout", ddListInner)
     ddListLayout.Padding = UDim.new(0, 4)
     ddListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- Função pra atualizar highlights
-    local function refreshDropdownHighlights()
-        for tName, ref in pairs(themeRefs) do
-            local active = (tName == CurrentThemeName)
-            ref.stroke.Color = active and THEMES[tName].Accent or Color3.fromRGB(40, 40, 50)
-            ref.stroke.Thickness = active and 2 or 1
-            ref.stroke.Transparency = active and 0 or 0.6
-            ref.nameLbl.TextColor3 = active and THEMES[tName].Accent or TEXT_DIM
-            ref.item.BackgroundColor3 = active and Color3.fromRGB(22, 22, 30) or Color3.fromRGB(14, 14, 20)
-        end
-        ddDot.BackgroundColor3 = THEMES[CurrentThemeName].Accent
-        ddDotGrad.Color = ColorSequence.new(THEMES[CurrentThemeName].Accent, THEMES[CurrentThemeName].Accent2)
-        ddValue.Text = CurrentThemeName
-        ddValue.TextColor3 = THEMES[CurrentThemeName].Accent
-    end
-
-    -- Cria botão de cada tema
     for i, tName in ipairs(themeList) do
         local themeData = THEMES[tName]
         local item = Instance.new("TextButton")
@@ -1729,7 +1586,6 @@ do
         st.Thickness = 1
         st.Transparency = 0.6
 
-        -- Preview de gradiente
         local preview = Instance.new("Frame", item)
         preview.Size = UDim2.new(0, 44, 0, 24)
         preview.Position = UDim2.new(0, 8, 0.5, -12)
@@ -1746,30 +1602,49 @@ do
         nameLbl.Text = tName
         nameLbl.Font = Enum.Font.GothamBold
         nameLbl.TextSize = 12
-        nameLbl.TextColor3 = TEXT_DIM
+        nameLbl.TextColor3 = CurrentTheme.TEXT_DIM
         nameLbl.TextXAlignment = Enum.TextXAlignment.Left
 
         themeRefs[tName] = { item = item, stroke = st, nameLbl = nameLbl }
 
         item.MouseButton1Click:Connect(function()
-            applyNewTheme(tName)
-            refreshDropdownHighlights()
-            -- Fecha o dropdown
+            applyThemeFull(tName)
+            -- Atualiza highlights do dropdown
+            for n, ref in pairs(themeRefs) do
+                local active = (n == tName)
+                ref.stroke.Color = active and THEMES[n].Accent or Color3.fromRGB(40, 40, 50)
+                ref.stroke.Thickness = active and 2 or 1
+                ref.stroke.Transparency = active and 0 or 0.6
+                ref.nameLbl.TextColor3 = active and THEMES[n].Accent or CurrentTheme.TEXT_DIM
+                ref.item.BackgroundColor3 = active and Color3.fromRGB(22, 22, 30) or Color3.fromRGB(14, 14, 20)
+            end
+            ddValue.Text = tName
+            ddValue.TextColor3 = THEMES[tName].Accent
+            ddDot.BackgroundColor3 = THEMES[tName].Accent
+            ddArrow.TextColor3 = THEMES[tName].Accent
+
+            -- Fecha
             isOpen = false
             TweenService:Create(ddList, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
                 Size = UDim2.new(1, -8, 0, 0)
             }):Play()
             ddArrow.Text = "▼"
-            task.delay(0.22, function()
-                ddList.Visible = false
-            end)
+            task.delay(0.22, function() ddList.Visible = false end)
             showToast("TEMA", "Aplicado: " .. tName, SUCCESS_CLR)
         end)
     end
 
-    refreshDropdownHighlights()
+    -- Marca o tema atual
+    for n, ref in pairs(themeRefs) do
+        if n == CurrentThemeName then
+            ref.stroke.Color = THEMES[n].Accent
+            ref.stroke.Thickness = 2
+            ref.stroke.Transparency = 0
+            ref.nameLbl.TextColor3 = THEMES[n].Accent
+            ref.item.BackgroundColor3 = Color3.fromRGB(22, 22, 30)
+        end
+    end
 
-    -- Abre/fecha o dropdown
     local listHeight = #themeList * 38 + (#themeList - 1) * 4 + 12
     ddHeader.MouseButton1Click:Connect(function()
         isOpen = not isOpen
@@ -1794,18 +1669,20 @@ do
     createSection(c, 13, "CRÉDITOS")
     local creditsLbl = Instance.new("TextLabel")
     creditsLbl.Size = UDim2.new(1, 0, 0, 60)
-    creditsLbl.BackgroundColor3 = BG_ROW
+    creditsLbl.BackgroundColor3 = CurrentTheme.BG_ROW
     creditsLbl.BorderSizePixel = 0
     creditsLbl.LayoutOrder = 14
     creditsLbl.Text = "AKZ MENU FPS " .. VERSION .. "\nDesenvolvido por " .. DEV_NAME .. "\nTodos os direitos reservados"
     creditsLbl.Font = Enum.Font.Code
     creditsLbl.TextSize = 11
-    creditsLbl.TextColor3 = TEXT_DIM
+    creditsLbl.TextColor3 = CurrentTheme.TEXT_DIM
     creditsLbl.TextXAlignment = Enum.TextXAlignment.Center
     creditsLbl.TextYAlignment = Enum.TextYAlignment.Center
     creditsLbl.TextWrapped = true
     creditsLbl.Parent = c
     Instance.new("UICorner", creditsLbl).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", creditsLbl)
+    reg("text_dim", creditsLbl, "TextColor3")
 end
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1814,24 +1691,42 @@ end
 local espTab = createTab("ESP")
 do
     local c = espTab.content
-    createSection(c, 1, "GERAL")
-    createToggle(c, 2, "ESP Ativado", Config.ESPEnabled, function(v)
-        Config.ESPEnabled = v
-        if not v then clearAllESP() end
-    end)
 
-    createSection(c, 3, "TIMES")
-    createTeamPanel(c, 4)
+    createSection(c, 1, "DETECÇÃO")
+    local apiStatusLbl = Instance.new("TextLabel")
+    apiStatusLbl.Size = UDim2.new(1, 0, 0, 34)
+    apiStatusLbl.BackgroundColor3 = CurrentTheme.BG_ROW
+    apiStatusLbl.BorderSizePixel = 0
+    apiStatusLbl.LayoutOrder = 2
+    apiStatusLbl.Text = "○ API não detectada"
+    apiStatusLbl.Font = Enum.Font.GothamBold
+    apiStatusLbl.TextSize = 13
+    apiStatusLbl.TextColor3 = CurrentTheme.TEXT_DIM
+    apiStatusLbl.TextXAlignment = Enum.TextXAlignment.Center
+    apiStatusLbl.TextYAlignment = Enum.TextYAlignment.Center
+    apiStatusLbl.Parent = c
+    Instance.new("UICorner", apiStatusLbl).CornerRadius = UDim.new(0, 8)
+    reg("bg_row", apiStatusLbl)
+    reg("text_dim", apiStatusLbl, "TextColor3")
 
-    createButton(c, 5, "🔍  Detectar Times", function()
-        refreshTeamPanel()
-        if TeamDetect.method then
-            showToast("TIMES DETECTADOS", "Método: " .. TeamDetect.method, SUCCESS_CLR)
+    createButton(c, 3, "🔍  Detectar API do Jogo", function()
+        local ok, msg = detectGameAPI()
+        if ok then
+            apiStatusLbl.Text = "✓ API Detectada"
+            apiStatusLbl.TextColor3 = SUCCESS_CLR
+            showToast("API DETECTADA", "Players: " .. GameAPI.playersCount .. " • Times: " .. GameAPI.teamsFound, SUCCESS_CLR)
         else
-            showToast("TIMES", "Nenhum time encontrado", WARN_CLR)
+            apiStatusLbl.Text = "✗ Falha: " .. (msg or "desconhecido")
+            apiStatusLbl.TextColor3 = DANGER_CLR
+            showToast("API FALHOU", msg or "Erro", DANGER_CLR)
         end
     end)
 
+    createSection(c, 4, "GERAL")
+    createToggle(c, 5, "ESP Ativado", Config.ESPEnabled, function(v)
+        Config.ESPEnabled = v
+        if not v then clearAllESP() end
+    end)
     createToggle(c, 6, "Só Inimigos (team check)", Config.ESPTeamCheck, function(v) Config.ESPTeamCheck = v end)
 
     createSection(c, 7, "HIGHLIGHT")
@@ -1904,9 +1799,7 @@ local moveTab = createTab("Movimento")
 do
     local c = moveTab.content
     createSection(c, 1, "VELOCIDADE")
-    createToggle(c, 2, "Speed Ativado", Config.SpeedEnabled, function(v)
-        setSpeed(v)
-    end)
+    createToggle(c, 2, "Speed Ativado", Config.SpeedEnabled, function(v) setSpeed(v) end)
     createSlider(c, 3, "WalkSpeed", 16, 300, Config.SpeedValue, false, function(v)
         Config.SpeedValue = math.floor(v)
         if Config.SpeedEnabled then
@@ -1916,9 +1809,7 @@ do
     end)
 
     createSection(c, 4, "PULO")
-    createToggle(c, 5, "JumpPower Ativado", Config.JumpEnabled, function(v)
-        setJump(v)
-    end)
+    createToggle(c, 5, "JumpPower Ativado", Config.JumpEnabled, function(v) setJump(v) end)
     createSlider(c, 6, "JumpPower", 50, 300, Config.JumpValue, false, function(v)
         Config.JumpValue = math.floor(v)
         if Config.JumpEnabled then
@@ -1929,14 +1820,10 @@ do
             end
         end
     end)
-    createToggle(c, 7, "Inf Jump", Config.InfJump, function(v)
-        setInfJump(v)
-    end)
+    createToggle(c, 7, "Inf Jump", Config.InfJump, function(v) setInfJump(v) end)
 
     createSection(c, 8, "EXTRAS")
-    createToggle(c, 9, "Noclip", Config.Noclip, function(v)
-        setNoclip(v)
-    end)
+    createToggle(c, 9, "Noclip", Config.Noclip, function(v) setNoclip(v) end)
     createToggle(c, 10, "Anti-AFK", Config.AntiAFK, function(v)
         Config.AntiAFK = v
         if v then
@@ -1975,7 +1862,7 @@ end
 selectTab("Principal")
 
 -- ═══════════════════════════════════════════════════════════════
--- INPUT
+-- LOOP
 -- ═══════════════════════════════════════════════════════════════
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -1985,13 +1872,9 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
--- ═══════════════════════════════════════════════════════════════
--- LOOP PRINCIPAL
--- ═══════════════════════════════════════════════════════════════
 local wasEnabled = false
 
 RunService.RenderStepped:Connect(function(dt)
-    -- FOV circle
     local showFov = Config.AimbotEnabled and Config.AimbotShowFOV
     local centro = getScreenCenter()
     if AimFovDrawing then
@@ -2003,7 +1886,6 @@ RunService.RenderStepped:Connect(function(dt)
         if showFov then fovCircle.Position = UDim2.fromOffset(centro.X, centro.Y) end
     end
 
-    -- ESP
     if not Config.ESPEnabled then
         if wasEnabled then clearAllESP() end
         wasEnabled = false
@@ -2014,7 +1896,6 @@ RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- AIMBOT (sempre ativo quando ligado)
     if Config.AimbotEnabled then
         local target = getAimbotTarget()
         if target then lockOn(target) end
@@ -2022,7 +1903,6 @@ RunService.RenderStepped:Connect(function(dt)
         Config.LockedTarget = nil
     end
 
-    -- Movimento
     local char = LocalPlayer.Character
     if char then
         local hum = char:FindFirstChildOfClass("Humanoid")
@@ -2129,3 +2009,4 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 print("[AKZ MENU FPS] " .. VERSION .. " carregado 🎯")
+print("[API] Aperte 'Detectar API do Jogo' na aba ESP")
