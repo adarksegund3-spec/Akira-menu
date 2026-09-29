@@ -1,417 +1,398 @@
--- ============================================================
--- SCRIPT: Ícone Arrastável + Menu "Direcionar" (Discord)
--- ============================================================
+-- ============================================
+-- DIAGNÓSTICO COMPLETO DE EXECUTOR
+-- Não coleta nada do jogo, só do executor/ambiente
+-- ============================================
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
-local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
--- Remove script antigo se existir
-if PlayerGui:FindFirstChild("DiscordHubGui") then
-    PlayerGui.DiscordHubGui:Destroy()
+if playerGui:FindFirstChild("DiagGui") then
+    playerGui.DiagGui:Destroy()
 end
 
--- ============================================================
--- FUNÇÕES UTILITÁRIAS
--- ============================================================
+-- ============================================
+-- COLETA DE DADOS
+-- ============================================
 
-local function create(className, properties)
-    local obj = Instance.new(className)
-    for prop, value in pairs(properties) do
-        obj[prop] = value
+local linhas = {}
+local function add(titulo, valor)
+    table.insert(linhas, titulo .. ": " .. tostring(valor))
+end
+local function sep()
+    table.insert(linhas, "----------------------------------------")
+end
+local function header(txt)
+    table.insert(linhas, "")
+    table.insert(linhas, "===== " .. txt .. " =====")
+end
+
+-- ============ IDENTIFICAÇÃO DO EXECUTOR ============
+header("IDENTIFICACAO DO EXECUTOR")
+
+local function safeGet(fn)
+    local ok, v = pcall(fn)
+    if ok then return v end
+    return "ERRO"
+end
+
+add("identifyexecutor()", safeGet(function() return identifyexecutor and identifyexecutor() or "N/A" end))
+add("getexecutorname()", safeGet(function() return getexecutorname and getexecutorname() or "N/A" end))
+add("getscriptname()", safeGet(function() return getscriptname and getscriptname() or "N/A" end))
+add("getscriptversion()", safeGet(function() return getscriptversion and getscriptversion() or "N/A" end))
+add("getexecutorversion()", safeGet(function() return getexecutorversion and getexecutorversion() or "N/A" end))
+add("getexploitname()", safeGet(function() return getexploitname and getexploitname() or "N/A" end))
+add("getname()", safeGet(function() return getname and getname() or "N/A" end))
+add("getversion()", safeGet(function() return getversion and getversion() or "N/A" end))
+
+-- ============ GLOBALS DISPONÍVEIS ============
+header("FUNCOES GLOBAIS DISPONIVEIS")
+
+local funcoesParaTestar = {
+    -- Executors famosos
+    "syn", "Krnl", "Fluxus", "Solara", "Delta", "Arceus", "Codex", "Wave",
+    "Sirhurt", "Protosmasher", "Sentinel", "Vega", "Elysian", "Trigon",
+    "Nihon", "AWP", "OxygenU", "ScriptWare", "Wearedevs",
+    -- Funções comuns
+    "loadstring", "load", "dofile", "loadfile", "require",
+    "setclipboard", "toclipboard", "writeclipboard",
+    "openbrowser", "openbrowserwindow", "request", "http_request",
+    "http_request_async", "syn_request", "HttpRequest",
+    "getrawmetatable", "setrawmetatable", "setreadonly", "isreadonly",
+    "getgenv", "getrenv", "getreg", "getgc", "getinstances", "getnilinstances",
+    "hookfunction", "hookmetamethod", "replaceclosure", "newcclosure",
+    "checkcaller", "islclosure", "getupvalue", "setupvalue", "getupvalues",
+    "getconstants", "getprotos", "getstack",
+    "fireclickdetector", "firetouchinterest", "fireproximityprompt",
+    "getconnections", "firesignal", "getsignal", "getcustomasset",
+    "readfile", "writefile", "appendfile", "listfiles", "isfile", "delfile",
+    "makefolder", "isfolder", "delfolder", "listfolders",
+    "gethui", "get_hui", "protectgui", "unprotectgui",
+    "decompile", "getscriptbytecode", "getscripthash",
+    "getcallbackvalue", "getcustomasset",
+    "setfpscap", "getfpscap",
+    "setthreadidentity", "getthreadidentity", "getidentity",
+    "getscripthash", "getloadedmodules",
+    "identifyexecutor", "getexecutorname", "getscriptname",
+    "queue_on_teleport", "queueonteleport", "setthreadcontext",
+    "getgc", "getreg", "getrenv", "getgenv",
+    "saveinstance", "saveplace",
+    "getobjects", "getinstances",
+    "cloneref", "compareinstances",
+    "getthreadcontext", "setthreadcontext",
+    "is_sirhurt_closure", "is_synapse_function",
+    "getrawmetatable", "setrawmetatable",
+    "sethiddenproperty", "gethiddenproperty", "setscriptable",
+    "getfflag", "setfflag",
+    "getasset", "getcustomasset",
+    "loadstring",
+    "syn", "krnl", "fluxus", "fluxusapi", "delta", "arceus", "codex", "wave",
+    "http", "httpget", "httppost",
+    "WebSocket", "websocket",
+    "os", "package", "debug", "io",
+}
+
+for _, nome in ipairs(funcoesParaTestar) do
+    local val = rawget(getfenv and getfenv() or _G, nome)
+    if val ~= nil then
+        add(nome, type(val))
     end
-    return obj
 end
 
-local function addCorner(parent, radius)
-    return create("UICorner", {
-        CornerRadius = UDim.new(radius or 1, 0),
-        Parent = parent
-    })
+-- ============ IDENTIDADE / CONTEXTO ============
+header("IDENTIDADE E CONTEXTO")
+
+add("getthreadidentity()", safeGet(function() return getthreadidentity and getthreadidentity() or getidentity and getidentity() or "N/A" end))
+add("checkcaller()", safeGet(function() return checkcaller and tostring(checkcaller()) or "N/A" end))
+add("getgenv() tipo", safeGet(function() return getgenv and type(getgenv()) or "N/A" end))
+add("getrenv() tipo", safeGet(function() return getrenv and type(getrenv()) or "N/A" end))
+add("getreg() tipo", safeGet(function() return getreg and type(getreg()) or "N/A" end))
+
+-- ============ INFORMAÇÕES DO USUÁRIO ============
+header("USUARIO")
+
+add("Username", player.Name)
+add("DisplayName", player.DisplayName)
+add("UserId", player.UserId)
+add("AccountAge (dias)", player.AccountAge)
+add("MembershipType", tostring(player.MembershipType))
+add("Plataforma detectada", tostring(UserInputService:GetPlatform()))
+add("É Tencent?", tostring(UserInputService.IsTencentDevice or "N/A"))
+
+-- ============ HARDWARE / SISTEMA ============
+header("SISTEMA E HARDWARE")
+
+add("OS via os.getenv", safeGet(function() return os and os.getenv and os.getenv("OS") or "N/A" end))
+add("Username sistema", safeGet(function() return os and os.getenv and os.getenv("USERNAME") or os and os.getenv and os.getenv("USER") or "N/A" end))
+add("Homepath", safeGet(function() return os and os.getenv and os.getenv("HOME") or os and os.getenv and os.getenv("USERPROFILE") or "N/A" end))
+add("os.time()", safeGet(function() return os and os.time() or "N/A" end))
+add("os.clock()", safeGet(function() return os and os.clock() or "N/A" end))
+add("os.date()", safeGet(function() return os and os.date and os.date() or "N/A" end))
+add("_VERSION", _VERSION)
+
+-- ============ CAPACIDADES DO AMBIENTE ============
+header("CAPACIDADES DO AMBIENTE")
+
+add("os.execute existe?", tostring(os and os.execute ~= nil))
+add("os.execute tipo", type(os and os.execute))
+add("io existe?", tostring(io ~= nil))
+add("io.open existe?", tostring(io and io.open ~= nil))
+add("debug existe?", tostring(debug ~= nil))
+add("debug.getinfo existe?", tostring(debug and debug.getinfo ~= nil))
+add("package.config", tostring(package and package.config))
+add("string.dump existe?", tostring(string.dump ~= nil))
+
+-- ============ RUNSERVICE / PLATAFORMA ============
+header("RUNSERVICE / PLATAFORMA")
+
+add("RunService tipo", safeGet(function() return tostring(RunService:IsClient() and "Client" or "") .. (RunService:IsServer() and "Server" or "") end))
+add("IsStudio", tostring(RunService:IsStudio()))
+add("IsMobile (UIS)", tostring(UserInputService.TouchEnabled))
+add("IsKeyboard (UIS)", tostring(UserInputService.KeyboardEnabled))
+add("IsMouse (UIS)", tostring(UserInputService.MouseEnabled))
+add("IsGamepad (UIS)", tostring(UserInputService.GamepadEnabled))
+add("IsVREnabled", tostring(UserInputService.VREnabled))
+add("GuiService.IsTenfootInterface", tostring(GuiService.IsTenfootInterface))
+add("UIS PreferredInput", safeGet(function() return tostring(UserInputService.PreferredInput) end))
+add("Screen size", safeGet(function() return tostring(workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize) end))
+add("Identity Roblox (LocalPlayer)", safeGet(function() return tostring(player:GetNetworkOwner()) end))
+
+-- ============ TESTE DE METODOS DE ABRIR NAVEGADOR ============
+header("TESTE: METODOS DE ABRIR NAVEGADOR")
+
+-- Só verifica se existem, NÃO tenta abrir aqui
+add("openbrowser definido?", tostring(rawget(getfenv and getfenv() or _G, "openbrowser") ~= nil))
+add("openbrowserwindow definido?", tostring(rawget(getfenv and getfenv() or _G, "openbrowserwindow") ~= nil))
+add("GuiService.OpenBrowserWindow definido?", tostring(GuiService.OpenBrowserWindow ~= nil))
+add("LinkingService disponivel?", tostring(pcall(function() return game:GetService("LinkingService") end)))
+add("setclipboard definido?", tostring(rawget(getfenv and getfenv() or _G, "setclipboard") ~= nil))
+add("toclipboard definido?", tostring(rawget(getfenv and getfenv() or _G, "toclipboard") ~= nil))
+add("syn.write_clipboard?", tostring(rawget(getfenv and getfenv() or _G, "syn") ~= nil and type(rawget(getfenv and getfenv() or _G, "syn").write_clipboard) == "function"))
+add("request definido?", tostring(rawget(getfenv and getfenv() or _G, "request") ~= nil))
+
+-- ============ TESTE REAL: GuiService:OpenBrowserWindow ============
+header("TESTE REAL DE ABRIR NAVEGADOR")
+
+do
+    local ok, err = pcall(function()
+        GuiService:OpenBrowserWindow("https://example.com")
+    end)
+    add("GuiService:OpenBrowserWindow", ok and "SEM ERRO" or ("ERRO: " .. tostring(err)))
 end
 
-local function addStroke(parent, color, thickness)
-    return create("UIStroke", {
-        Color = color or Color3.fromRGB(0, 120, 255),
-        Thickness = thickness or 2,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-        Parent = parent
-    })
+do
+    local ok, err = pcall(function()
+        game:GetService("LinkingService"):OpenUrl("https://example.com")
+    end)
+    add("LinkingService:OpenUrl", ok and "SEM ERRO" or ("ERRO: " .. tostring(err)))
 end
 
--- ============================================================
--- SCREEN GUI PRINCIPAL
--- ============================================================
+-- ============ MONTAR TEXTO FINAL ============
+local textoFinal = table.concat(linhas, "\n")
 
-local ScreenGui = create("ScreenGui", {
-    Name = "DiscordHubGui",
-    ResetOnSpawn = false,
-    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-    IgnoreGuiInset = true,
-    Parent = PlayerGui
-})
+-- ============================================
+-- INTERFACE
+-- ============================================
 
--- ============================================================
--- ÍCONE CIRCULAR ARRASTÁVEL
--- ============================================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "DiagGui"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
 
-local IconButton = create("TextButton", {
-    Name = "IconButton",
-    Size = UDim2.new(0, 50, 0, 50),
-    Position = UDim2.new(0, 20, 0.5, -25),
-    BackgroundColor3 = Color3.fromRGB(88, 101, 242), -- Azul Discord
-    Text = "💬",
-    TextSize = 24,
-    Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    AutoButtonColor = false,
-    Active = true,
-    Parent = ScreenGui
-})
+local janela = Instance.new("Frame")
+janela.Size = UDim2.new(0, 520, 0, 600)
+janela.Position = UDim2.new(0.5, -260, 0.5, -300)
+janela.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+janela.BorderSizePixel = 0
+janela.Active = true
+janela.Parent = gui
 
-addCorner(IconButton, 1)
-addStroke(IconButton, Color3.fromRGB(255, 255, 255), 2)
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = janela
 
--- Efeito hover
-IconButton.MouseEnter:Connect(function()
-    TweenService:Create(IconButton, TweenInfo.new(0.2), {
-        BackgroundColor3 = Color3.fromRGB(114, 137, 218)
-    }):Play()
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(88, 101, 242)
+stroke.Thickness = 2
+stroke.Parent = janela
+
+-- Barra título (arrastável)
+local titulo = Instance.new("TextLabel")
+titulo.Size = UDim2.new(1, 0, 0, 40)
+titulo.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+titulo.Text = "  DIAGNOSTICO DE EXECUTOR"
+titulo.TextColor3 = Color3.fromRGB(255, 255, 255)
+titulo.TextSize = 15
+titulo.Font = Enum.Font.GothamBold
+titulo.TextXAlignment = Enum.TextXAlignment.Left
+titulo.Parent = janela
+
+local cornerT = Instance.new("UICorner")
+cornerT.CornerRadius = UDim.new(0, 10)
+cornerT.Parent = titulo
+
+-- Botão fechar
+local fechar = Instance.new("TextButton")
+fechar.Size = UDim2.new(0, 30, 0, 28)
+fechar.Position = UDim2.new(1, -36, 0, 6)
+fechar.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+fechar.Text = "X"
+fechar.TextColor3 = Color3.fromRGB(255, 255, 255)
+fechar.TextSize = 14
+fechar.Font = Enum.Font.GothamBold
+fechar.Parent = janela
+
+local cornerF = Instance.new("UICorner")
+cornerF.CornerRadius = UDim.new(0, 6)
+cornerF.Parent = fechar
+
+-- Botão copiar
+local copiar = Instance.new("TextButton")
+copiar.Size = UDim2.new(0, 100, 0, 30)
+copiar.Position = UDim2.new(0, 10, 1, -40)
+copiar.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+copiar.Text = "COPIAR TUDO"
+copiar.TextColor3 = Color3.fromRGB(255, 255, 255)
+copiar.TextSize = 13
+copiar.Font = Enum.Font.GothamBold
+copiar.Parent = janela
+
+local cornerC = Instance.new("UICorner")
+cornerC.CornerRadius = UDim.new(0, 6)
+cornerC.Parent = copiar
+
+-- Status label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -130, 0, 30)
+statusLabel.Position = UDim2.new(0, 120, 1, -40)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = ""
+statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+statusLabel.TextSize = 13
+statusLabel.Font = Enum.Font.GothamMedium
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = janela
+
+-- ScrollFrame
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -20, 1, -90)
+scroll.Position = UDim2.new(0, 10, 0, 48)
+scroll.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 8
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = janela
+
+local cornerS = Instance.new("UICorner")
+cornerS.CornerRadius = UDim.new(0, 6)
+cornerS.Parent = scroll
+
+local padding = Instance.new("UIPadding")
+padding.PaddingTop = UDim.new(0, 8)
+padding.PaddingBottom = UDim.new(0, 8)
+padding.PaddingLeft = UDim.new(0, 8)
+padding.PaddingRight = UDim.new(0, 8)
+padding.Parent = scroll
+
+local layout = Instance.new("UIListLayout")
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 2)
+layout.Parent = scroll
+
+-- Preenche com as linhas
+for i, linha in ipairs(linhas) do
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -8, 0, 16)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = linha
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 230)
+    lbl.TextSize = 12
+    lbl.Font = Enum.Font.Code
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.TextWrapped = false
+    lbl.LayoutOrder = i
+    lbl.Parent = scroll
+
+    if string.find(linha, "^=====") then
+        lbl.TextColor3 = Color3.fromRGB(88, 200, 255)
+        lbl.Font = Enum.Font.GothamBold
+        lbl.Size = UDim2.new(1, -8, 0, 20)
+    elseif string.find(linha, "^%-%-%-%-") then
+        lbl.TextColor3 = Color3.fromRGB(80, 80, 100)
+    end
+end
+
+-- ============================================
+-- FUNÇÃO COPIAR
+-- ============================================
+
+local function copiarTexto(txt)
+    local ok = false
+    if setclipboard then
+        ok = pcall(setclipboard, txt)
+    end
+    if not ok and toclipboard then
+        ok = pcall(toclipboard, txt)
+    end
+    if not ok and syn and syn.write_clipboard then
+        ok = pcall(syn.write_clipboard, txt)
+    end
+    if not ok then
+        if writeclipboard then
+            ok = pcall(writeclipboard, txt)
+        end
+    end
+    if not ok then
+        if set_clipboard then
+            ok = pcall(set_clipboard, txt)
+        end
+    end
+    return ok
+end
+
+copiar.MouseButton1Click:Connect(function()
+    local ok = copiarTexto(textoFinal)
+    if ok then
+        statusLabel.Text = "Copiado! Cola no chat."
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        statusLabel.Text = "Falha ao copiar."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+    task.wait(3)
+    statusLabel.Text = ""
 end)
 
-IconButton.MouseLeave:Connect(function()
-    TweenService:Create(IconButton, TweenInfo.new(0.2), {
-        BackgroundColor3 = Color3.fromRGB(88, 101, 242)
-    }):Play()
-end)
-
--- ============================================================
--- SISTEMA DE ARRASTO (MOUSE + TOUCH)
--- ============================================================
+-- ============================================
+-- ARRASTAR JANELA PELA BARRA DE TITULO
+-- ============================================
 
 local dragging = false
 local dragStart, startPos
 
-local function beginDrag(input)
+titulo.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
         dragStart = input.Position
-        startPos = IconButton.Position
-    end
-end
-
-local function updateDrag(input)
-    if dragging then
-        local delta = input.Position - dragStart
-        IconButton.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-end
-
-local function endDrag()
-    dragging = false
-end
-
-IconButton.InputBegan:Connect(beginDrag)
-IconButton.InputChanged:Connect(updateDrag)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-        endDrag()
-    end
-end)
-
--- ============================================================
--- MENU PRINCIPAL (OCULTO INICIALMENTE)
--- ============================================================
-
-local MenuFrame = create("Frame", {
-    Name = "MenuFrame",
-    Size = UDim2.new(0, 320, 0, 220),
-    Position = UDim2.new(0.5, -160, 0.5, -110),
-    BackgroundColor3 = Color3.fromRGB(30, 30, 40),
-    BorderSizePixel = 0,
-    Visible = false,
-    Active = true,
-    Parent = ScreenGui
-})
-
-addCorner(MenuFrame, 0.08)
-addStroke(MenuFrame, Color3.fromRGB(88, 101, 242), 2)
-
--- Título do menu
-local TitleLabel = create("TextLabel", {
-    Name = "Title",
-    Size = UDim2.new(1, 0, 0, 40),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(88, 101, 242),
-    Text = "  Menu",
-    TextSize = 18,
-    Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = MenuFrame
-})
-addCorner(TitleLabel, 0.08)
-
--- Botão fechar
-local CloseButton = create("TextButton", {
-    Name = "CloseButton",
-    Size = UDim2.new(0, 35, 0, 35),
-    Position = UDim2.new(1, -40, 0, 3),
-    BackgroundColor3 = Color3.fromRGB(200, 50, 50),
-    Text = "✕",
-    TextSize = 16,
-    Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    Parent = MenuFrame
-})
-addCorner(CloseButton, 1)
-
--- Barra de abas
-local TabBar = create("Frame", {
-    Name = "TabBar",
-    Size = UDim2.new(1, 0, 0, 35),
-    Position = UDim2.new(0, 0, 0, 40),
-    BackgroundColor3 = Color3.fromRGB(40, 40, 55),
-    BorderSizePixel = 0,
-    Parent = MenuFrame
-})
-
--- Botão da aba "Direcionar"
-local TabButton = create("TextButton", {
-    Name = "TabButton",
-    Size = UDim2.new(0, 120, 1, 0),
-    Position = UDim2.new(0, 5, 0, 0),
-    BackgroundColor3 = Color3.fromRGB(60, 60, 80),
-    Text = "Direcionar",
-    TextSize = 14,
-    Font = Enum.Font.GothamMedium,
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    Parent = TabBar
-})
-addCorner(TabButton, 0.3)
-
--- Container de conteúdo
-local ContentFrame = create("Frame", {
-    Name = "ContentFrame",
-    Size = UDim2.new(1, -20, 1, -95),
-    Position = UDim2.new(0, 10, 0, 80),
-    BackgroundColor3 = Color3.fromRGB(35, 35, 48),
-    BorderSizePixel = 0,
-    Parent = MenuFrame
-})
-addCorner(ContentFrame, 0.06)
-
--- ============================================================
--- BLOCO "COMUNIDADE DISCORD"
--- ============================================================
-
-local DiscordBlock = create("Frame", {
-    Name = "DiscordBlock",
-    Size = UDim2.new(1, -20, 0, 90),
-    Position = UDim2.new(0, 10, 0, 10),
-    BackgroundColor3 = Color3.fromRGB(25, 25, 35),
-    BorderSizePixel = 0,
-    Parent = ContentFrame
-})
-addCorner(DiscordBlock, 0.08)
-
--- Borda azul do bloco
-addStroke(DiscordBlock, Color3.fromRGB(0, 120, 255), 2)
-
--- Título do bloco
-create("TextLabel", {
-    Name = "BlockTitle",
-    Size = UDim2.new(1, -20, 0, 30),
-    Position = UDim2.new(0, 10, 0, 8),
-    BackgroundTransparency = 1,
-    Text = "Comunidade Discord",
-    TextSize = 16,
-    Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(0, 150, 255),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = DiscordBlock
-})
-
--- Descrição
-create("TextLabel", {
-    Name = "BlockDesc",
-    Size = UDim2.new(1, -20, 0, 20),
-    Position = UDim2.new(0, 10, 0, 35),
-    BackgroundTransparency = 1,
-    Text = "Entre no nosso servidor para suporte e novidades!",
-    TextSize = 12,
-    Font = Enum.Font.Gotham,
-    TextColor3 = Color3.fromRGB(180, 180, 200),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = DiscordBlock
-})
-
--- Botão "Entrar"
-local JoinButton = create("TextButton", {
-    Name = "JoinButton",
-    Size = UDim2.new(0, 100, 0, 30),
-    Position = UDim2.new(1, -110, 1, -38),
-    BackgroundColor3 = Color3.fromRGB(88, 101, 242),
-    Text = "Entrar",
-    TextSize = 14,
-    Font = Enum.Font.GothamBold,
-    TextColor3 = Color3.fromRGB(255, 255, 255),
-    Parent = DiscordBlock
-})
-addCorner(JoinButton, 0.3)
-
--- Efeito hover no botão Entrar
-JoinButton.MouseEnter:Connect(function()
-    TweenService:Create(JoinButton, TweenInfo.new(0.15), {
-        BackgroundColor3 = Color3.fromRGB(114, 137, 218)
-    }):Play()
-end)
-
-JoinButton.MouseLeave:Connect(function()
-    TweenService:Create(JoinButton, TweenInfo.new(0.15), {
-        BackgroundColor3 = Color3.fromRGB(88, 101, 242)
-    }):Play()
-end)
-
--- ============================================================
--- FUNÇÃO PARA ABRIR O LINK DO DISCORD
--- ============================================================
-
-local DISCORD_URL = "https://discord.gg/kc7myVSq3"
-
-local function abrirDiscord()
-    -- Tentativa 1: GuiService:OpenBrowserWindow (funciona em alguns executores)
-    pcall(function()
-        GuiService:OpenBrowserWindow(DISCORD_URL)
-    end)
-
-    -- Tentativa 2: LinkingService:OpenUrl (alternativa)
-    pcall(function()
-        local LinkingService = game:GetService("LinkingService")
-        LinkingService:OpenUrl(DISCORD_URL)
-    end)
-
-    -- Tentativa 3: setclipboard (fallback universal)
-    local clipboardFunc = setclipboard or toclipboard or syn and syn.write_clipboard
-    if clipboardFunc then
-        pcall(function()
-            clipboardFunc(DISCORD_URL)
-        end)
-    end
-
-    -- Notificação visual
-    local NotifyGui = create("ScreenGui", {
-        Name = "NotifyGui",
-        ResetOnSpawn = false,
-        Parent = PlayerGui
-    })
-
-    local NotifyFrame = create("Frame", {
-        Name = "Notify",
-        Size = UDim2.new(0, 280, 0, 60),
-        Position = UDim2.new(0.5, -140, 0, -80),
-        BackgroundColor3 = Color3.fromRGB(40, 40, 55),
-        BorderSizePixel = 0,
-        Parent = NotifyGui
-    })
-    addCorner(NotifyFrame, 0.1)
-    addStroke(NotifyFrame, Color3.fromRGB(88, 101, 242), 2)
-
-    create("TextLabel", {
-        Name = "NotifyText",
-        Size = UDim2.new(1, -20, 1, 0),
-        Position = UDim2.new(0, 10, 0, 0),
-        BackgroundTransparency = 1,
-        Text = "🔗 Link copiado! Abra o Discord.",
-        TextSize = 14,
-        Font = Enum.Font.GothamMedium,
-        TextColor3 = Color3.fromRGB(255, 255, 255),
-        TextWrapped = true,
-        Parent = NotifyFrame
-    })
-
-    -- Animação de entrada
-    TweenService:Create(NotifyFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
-        Position = UDim2.new(0.5, -140, 0, 20)
-    }):Play()
-
-    -- Remove após 3 segundos
-    task.delay(3, function()
-        TweenService:Create(NotifyFrame, TweenInfo.new(0.3), {
-            Position = UDim2.new(0.5, -140, 0, -80)
-        }):Play()
-        task.wait(0.35)
-        NotifyGui:Destroy()
-    end)
-end
-
-JoinButton.MouseButton1Click:Connect(abrirDiscord)
-
--- ============================================================
--- LÓGICA DE ABRIR/FECHAR O MENU
--- ============================================================
-
-local menuAberto = false
-
-local function toggleMenu()
-    menuAberto = not menuAberto
-    MenuFrame.Visible = menuAberto
-
-    if menuAberto then
-        -- Animação de escala ao abrir
-        MenuFrame.Size = UDim2.new(0, 0, 0, 0)
-        MenuFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        TweenService:Create(MenuFrame, TweenInfo.new(0.25, Enum.EasingStyle.Back), {
-            Size = UDim2.new(0, 320, 0, 220),
-            Position = UDim2.new(0.5, -160, 0.5, -110)
-        }):Play()
-    end
-end
-
--- Clique no ícone
-IconButton.MouseButton1Click:Connect(function()
-    -- Ignora se foi um arrasto (movimento maior que 5px)
-    if dragging then return end
-    toggleMenu()
-end)
-
--- Fechar pelo botão X
-CloseButton.MouseButton1Click:Connect(function()
-    menuAberto = false
-    MenuFrame.Visible = false
-end)
-
--- ============================================================
--- TORNAR O MENU TAMBÉM ARRASTÁVEL (opcional, mas útil)
--- ============================================================
-
-local menuDragging = false
-local menuDragStart, menuStartPos
-
-TitleLabel.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-    or input.UserInputType == Enum.UserInputType.Touch then
-        menuDragging = true
-        menuDragStart = input.Position
-        menuStartPos = MenuFrame.Position
+        startPos = janela.Position
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-    if menuDragging then
-        local delta = input.Position - menuDragStart
-        MenuFrame.Position = UDim2.new(
-            menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        janela.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
         )
     end
 end)
@@ -419,10 +400,16 @@ end)
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
     or input.UserInputType == Enum.UserInputType.Touch then
-        menuDragging = false
+        dragging = false
     end
 end)
 
--- ============================================================
--- FIM DO SCRIPT
--- ============================================================
+fechar.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+-- Log no console também (caso o botão falhe)
+print("========================================")
+print("DIAGNOSTICO COMPLETO:")
+print(textoFinal)
+print("========================================")
