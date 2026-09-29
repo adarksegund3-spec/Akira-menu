@@ -23,20 +23,14 @@ local DEV_NAME     = "Akira007p"
 local VERSION      = "v1"
 
 -- ═══════════════════════════════════════════════════════════════
--- CARREGAR WINDUI
+-- WINDUI
 -- ═══════════════════════════════════════════════════════════════
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 -- ═══════════════════════════════════════════════════════════════
--- GAME API (detecção)
+-- GAME API
 -- ═══════════════════════════════════════════════════════════════
-local GameAPI = {
-    detected = false,
-    method = nil,
-    hasTeams = false,
-    teamsFound = 0,
-    playersCount = 0,
-}
+local GameAPI = { detected=false, method=nil, hasTeams=false, teamsFound=0, playersCount=0 }
 
 local GENERIC_TEAM_NAMES = {
     ["play"]=true, ["players"]=true, ["player"]=true, ["lobby"]=true,
@@ -51,8 +45,7 @@ local function isGenericTeamName(name)
     if not name then return true end
     local n = tostring(name):lower():gsub("^%s+",""):gsub("%s+$","")
     if n == "" then return true end
-    if GENERIC_TEAM_NAMES[n] then return true end
-    return false
+    return GENERIC_TEAM_NAMES[n] == true
 end
 
 local function getTeamViaTeam(p)
@@ -64,8 +57,7 @@ end
 
 local function getTeamViaAttribute(p)
     if not p then return nil end
-    local c = p.Character
-    if not c then return nil end
+    local c = p.Character; if not c then return nil end
     local ok, v = pcall(function() return c:GetAttribute("TeamColor") end)
     if ok and v then return tostring(v) end
     return nil
@@ -73,8 +65,7 @@ end
 
 local function getTeamViaStringValue(p)
     if not p then return nil end
-    local c = p.Character
-    if not c then return nil end
+    local c = p.Character; if not c then return nil end
     local sv = c:FindFirstChild("Team")
     if sv and (sv:IsA("StringValue") or sv:IsA("ObjectValue")) then return sv.Value end
     return nil
@@ -133,10 +124,10 @@ local function getTeamColorFor(p)
 end
 
 local function getPlayerColor(p)
-    if p == LocalPlayer then return Color3.fromRGB(120, 220, 140) end
-    if GameAPI.hasTeams and isAlly(p) then return Color3.fromRGB(80, 170, 255) end
+    if p == LocalPlayer then return Color3.fromRGB(120,220,140) end
+    if GameAPI.hasTeams and isAlly(p) then return Color3.fromRGB(80,170,255) end
     local c = getTeamColorFor(p); if c then return c end
-    return Color3.fromRGB(220, 40, 40)
+    return Color3.fromRGB(220,40,40)
 end
 
 local function detectGameAPI()
@@ -162,16 +153,14 @@ local function detectGameAPI()
                 teamMap[key].count = teamMap[key].count + 1
             end
         end
-        local validTeams = {}
+        local valid = {}
         for key, data in pairs(teamMap) do
-            local isGeneric = isGenericTeamName(key)
-            local isEverybody = (data.count == #allPlayers)
-            if not isGeneric and not isEverybody and data.count >= 1 then
-                validTeams[key] = data
+            if not isGenericTeamName(key) and data.count < #allPlayers and data.count >= 1 then
+                valid[key] = data
             end
         end
         local count = 0
-        for _ in pairs(validTeams) do count = count + 1 end
+        for _ in pairs(valid) do count = count + 1 end
         return { validTeams = count }
     end
 
@@ -192,7 +181,6 @@ local function detectGameAPI()
     end
 
     GameAPI.detected = true
-
     if GameAPI.hasTeams then
         return true, "API Detectada • " .. GameAPI.teamsFound .. " times"
     else
@@ -204,7 +192,6 @@ end
 -- CONFIG
 -- ═══════════════════════════════════════════════════════════════
 local Config = {
-    -- ESP
     ESPEnabled = false,
     ESPTeamCheck = false,
     ESP_Highlight = false,
@@ -212,7 +199,6 @@ local Config = {
     ESP_Distance = false,
     ESP_Color = false,
 
-    -- Aimbot
     AimbotEnabled = false,
     AimbotShowFOV = true,
     AimbotFOV = 150,
@@ -223,21 +209,11 @@ local Config = {
     AimbotSmooth = 0.05,
     LockedTarget = nil,
 
-    -- Movimento
-    SpeedEnabled = false,
-    SpeedValue = 30,
-    JumpEnabled = false,
-    JumpValue = 60,
-    InfJump = false,
-    Noclip = false,
-
-    -- Armas
-    NoRecoil = false,
-    NoSpread = false,
-
-    -- Misc
-    FullBright = false,
-    AntiAFK = false,
+    SpeedEnabled = false, SpeedValue = 30,
+    JumpEnabled = false, JumpValue = 60,
+    InfJump = false, Noclip = false,
+    NoRecoil = false, NoSpread = false,
+    FullBright = false, AntiAFK = false,
 }
 
 local DEFAULT_WALKSPEED = 16
@@ -245,7 +221,7 @@ local DEFAULT_JUMPPOWER = 50
 local MState = { InfJumpConn=nil, NoclipConn=nil, SavedWalk=nil, SavedJump=nil, SavedUseJump=true }
 
 -- ═══════════════════════════════════════════════════════════════
--- FOV CIRCLE (aimbot)
+-- FOV CIRCLE
 -- ═══════════════════════════════════════════════════════════════
 local fovGui = Instance.new("ScreenGui")
 fovGui.Name = "AKZ_FOV"
@@ -278,45 +254,48 @@ local function refreshFov()
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- ESP (adaptado do source — sincroniza ao vivo)
+-- ESP — Sistema com sincronização imediata
 -- ═══════════════════════════════════════════════════════════════
 local HL_TAG = "AKZ_ESP_HL"
 local BB_TAG = "AKZ_ESP_BB"
 
-local function clearESPForPlayer(player)
+local function limparESP(player)
     local char = player.Character
-    if char then
-        local hl = char:FindFirstChild(HL_TAG); if hl then hl:Destroy() end
-        local bb = char:FindFirstChild(BB_TAG); if bb then bb:Destroy() end
-    end
+    if not char then return end
+    local hl = char:FindFirstChild(HL_TAG); if hl then hl:Destroy() end
+    local bb = char:FindFirstChild(BB_TAG); if bb then bb:Destroy() end
 end
 
-local function clearAllESP()
-    for _, p in ipairs(Players:GetPlayers()) do clearESPForPlayer(p) end
+local function limparTudoESP()
+    for _, p in ipairs(Players:GetPlayers()) do limparESP(p) end
 end
 
-local function updateESPForPlayer(player)
+-- Essa função SEMPRE:
+--   • cria o que deveria existir e não existe
+--   • destrói o que existe e não deveria
+--   • atualiza o que existe
+-- Roda a cada frame e no callback de cada toggle
+local function sincronizarESP(player)
     if player == LocalPlayer then return end
+
     local char = player.Character
-    if not char then clearESPForPlayer(player); return end
+    if not char then limparESP(player); return end
 
     local hrp = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum or hum.Health <= 0 then
-        clearESPForPlayer(player); return
-    end
+    if not hrp or not hum or hum.Health <= 0 then limparESP(player); return end
 
-    -- Team check
+    -- Condições globais que forçam limpeza total
+    if not Config.ESPEnabled then limparESP(player); return end
     if Config.ESPTeamCheck and GameAPI.hasTeams and isAlly(player) then
-        clearESPForPlayer(player); return
+        limparESP(player); return
     end
 
-    -- Cor
     local color
     if Config.ESP_Color then color = getPlayerColor(player)
     else color = Color3.fromRGB(220,40,40) end
 
-    -- HIGHLIGHT (sincronização ao vivo)
+    -- ───────────── HIGHLIGHT ─────────────
     local hl = char:FindFirstChild(HL_TAG)
     if Config.ESP_Highlight then
         if not hl then
@@ -331,13 +310,14 @@ local function updateESPForPlayer(player)
         hl.FillTransparency = 0.5
         hl.OutlineTransparency = 0
     elseif hl then
-        hl:Destroy()  -- ← desligou? some na hora
+        hl:Destroy()
     end
 
-    -- NOME / DISTÂNCIA (sincronização ao vivo)
+    -- ───────────── NOME / DISTÂNCIA ─────────────
     local bb = char:FindFirstChild(BB_TAG)
-    local wantBB = Config.ESP_Name or Config.ESP_Distance
-    if wantBB then
+    local querBB = Config.ESP_Name or Config.ESP_Distance
+
+    if querBB then
         local head = char:FindFirstChild("Head")
         if head then
             if not bb then
@@ -363,14 +343,20 @@ local function updateESPForPlayer(player)
             if Config.ESP_Name then txt = player.DisplayName end
             if Config.ESP_Distance then
                 local dist = math.floor((hrp.Position - Camera.CFrame.Position).Magnitude)
-                if txt ~= "" then txt = txt .. "  |  " .. dist .. "m"
-                else txt = dist .. "m" end
+                txt = (txt ~= "") and (txt .. "  |  " .. dist .. "m") or (dist .. "m")
             end
             bb.Lbl.Text = txt
             bb.Lbl.TextColor3 = color
         end
     elseif bb then
-        bb:Destroy()  -- ← desligou? some na hora
+        -- Não quer mais BB? Destrói imediatamente
+        bb:Destroy()
+    end
+end
+
+local function sincronizarTodosESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        sincronizarESP(p)
     end
 end
 
@@ -542,8 +528,7 @@ end
 -- ═══════════════════════════════════════════════════════════════
 local weaponTick = 0
 local function applyWeaponMods()
-    local ch = LocalPlayer.Character
-    if not ch then return end
+    local ch = LocalPlayer.Character; if not ch then return end
     local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
     for _, cont in ipairs({ch, bp}) do
         if cont then
@@ -567,7 +552,7 @@ local function applyWeaponMods()
 end
 
 -- ═══════════════════════════════════════════════════════════════
--- CRIAR WINDOW
+-- WINDOW
 -- ═══════════════════════════════════════════════════════════════
 local Window = WindUI:CreateWindow({
     Title = "AKZ MENU FPS " .. VERSION,
@@ -582,10 +567,10 @@ local Window = WindUI:CreateWindow({
     SideBarWidth = 200,
 })
 
--- ═══ ABA PRINCIPAL ═══
+-- ═══ PRINCIPAL ═══
 local principalTab = Window:Tab({ Title = "Principal", Icon = "home" })
 
-local infoSection = principalTab:Section({ Title = "Informações", Opened = true })
+principalTab:Section({ Title = "Informações", Opened = true })
 
 local executorName = "Desconhecido"
 pcall(function() if identifyexecutor then executorName = identifyexecutor() end end)
@@ -594,7 +579,7 @@ principalTab:Paragraph({ Title = "👤  Usuário: " .. LocalPlayer.DisplayName }
 principalTab:Paragraph({ Title = "⚙️  Executor: " .. executorName })
 principalTab:Paragraph({ Title = "📦  Versão: " .. VERSION })
 
-local commSection = principalTab:Section({ Title = "Comunidade", Opened = true })
+principalTab:Section({ Title = "Comunidade", Opened = true })
 
 principalTab:Button({
     Title = "💬  Comunidade Discord",
@@ -602,27 +587,24 @@ principalTab:Button({
     Callback = function()
         pcall(function() setclipboard(DISCORD_LINK) end)
         pcall(function() game:GetService("GuiService"):OpenBrowserWindow(DISCORD_LINK) end)
-        WindUI:Notify({ Title = "Discord", Content = "Link copiado!", Duration = 3, Icon = "message-circle" })
+        WindUI:Notify({ Title = "Discord", Content = "Link copiado!", Duration = 3 })
     end,
 })
 
-local uiSection = principalTab:Section({ Title = "Aparência", Opened = true })
+principalTab:Section({ Title = "Aparência", Opened = true })
 
 principalTab:Toggle({
     Title = "Menu Transparente",
-    Desc = "Deixa o menu semi-transparente",
     Value = false,
     Callback = function(v)
-        -- WindUI já tem tema próprio; usamos o BackgroundTransparency da window se disponível
-        -- Aplicamos transparência global via Window:SetBackgroundTransparency se existir
         pcall(function() Window:SetBackgroundTransparency(v and 0.5 or 0) end)
     end,
 })
 
--- ═══ ABA ESP ═══
+-- ═══ ESP ═══
 local espTab = Window:Tab({ Title = "ESP", Icon = "eye" })
 
-local apiSection = espTab:Section({ Title = "Detecção", Opened = true })
+espTab:Section({ Title = "Detecção", Opened = true })
 
 local apiStatusParagraph
 apiStatusParagraph = espTab:Paragraph({ Title = "○ API não detectada", Desc = "Clique em detectar para escanear o jogo" })
@@ -633,16 +615,11 @@ espTab:Button({
     Callback = function()
         local ok, msg = detectGameAPI()
         apiStatusParagraph:SetTitle("✓ " .. msg)
-        WindUI:Notify({
-            Title = ok and "API Detectada" or "Falha",
-            Content = msg,
-            Duration = 4,
-            Icon = ok and "check-circle" or "x-circle",
-        })
+        WindUI:Notify({ Title = "API", Content = msg, Duration = 4 })
     end,
 })
 
-local espSection = espTab:Section({ Title = "ESP Geral", Opened = true })
+espTab:Section({ Title = "ESP Geral", Opened = true })
 
 espTab:Toggle({
     Title = "ESP Ativado",
@@ -650,60 +627,61 @@ espTab:Toggle({
     Value = false,
     Callback = function(v)
         Config.ESPEnabled = v
-        if not v then clearAllESP() end
+        sincronizarTodosESP() -- ← aplica imediatamente
     end,
 })
 
 espTab:Toggle({
     Title = "Só Inimigos (team check)",
-    Desc = "Só mostra players que não são do seu time (precisa detectar API)",
     Value = false,
-    Callback = function(v) Config.ESPTeamCheck = v end,
+    Callback = function(v)
+        Config.ESPTeamCheck = v
+        sincronizarTodosESP()
+    end,
 })
 
-local elemSection = espTab:Section({ Title = "Elementos", Opened = true })
+espTab:Section({ Title = "Elementos", Opened = true })
 
 espTab:Toggle({
     Title = "Highlight (corpo brilhando)",
     Value = false,
     Callback = function(v)
         Config.ESP_Highlight = v
-        if not v then
-            for _, p in ipairs(Players:GetPlayers()) do
-                local ch = p.Character
-                if ch then
-                    local hl = ch:FindFirstChild(HL_TAG)
-                    if hl then hl:Destroy() end
-                end
-            end
-        end
+        sincronizarTodosESP() -- ← cria/destrói na hora
     end,
 })
 
 espTab:Toggle({
     Title = "Nome",
     Value = false,
-    Callback = function(v) Config.ESP_Name = v end,
+    Callback = function(v)
+        Config.ESP_Name = v
+        sincronizarTodosESP()
+    end,
 })
 
 espTab:Toggle({
     Title = "Distância",
     Value = false,
-    Callback = function(v) Config.ESP_Distance = v end,
+    Callback = function(v)
+        Config.ESP_Distance = v
+        sincronizarTodosESP() -- ← aqui era o bug: agora atualiza imediato
+    end,
 })
 
 espTab:Toggle({
     Title = "Cor do Time (se detectado)",
-    Desc = "Usa a cor real do time no highlight/nome",
     Value = false,
-    Callback = function(v) Config.ESP_Color = v end,
+    Callback = function(v)
+        Config.ESP_Color = v
+        sincronizarTodosESP()
+    end,
 })
 
-local visualSection = espTab:Section({ Title = "Visual", Opened = false })
+espTab:Section({ Title = "Visual", Opened = false })
 
 espTab:Toggle({
     Title = "FullBright",
-    Desc = "Ilumina o mapa todo",
     Value = false,
     Callback = function(v)
         Config.FullBright = v
@@ -723,52 +701,33 @@ espTab:Toggle({
     end,
 })
 
--- ═══ ABA AIMBOT ═══
+-- ═══ AIMBOT ═══
 local aimTab = Window:Tab({ Title = "Aimbot", Icon = "crosshair" })
 
-local aimMainSection = aimTab:Section({ Title = "Aimbot", Opened = true })
+aimTab:Section({ Title = "Aimbot", Opened = true })
 
 aimTab:Toggle({
     Title = "Aimbot Ativado",
-    Desc = "Trava no inimigo mais próximo automaticamente",
     Value = false,
     Callback = function(v)
         Config.AimbotEnabled = v
         if not v then Config.LockedTarget = nil end
     end,
 })
+aimTab:Toggle({ Title = "Mostrar FOV", Value = true, Callback = function(v) Config.AimbotShowFOV = v end })
+aimTab:Toggle({ Title = "Não mirar em aliados", Value = false, Callback = function(v) Config.AimbotTeamCheck = v end })
+aimTab:Toggle({ Title = "Não atravessar parede", Value = false, Callback = function(v) Config.AimbotWallCheck = v end })
 
-aimTab:Toggle({
-    Title = "Mostrar FOV",
-    Value = true,
-    Callback = function(v) Config.AimbotShowFOV = v end,
-})
-
-aimTab:Toggle({
-    Title = "Não mirar em aliados",
-    Value = false,
-    Callback = function(v) Config.AimbotTeamCheck = v end,
-})
-
-aimTab:Toggle({
-    Title = "Não atravessar parede",
-    Value = false,
-    Callback = function(v) Config.AimbotWallCheck = v end,
-})
-
-local aimTargetSection = aimTab:Section({ Title = "Alvo", Opened = false })
+aimTab:Section({ Title = "Alvo", Opened = false })
 
 aimTab:Dropdown({
     Title = "Parte do corpo",
     Values = { "Head", "Torso" },
     Value = "Head",
-    Callback = function(v)
-        Config.AimbotPart = v
-        Config.LockedTarget = nil
-    end,
+    Callback = function(v) Config.AimbotPart = v; Config.LockedTarget = nil end,
 })
 
-local aimFovSection = aimTab:Section({ Title = "FOV", Opened = false })
+aimTab:Section({ Title = "FOV", Opened = false })
 
 aimTab:Slider({
     Title = "Tamanho",
@@ -784,7 +743,7 @@ aimTab:Slider({
     Callback = function(v) Config.AimbotFOVAlpha = v; refreshFov() end,
 })
 
-local aimSmoothSection = aimTab:Section({ Title = "Suavidade", Opened = false })
+aimTab:Section({ Title = "Suavidade", Opened = false })
 
 aimTab:Slider({
     Title = "Smoothness (0 = snap)",
@@ -793,20 +752,13 @@ aimTab:Slider({
     Callback = function(v) Config.AimbotSmooth = v end,
 })
 
--- ═══ ABA MOVIMENTO ═══
+-- ═══ MOVIMENTO ═══
 local moveTab = Window:Tab({ Title = "Movimento", Icon = "move" })
 
-local speedSection = moveTab:Section({ Title = "Velocidade", Opened = true })
-
-moveTab:Toggle({
-    Title = "Speed Ativado",
-    Value = false,
-    Callback = function(v) setSpeed(v) end,
-})
-
+moveTab:Section({ Title = "Velocidade", Opened = true })
+moveTab:Toggle({ Title = "Speed Ativado", Value = false, Callback = function(v) setSpeed(v) end })
 moveTab:Slider({
-    Title = "WalkSpeed",
-    Step = 1,
+    Title = "WalkSpeed", Step = 1,
     Value = { Min = 16, Max = 300, Default = 30 },
     Callback = function(v)
         Config.SpeedValue = v
@@ -816,46 +768,24 @@ moveTab:Slider({
     end,
 })
 
-local jumpSection = moveTab:Section({ Title = "Pulo", Opened = true })
-
-moveTab:Toggle({
-    Title = "JumpPower Ativado",
-    Value = false,
-    Callback = function(v) setJump(v) end,
-})
-
+moveTab:Section({ Title = "Pulo", Opened = true })
+moveTab:Toggle({ Title = "JumpPower Ativado", Value = false, Callback = function(v) setJump(v) end })
 moveTab:Slider({
-    Title = "JumpPower",
-    Step = 1,
+    Title = "JumpPower", Step = 1,
     Value = { Min = 50, Max = 300, Default = 60 },
     Callback = function(v)
         Config.JumpValue = v
         if Config.JumpEnabled then
-            local hum = getHum()
-            if hum then hum.UseJumpPower = true; hum.JumpPower = v end
+            local hum = getHum(); if hum then hum.UseJumpPower = true; hum.JumpPower = v end
         end
     end,
 })
+moveTab:Toggle({ Title = "Inf Jump", Value = false, Callback = function(v) setInfJump(v) end })
 
+moveTab:Section({ Title = "Extras", Opened = false })
+moveTab:Toggle({ Title = "Noclip", Value = false, Callback = function(v) setNoclip(v) end })
 moveTab:Toggle({
-    Title = "Inf Jump",
-    Desc = "Pula infinitas vezes no ar",
-    Value = false,
-    Callback = function(v) setInfJump(v) end,
-})
-
-local extrasSection = moveTab:Section({ Title = "Extras", Opened = false })
-
-moveTab:Toggle({
-    Title = "Noclip",
-    Desc = "Atravessa paredes",
-    Value = false,
-    Callback = function(v) setNoclip(v) end,
-})
-
-moveTab:Toggle({
-    Title = "Anti-AFK",
-    Value = false,
+    Title = "Anti-AFK", Value = false,
     Callback = function(v)
         Config.AntiAFK = v
         if v then
@@ -869,33 +799,21 @@ moveTab:Toggle({
                     end)
                 end
             end)
-            WindUI:Notify({ Title = "Anti-AFK", Content = "Ativado", Duration = 3, Icon = "shield" })
         end
     end,
 })
 
--- ═══ ABA ARMAS ═══
+-- ═══ ARMAS ═══
 local armTab = Window:Tab({ Title = "Armas", Icon = "sword" })
-
-local modSection = armTab:Section({ Title = "Modificações", Opened = true })
-
-armTab:Toggle({
-    Title = "No Recoil",
-    Value = false,
-    Callback = function(v) Config.NoRecoil = v end,
-})
-
-armTab:Toggle({
-    Title = "No Spread",
-    Value = false,
-    Callback = function(v) Config.NoSpread = v end,
-})
+armTab:Section({ Title = "Modificações", Opened = true })
+armTab:Toggle({ Title = "No Recoil", Value = false, Callback = function(v) Config.NoRecoil = v end })
+armTab:Toggle({ Title = "No Spread", Value = false, Callback = function(v) Config.NoSpread = v end })
 
 -- ═══════════════════════════════════════════════════════════════
 -- LOOP PRINCIPAL
 -- ═══════════════════════════════════════════════════════════════
 RunService.RenderStepped:Connect(function(dt)
-    -- FOV circle
+    -- FOV
     local showFov = Config.AimbotEnabled and Config.AimbotShowFOV
     if showFov then
         fovCircle.Visible = true
@@ -905,15 +823,8 @@ RunService.RenderStepped:Connect(function(dt)
         fovCircle.Visible = false
     end
 
-    -- ESP loop (sempre roda pra sincronizar quando desliga)
-    for _, player in ipairs(Players:GetPlayers()) do
-        if Config.ESPEnabled then
-            updateESPForPlayer(player)
-        else
-            -- Garante que limpa tudo quando desligar
-            clearESPForPlayer(player)
-        end
-    end
+    -- ESP — sincroniza TODOS a cada frame (garante estado correto)
+    sincronizarTodosESP()
 
     -- Aimbot
     if Config.AimbotEnabled then
@@ -945,7 +856,7 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 Players.PlayerRemoving:Connect(function(p)
-    clearESPForPlayer(p)
+    limparESP(p)
     if Config.LockedTarget and Config.LockedTarget.Parent == p.Character then
         Config.LockedTarget = nil
     end
