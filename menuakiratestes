@@ -1,7 +1,8 @@
 --[[
     SCRIPT: Akira Hub | Volleyball Legends
-    VERSÃO: v2 (Corrigido com base em diagnóstico real)
+    VERSÃO: v1
     DESENVOLVEDOR: akira007p
+    DESCRIÇÃO: Script profissional para Volleyball Legends (Haikyuu) com Auto Farm, Hitbox, Status, Auto Spin, ESP e mais.
 ]]
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -16,49 +17,51 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- ==========================================
--- CONFIG E SALVAMENTO
+-- CONFIGURAÇÕES E SALVAMENTO
 -- ==========================================
-local configFile = "AkiraHubVLConfig.json"
+local configFile = "AkiraHubVolleyballConfig.json"
+
 local config = {
-    spikePower = 1, diveSpeed = 1, blockPower = 1, bumpPower = 1,
-    servePower = 1, jumpPower = 1, speed = 1, setPower = 1, tiltPower = 1,
-    dashPower = 1, powerfulServe = false, autoRotate = false,
-    hitboxSize = 15, hitboxEnabled = false,
-    spikeHitbox = 10, bumpHitbox = 10, diveHitbox = 10, setHitbox = 10,
-    serveHitbox = 10, blockHitbox = 10, jumpsetHitbox = 10,
-    steelblockHitbox = 10, bumpserveHitbox = 10
+    spikePower = 1,
+    diveSpeed = 1,
+    blockPower = 1,
+    bumpPower = 1,
+    servePower = 1,
+    jumpPower = 1,
+    speed = 1,
+    setPower = 1,
+    tiltPower = 1,
+    powerfulServe = false,
+    autoRotate = false,
+    hitboxEnabled = false,
+    hitboxSize = 15,
+    autoSpin = false,
+    espEnabled = false
 }
 
 local function loadConfig()
-    if isfile and isfile(configFile) then
-        local ok, r = pcall(function() return HttpService:JSONDecode(readfile(configFile)) end)
-        if ok then for k, v in pairs(r) do config[k] = v end end
+    if isfile(configFile) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(configFile))
+        end)
+        if success then
+            for k, v in pairs(result) do config[k] = v end
+        end
     end
 end
-local function saveConfig()
-    if writefile then pcall(function() writefile(configFile, HttpService:JSONEncode(config)) end) end
-end
-loadConfig()
 
--- ==========================================
--- KNIT HELPERS
--- ==========================================
-local function getKnit()
-    return ReplicatedStorage.Packages._Index["sleitnick_knit@1.7.0"].knit
+local function saveConfig()
+    writefile(configFile, HttpService:JSONEncode(config))
 end
-local function callRF(service, remote, ...)
-    local ok, res = pcall(function()
-        return getKnit().Services[service].RF[remote]:InvokeServer(...)
-    end)
-    return ok and res or nil
-end
+
+loadConfig()
 
 -- ==========================================
 -- JANELA PRINCIPAL
 -- ==========================================
 local Window = Rayfield:CreateWindow({
-    Name = "Akira Hub | Volleyball Legends v2",
-    LoadingTitle = "Akira Hub v2",
+    Name = "Akira Hub | Volleyball Legends",
+    LoadingTitle = "Akira Hub",
     LoadingSubtitle = "por akira007p",
     ConfigurationSaving = { Enabled = false },
     Discord = { Enabled = true, Invite = "DP69yEHWz" },
@@ -66,11 +69,13 @@ local Window = Rayfield:CreateWindow({
 })
 
 -- ==========================================
--- ABA PRINCIPAL
+-- ABA PRINCIPAL (PERFIL DO JOGADOR)
 -- ==========================================
 local HomeTab = Window:CreateTab("Principal", 4483362458)
+
 HomeTab:CreateSection("Perfil do Jogador")
 
+-- Skin do jogador
 local skinFrame = Instance.new("Frame")
 skinFrame.Size = UDim2.new(0, 80, 0, 80)
 skinFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
@@ -84,41 +89,39 @@ skinImage.BackgroundTransparency = 1
 skinImage.Parent = skinFrame
 
 task.spawn(function()
-    local ok, thumb = pcall(function()
+    local success, thumb = pcall(function()
         return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
     end)
-    if ok then skinImage.Image = thumb end
+    if success then skinImage.Image = thumb end
 end)
 
 HomeTab:CreateLabel("Desenvolvedor: akira007p")
 HomeTab:CreateLabel("Usuário: " .. LocalPlayer.Name)
-HomeTab:CreateLabel("Executor: " .. (identifyexecutor and identifyexecutor() or "Desconhecido"))
-HomeTab:CreateLabel("Versão: v2")
+HomeTab:CreateLabel("Executor: " .. (identifyexecutor() or "Desconhecido"))
+HomeTab:CreateLabel("Versão: v1")
 HomeTab:CreateLabel("Discord: https://discord.gg/DP69yEHWz")
 
 HomeTab:CreateButton({
     Name = "Copiar Link do Discord",
     Callback = function()
-        if setclipboard then setclipboard("https://discord.gg/DP69yEHWz") end
+        setclipboard("https://discord.gg/DP69yEHWz")
         Rayfield:Notify({Title = "Copiado!", Content = "Link do Discord copiado.", Duration = 4, Image = 4483362458})
     end
 })
 
 -- ==========================================
--- AUTO FARM
+-- ABA AUTO FARM
 -- ==========================================
 local FarmTab = Window:CreateTab("Auto Farm", 4483362458)
+
 FarmTab:CreateSection("Configurações de Farm")
 
 local isRunning = false
 local enablejoin = false
 local escPressed = false
 
-local function getChar()
-    local char = LocalPlayer.Character
-    if not char then return nil, nil, nil end
-    return char, char:FindFirstChildOfClass("Humanoid"), char:FindFirstChild("HumanoidRootPart")
-end
+local humanoid = LocalPlayer.Character:WaitForChild("Humanoid")
+local humanoidRootPart = LocalPlayer.Character:WaitForChild("HumanoidRootPart")
 
 local function pressSpace()
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
@@ -132,17 +135,16 @@ local function pressClick()
 end
 
 local function getRandomTargetPart()
-    local ok, folder = pcall(function()
-        return Workspace.Map.BallNoCollide.Positions["2"]
-    end)
-    if not ok or not folder then return nil end
+    local positionsFolder = Workspace.Map.BallNoCollide.Positions["2"]
     local parts = {}
-    for _, p in ipairs(folder:GetChildren()) do
-        if p:IsA("BasePart") then table.insert(parts, p) end
+    for _, part in ipairs(positionsFolder:GetChildren()) do
+        if part:IsA("BasePart") then table.insert(parts, part) end
     end
     if #parts > 0 then return parts[math.random(1, #parts)] end
     return nil
 end
+
+local roundOverStats = LocalPlayer.PlayerGui.Interface.RoundOverStats
 
 local function pressEscTwice()
     task.wait(5)
@@ -154,50 +156,46 @@ local function pressEscTwice()
     task.wait(0.7)
 end
 
-task.spawn(function()
-    local ok = pcall(function()
-        local roundOverStats = LocalPlayer.PlayerGui.Interface.RoundOverStats
-        while true do
-            if roundOverStats and roundOverStats.Visible then
-                if not escPressed then
-                    pressEscTwice()
-                    escPressed = true
-                end
-            else
-                escPressed = false
+local function checkRoundOverStats()
+    while true do
+        if roundOverStats.Visible then
+            if not escPressed then
+                pressEscTwice()
+                escPressed = true
             end
-            task.wait(0.5)
+        else
+            escPressed = false
         end
-    end)
-end)
+        task.wait(0.5)
+    end
+end
 
--- FIX: procurar bola em qualquer lugar do workspace
+local ballPrefix = "CLIENT_BALL_"
 local function getBall()
-    for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and string.find(obj.Name, "CLIENT_BALL", 1, true) then
-            return obj:FindFirstChild("Sphere.001") or obj:FindFirstChild("Cube.001") or obj:FindFirstChildWhichIsA("BasePart")
+    for _, object in pairs(Workspace:GetChildren()) do
+        if object:IsA("Model") and object.Name:match(ballPrefix) then
+            return object:FindFirstChild("Sphere.001") or object:FindFirstChild("Cube.001")
         end
     end
     return nil
 end
 
+task.spawn(checkRoundOverStats)
+
 task.spawn(function()
     while task.wait(0.3) do
         if not isRunning then continue end
-        local char, humanoid, root = getChar()
-        if not char or not humanoid or not root then continue end
-
         local ballPart = getBall()
         if ballPart then
             humanoid:MoveTo(ballPart.Position)
-            local distance = (ballPart.Position - root.Position).Magnitude
+            local distance = (ballPart.Position - humanoidRootPart.Position).Magnitude
             if distance <= 15 then
                 local targetPart = getRandomTargetPart()
                 if targetPart then
-                    local lookVector = (targetPart.Position - root.Position).Unit
-                    root.CFrame = CFrame.new(root.Position, root.Position + lookVector)
+                    local lookVector = (targetPart.Position - humanoidRootPart.Position).Unit
+                    humanoidRootPart.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + lookVector)
                 end
-                if ballPart.Position.Y > root.Position.Y + 5 then
+                if ballPart.Position.Y > humanoidRootPart.Position.Y + 5 then
                     pressSpace()
                     pressClick()
                 end
@@ -206,42 +204,28 @@ task.spawn(function()
     end
 end)
 
--- FIX: Team Selection usa TeamHolder, não botões numerados
 local function teamSelection()
     if not enablejoin then return end
     task.wait(10)
-    pcall(function()
-        local tsGui = LocalPlayer.PlayerGui.Interface.TeamSelection
-        local gameGui = LocalPlayer.PlayerGui.Interface.Game
-        if not tsGui or not gameGui then return end
-        if not gameGui.Visible then tsGui.Visible = true end
-
-        while not gameGui.Visible and enablejoin do
-            -- Procurar todos os ImageButtons clicáveis dentro do TeamSelection
-            local clickables = {}
-            for _, obj in ipairs(tsGui:GetDescendants()) do
-                if obj:IsA("ImageButton") and obj.Visible and obj.Active then
-                    -- Filtra botões válidos (ignora Return, Options, etc)
-                    if obj.Name ~= "Return" and obj.Name ~= "Options" and obj.Name ~= "CloseBtn" and obj.Name ~= "SlotSelect" and obj.Name ~= "AdvancedMoves" then
-                        table.insert(clickables, obj)
-                    end
-                end
-            end
-
-            if #clickables > 0 then
-                local btn = clickables[math.random(1, #clickables)]
-                local pos = btn.AbsolutePosition + btn.AbsoluteSize / 2
-                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
-                VirtualInputManager:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
-            end
-            task.wait(math.random(5, 15) / 10)
+    local teamSelectionGui = LocalPlayer.PlayerGui.Interface.TeamSelection
+    local gameInterface = LocalPlayer.PlayerGui.Interface.Game
+    if not gameInterface.Visible then teamSelectionGui.Visible = true end
+    while not gameInterface.Visible and enablejoin do
+        local randomNum = math.random(1, 6)
+        local button = teamSelectionGui["2"][tostring(randomNum)]
+        if button and button:IsA("ImageButton") then
+            local absPos = button.AbsolutePosition
+            local absSize = button.AbsoluteSize
+            local clickPosition = absPos + (absSize / 2)
+            VirtualInputManager:SendMouseButtonEvent(clickPosition.X, clickPosition.Y, 0, true, game, 1)
+            VirtualInputManager:SendMouseButtonEvent(clickPosition.X, clickPosition.Y, 0, false, game, 1)
         end
-
-        if gameGui.Visible then tsGui.Visible = false end
-    end)
+        task.wait(math.random(5, 15) / 10)
+    end
+    if gameInterface.Visible then teamSelectionGui.Visible = false end
 end
 
-LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function(character)
     if enablejoin then teamSelection() end
 end)
 
@@ -268,14 +252,15 @@ FarmTab:CreateToggle({
 FarmTab:CreateButton({
     Name = "Quebrar Partida",
     Callback = function()
-        callRF("GameService", "Serve", nil, 0.95)
+        game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.GameService.RF.Serve:InvokeServer(nil, 0.95)
     end
 })
 
 FarmTab:CreateSection("Saque Poderoso")
+
 FarmTab:CreateToggle({
     Name = "Habilitar Saque Poderoso (Z)",
-    CurrentValue = config.powerfulServe,
+    CurrentValue = false,
     Flag = "PowerfulServe",
     Callback = function(Value)
         config.powerfulServe = Value
@@ -283,10 +268,10 @@ FarmTab:CreateToggle({
     end
 })
 
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if not gpe and input.KeyCode == Enum.KeyCode.Z then
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if not gameProcessedEvent and input.KeyCode == Enum.KeyCode.Z then
         if config.powerfulServe then
-            callRF("GameService", "Serve", Vector3.new(0, 0, 0), math.huge)
+            game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.GameService.RF.Serve:InvokeServer(Vector3.new(0, 0, 0), math.huge)
         end
     end
 end)
@@ -294,6 +279,15 @@ end)
 FarmTab:CreateSection("Diversos")
 
 local autoRotateConnection
+local function autorotateon()
+    autoRotateConnection = RunService.Heartbeat:Connect(function()
+        if humanoid.AutoRotate == false then humanoid.AutoRotate = true end
+    end)
+end
+local function autorotateoff()
+    if autoRotateConnection then autoRotateConnection:Disconnect(); autoRotateConnection = nil end
+end
+
 FarmTab:CreateToggle({
     Name = "Habilitar Rotação no Ar",
     CurrentValue = config.autoRotate,
@@ -301,112 +295,146 @@ FarmTab:CreateToggle({
     Callback = function(State)
         config.autoRotate = State
         saveConfig()
-        if State then
-            autoRotateConnection = RunService.Heartbeat:Connect(function()
-                local _, humanoid = getChar()
-                if humanoid and humanoid.AutoRotate == false then
-                    humanoid.AutoRotate = true
-                end
-            end)
-        else
-            if autoRotateConnection then
-                autoRotateConnection:Disconnect()
-                autoRotateConnection = nil
-            end
-        end
+        if State then autorotateon() else autorotateoff() end
     end
 })
 
 -- ==========================================
--- HITBOX DA BOLA
+-- ABA HITBOX (INTEGRADO DO SCRIPT FORNECIDO)
 -- ==========================================
-local HitboxTab = Window:CreateTab("Hitbox Bola", 4483362458)
+local HitboxTab = Window:CreateTab("Hitbox", 4483362458)
+
 HitboxTab:CreateSection("Hitbox da Bola")
 
 local BALL_NAME = "CLIENT_BALL"
 local HitboxEnabled = false
 local HitboxSize = 15
-local MIN_SIZE, MAX_SIZE = 6, 50
+local MIN_SIZE = 6
+local MAX_SIZE = 50
 local Hitboxes = {}
 local TrackedBalls = {}
+local TouchingParts = {}
 
-local function isBall(obj)
-    return obj:IsA("Model") and string.find(obj.Name, BALL_NAME, 1, true) ~= nil
+local function isBall(object)
+    return object:IsA("Model") and string.find(object.Name, BALL_NAME, 1, true) ~= nil
 end
 
-local function getBallPart(m)
-    return m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart", true)
+local function getBallPart(ballModel)
+    if ballModel.PrimaryPart then return ballModel.PrimaryPart end
+    return ballModel:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function removeHitbox(m)
-    if Hitboxes[m] and Hitboxes[m].Parent then Hitboxes[m]:Destroy() end
-    Hitboxes[m] = nil
+local function removeHitbox(ballModel)
+    local hitbox = Hitboxes[ballModel]
+    if hitbox and hitbox.Parent then hitbox:Destroy() end
+    Hitboxes[ballModel] = nil
+    TouchingParts[ballModel] = nil
 end
 
-local function createHitbox(m)
-    if not HitboxEnabled or not m or not m.Parent then return end
-    local bp = getBallPart(m)
-    if not bp then return end
-    if Hitboxes[m] and Hitboxes[m].Parent then
-        Hitboxes[m].Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+local function createHitbox(ballModel)
+    if not HitboxEnabled then return end
+    if not ballModel or not ballModel.Parent then return end
+    local ballPart = getBallPart(ballModel)
+    if not ballPart then return end
+    local existing = Hitboxes[ballModel]
+    if existing and existing.Parent then
+        existing.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
         return
     end
-    local h = Instance.new("Part")
-    h.Name = "AkiraBallHitbox"
-    h.Shape = Enum.PartType.Ball
-    h.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-    h.CFrame = bp.CFrame
-    h.Color = Color3.fromRGB(50, 255, 100)
-    h.Material = Enum.Material.ForceField
-    h.Transparency = 0.65
-    h.CanCollide = false
-    h.CanTouch = true
-    h.CanQuery = true
-    h.CastShadow = false
-    h.Massless = true
-    h.Anchored = false
-    h.Parent = m
-    local w = Instance.new("WeldConstraint")
-    w.Part0 = bp
-    w.Part1 = h
-    w.Parent = h
-    Hitboxes[m] = h
+    local hitbox = Instance.new("Part")
+    hitbox.Name = "Hitbox"
+    hitbox.Shape = Enum.PartType.Ball
+    hitbox.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+    hitbox.CFrame = ballPart.CFrame
+    hitbox.Color = Color3.fromRGB(50, 255, 100)
+    hitbox.Material = Enum.Material.ForceField
+    hitbox.Transparency = 0.65
+    hitbox.CanCollide = false
+    hitbox.CanTouch = true
+    hitbox.CanQuery = true
+    hitbox.CastShadow = false
+    hitbox.Massless = true
+    hitbox.Anchored = false
+    hitbox.Parent = ballModel
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = ballPart
+    weld.Part1 = hitbox
+    weld.Parent = hitbox
+    Hitboxes[ballModel] = hitbox
+    TouchingParts[ballModel] = {}
+    hitbox.Touched:Connect(function(otherPart)
+        if HitboxEnabled then end
+    end)
 end
 
-local function trackBall(m)
-    if TrackedBalls[m] then return end
-    TrackedBalls[m] = true
-    if HitboxEnabled then createHitbox(m) end
-    m.AncestryChanged:Connect(function(_, p)
-        if not p then
-            removeHitbox(m)
-            TrackedBalls[m] = nil
+local function trackBall(ballModel)
+    if TrackedBalls[ballModel] then return end
+    TrackedBalls[ballModel] = true
+    if HitboxEnabled then createHitbox(ballModel) end
+    ballModel.AncestryChanged:Connect(function(_, parent)
+        if parent == nil then
+            removeHitbox(ballModel)
+            TrackedBalls[ballModel] = nil
         end
     end)
 end
 
 local function scanForBalls()
-    for _, o in ipairs(Workspace:GetDescendants()) do
-        if isBall(o) then trackBall(o) end
+    for _, object in ipairs(Workspace:GetDescendants()) do
+        if isBall(object) then trackBall(object) end
     end
 end
 
-HitboxTab:CreateToggle({
-    Name = "Ativar Hitbox da Bola",
-    CurrentValue = false,
-    Flag = "HitboxToggle",
-    Callback = function(v)
-        HitboxEnabled = v
-        if v then
-            for m, _ in pairs(TrackedBalls) do
-                if m.Parent then createHitbox(m) end
-            end
-            scanForBalls()
+local function enableHitboxes()
+    HitboxEnabled = true
+    for ballModel in pairs(TrackedBalls) do
+        if ballModel.Parent then createHitbox(ballModel) end
+    end
+end
+
+local function disableHitboxes()
+    HitboxEnabled = false
+    for ballModel in pairs(Hitboxes) do removeHitbox(ballModel) end
+    table.clear(Hitboxes)
+    table.clear(TouchingParts)
+end
+
+local function setHitboxSize(size)
+    HitboxSize = math.clamp(math.round(size), MIN_SIZE, MAX_SIZE)
+    for ballModel, hitbox in pairs(Hitboxes) do
+        if ballModel.Parent and hitbox.Parent then
+            hitbox.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
         else
-            for m, _ in pairs(Hitboxes) do removeHitbox(m) end
-            table.clear(Hitboxes)
+            Hitboxes[ballModel] = nil
         end
     end
+end
+
+RunService.Heartbeat:Connect(function()
+    if not HitboxEnabled then return end
+    for ballModel, hitbox in pairs(Hitboxes) do
+        if not ballModel.Parent or not hitbox.Parent then
+            removeHitbox(ballModel)
+            continue
+        end
+        local overlapParams = OverlapParams.new()
+        overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+        overlapParams.FilterDescendantsInstances = { ballModel }
+        local currentParts = {}
+        for _, part in ipairs(Workspace:GetPartsInPart(hitbox, overlapParams)) do
+            currentParts[part] = true
+        end
+        TouchingParts[ballModel] = currentParts
+    end
+end)
+
+HitboxTab:CreateToggle({
+    Name = "Hitbox",
+    CurrentValue = false,
+    Flag = "HitboxToggle",
+    Callback = function(Value)
+        if Value then enableHitboxes() else disableHitboxes() end
+    end,
 })
 
 HitboxTab:CreateSlider({
@@ -415,318 +443,189 @@ HitboxTab:CreateSlider({
     Increment = 1,
     CurrentValue = HitboxSize,
     Flag = "HitboxSize",
-    Callback = function(v)
-        HitboxSize = math.clamp(math.round(v), MIN_SIZE, MAX_SIZE)
-        for m, h in pairs(Hitboxes) do
-            if m.Parent and h.Parent then
-                h.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-            end
-        end
-    end
+    Callback = function(Value)
+        setHitboxSize(Value)
+    end,
 })
 
-Workspace.DescendantAdded:Connect(function(o)
-    if isBall(o) then trackBall(o) end
+Workspace.DescendantAdded:Connect(function(object)
+    if isBall(object) then trackBall(object) end
 end)
+
 scanForBalls()
 
 -- ==========================================
--- HITBOXES DOS MOVIMENTOS (CORRIGIDO - 9 hitboxes)
--- ==========================================
-local HitboxMov = Window:CreateTab("Hitbox Movimentos", 4483362458)
-HitboxMov:CreateSection("Tamanho das Hitboxes de Movimento")
-
-local hitboxList = {
-    {name = "Cortada (Spike)", folder = "Spike", key = "spikeHitbox"},
-    {name = "Manchete (Bump)", folder = "Bump", key = "bumpHitbox"},
-    {name = "Mergulho (Dive)", folder = "Dive", key = "diveHitbox"},
-    {name = "Levantamento (Set)", folder = "Set", key = "setHitbox"},
-    {name = "Saque (Serve)", folder = "Serve", key = "serveHitbox"},
-    {name = "Bloqueio (Block)", folder = "Block", key = "blockHitbox"},
-    {name = "Jump Set", folder = "JumpSet", key = "jumpsetHitbox"},
-    {name = "Bloqueio de Aço (SteelBlock)", folder = "SteelBlock", key = "steelblockHitbox"},
-    {name = "Manchete de Saque (BumpServe)", folder = "BumpServe", key = "bumpserveHitbox"},
-}
-
-for _, hb in ipairs(hitboxList) do
-    HitboxMov:CreateSlider({
-        Name = hb.name,
-        Range = {1, 100},
-        Increment = 0.1,
-        CurrentValue = config[hb.key] or 10,
-        Flag = "Hitbox_" .. hb.folder,
-        Callback = function(value)
-            pcall(function()
-                local assets = ReplicatedStorage:FindFirstChild("Assets")
-                if not assets then return end
-                local hitboxes = assets:FindFirstChild("Hitboxes")
-                if not hitboxes then return end
-                local folder = hitboxes:FindFirstChild(hb.folder)
-                if not folder then return end
-                local part = folder:FindFirstChild("Part")
-                if part and part:IsA("BasePart") then
-                    part.Size = Vector3.new(value, value, value)
-                    config[hb.key] = value
-                    saveConfig()
-                end
-            end)
-        end
-    })
-end
-
--- ==========================================
--- STATUS (ATRIBUTOS CORRIGIDOS!)
+-- ABA STATUS (ALTERADOR DE STATUS)
 -- ==========================================
 local StatusTab = Window:CreateTab("Status", 4483362458)
-StatusTab:CreateSection("Alterador de Status (Multiplier_*)")
 
--- FIX: Todos os atributos agora usam Multiplier_XXX
-StatusTab:CreateSlider({
-    Name = "Força de Cortada",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.spikePower,
-    Flag = "SpikePower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_SpikePower", v); config.spikePower = v; saveConfig() end
-})
+StatusTab:CreateSection("Alterador de Status")
 
 StatusTab:CreateSlider({
     Name = "Velocidade de Mergulho",
     Range = {0, 5}, Increment = 0.1, CurrentValue = config.diveSpeed,
     Flag = "DiveSpeed",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_DiveSpeed", v); config.diveSpeed = v; saveConfig() end
+    Callback = function(value) LocalPlayer:SetAttribute("GameDiveSpeedMultiplier", value); config.diveSpeed = value; saveConfig() end
 })
 
 StatusTab:CreateSlider({
-    Name = "Força de Bloqueio",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.blockPower,
-    Flag = "BlockPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_BlockPower", v); config.blockPower = v; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Manchete",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.bumpPower,
-    Flag = "BumpPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_BumpPower", v); config.bumpPower = v; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Saque",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.servePower,
-    Flag = "ServePower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_ServePower", v); config.servePower = v; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Pulo",
-    Range = {0, 5}, Increment = 0.1, CurrentValue = config.jumpPower,
-    Flag = "JumpPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_JumpPower", v); config.jumpPower = v; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Velocidade",
-    Range = {0, 5}, Increment = 0.1, CurrentValue = config.speed,
-    Flag = "Speed",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_Speed", v); config.speed = v; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Levantamento",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.setPower,
-    Flag = "SetPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_SetPower", v); config.setPower = v; saveConfig() end
+    Name = "Força de Cortada",
+    Range = {0, 500}, Increment = 0.1, CurrentValue = config.spikePower,
+    Flag = "SpikePower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameSpikePowerMultiplier", value); config.spikePower = value; saveConfig() end
 })
 
 StatusTab:CreateSlider({
     Name = "Força de Inclinação",
     Range = {0, 500}, Increment = 0.1, CurrentValue = config.tiltPower,
     Flag = "TiltPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_TiltPower", v); config.tiltPower = v; saveConfig() end
+    Callback = function(value) LocalPlayer:SetAttribute("GameTiltPowerMultiplier", value); config.tiltPower = value; saveConfig() end
 })
 
 StatusTab:CreateSlider({
-    Name = "Força de Dash",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.dashPower,
-    Flag = "DashPower",
-    Callback = function(v) LocalPlayer:SetAttribute("Multiplier_DashPower", v); config.dashPower = v; saveConfig() end
+    Name = "Velocidade",
+    Range = {0, 1.5}, Increment = 0.1, CurrentValue = config.speed,
+    Flag = "Speed",
+    Callback = function(value) LocalPlayer:SetAttribute("GameSpeedMultiplier", value); config.speed = value; saveConfig() end
 })
 
-StatusTab:CreateButton({
-    Name = "Resetar Todos os Atributos",
-    Callback = function()
-        for _, attr in ipairs({"Multiplier_SpikePower", "Multiplier_DiveSpeed", "Multiplier_BlockPower", "Multiplier_BumpPower", "Multiplier_ServePower", "Multiplier_JumpPower", "Multiplier_Speed", "Multiplier_SetPower", "Multiplier_TiltPower", "Multiplier_DashPower"}) do
-            LocalPlayer:SetAttribute(attr, 1)
-        end
-        Rayfield:Notify({Title = "Reset", Content = "Todos os atributos resetados para 1.", Duration = 4, Image = 4483362458})
-    end
+StatusTab:CreateSlider({
+    Name = "Força de Levantamento",
+    Range = {0, 500}, Increment = 0.1, CurrentValue = config.setPower,
+    Flag = "SetPower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameSetPowerMultiplier", value); config.setPower = value; saveConfig() end
+})
+
+StatusTab:CreateSlider({
+    Name = "Força de Saque",
+    Range = {0, 500}, Increment = 0.1, CurrentValue = config.servePower,
+    Flag = "ServePower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameServePowerMultiplier", value); config.servePower = value; saveConfig() end
+})
+
+StatusTab:CreateSlider({
+    Name = "Força de Pulo",
+    Range = {0, 5}, Increment = 0.1, CurrentValue = config.jumpPower,
+    Flag = "JumpPower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameJumpPowerMultiplier", value); config.jumpPower = value; saveConfig() end
+})
+
+StatusTab:CreateSlider({
+    Name = "Força de Manchete",
+    Range = {0, 500}, Increment = 0.1, CurrentValue = config.bumpPower,
+    Flag = "BumpPower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameBumpPowerMultiplier", value); config.bumpPower = value; saveConfig() end
+})
+
+StatusTab:CreateSlider({
+    Name = "Força de Bloqueio",
+    Range = {0, 500}, Increment = 0.1, CurrentValue = config.blockPower,
+    Flag = "BlockPower",
+    Callback = function(value) LocalPlayer:SetAttribute("GameBlockPowerMultiplier", value); config.blockPower = value; saveConfig() end
 })
 
 -- ==========================================
--- AUTO SPIN (CORRIGIDO - StyleService)
+-- ABA AUTO SPIN (GIRO AUTOMÁTICO)
 -- ==========================================
 local SpinTab = Window:CreateTab("Auto Spin", 4483362458)
+
 SpinTab:CreateSection("Giro Automático")
 
 local autoSpin = false
-local desiredStyles = {"Hinata"}
+local desiredStyles = {}
 
-local function getCurrentStyle()
-    local ok, style = pcall(function()
-        return LocalPlayer.PlayerGui.Interface.Lobby.Styles.TopPanel.DisplayName.Text
-    end)
-    return ok and style or nil
-end
+SpinTab:CreateToggle({
+    Name = "Auto Spin",
+    CurrentValue = false,
+    Flag = "AutoSpin",
+    Callback = function(Value)
+        autoSpin = Value
+        if autoSpin then startAutoSpin() end
+    end
+})
 
-local function startAutoSpin()
+SpinTab:CreateDropdown({
+    Name = "Selecionar Estilo Desejado",
+    Options = {"Oikawa", "Bokuto", "Kageyama", "Sawamura", "Ushijima", "Kozume", "Kuroo", "Yamamoto", "Azumane", "Yaku", "Hinata"},
+    CurrentOption = {"Hinata"},
+    MultipleOptions = true,
+    Flag = "DesiredStyles",
+    Callback = function(Option)
+        desiredStyles = Option
+    end
+})
+
+function startAutoSpin()
     coroutine.wrap(function()
         while autoSpin do
-            local currentStyle = getCurrentStyle()
-            if currentStyle and table.find(desiredStyles, currentStyle) then
+            local currentStyle = LocalPlayer.PlayerGui.Interface.Lobby.Styles.TopPanel.DisplayName.Text
+            if table.find(desiredStyles, currentStyle) then
                 autoSpin = false
-                Rayfield:Notify({Title = "Estilo Obtido!", Content = "Você conseguiu: " .. currentStyle, Duration = 5, Image = 4483362458})
+                Rayfield:Notify({Title = "Estilo Obtido!", Content = "Você conseguiu: " .. currentStyle, Duration = 4, Image = 4483362458})
                 break
             else
-                -- FIX: StyleService (não StylesService)
-                callRF("StyleService", "Roll", false)
+                game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.StylesService.RF.Roll:InvokeServer(false)
                 task.wait(0.5)
             end
         end
     end)()
 end
 
-SpinTab:CreateToggle({
-    Name = "Auto Spin",
-    CurrentValue = false,
-    Flag = "AutoSpin",
-    Callback = function(v)
-        autoSpin = v
-        if autoSpin then startAutoSpin() end
-    end
-})
-
-SpinTab:CreateDropdown({
-    Name = "Selecionar Estilos Desejados",
-    Options = {"Oikawa", "Bokuto", "Kageyama", "Sawamura", "Ushijima", "Kozume", "Kuroo", "Yamamoto", "Azumane", "Yaku", "Hinata", "Shoyo"},
-    CurrentOption = {"Hinata"},
-    MultipleOptions = true,
-    Flag = "DesiredStyles",
-    Callback = function(opts)
-        desiredStyles = opts
-    end
-})
-
 -- ==========================================
--- EXTRAS (NOVOS - DESCOBERTOS NO DIAGNÓSTICO)
--- ==========================================
-local ExtrasTab = Window:CreateTab("Extras", 4483362458)
-ExtrasTab:CreateSection("Códigos")
-
-local codeBox = ExtrasTab:CreateInput({
-    Name = "Código para Resgatar",
-    PlaceholderText = "Digite o código...",
-    RemoveTextAfterFocusLost = false,
-    Flag = "CodeInput",
-    Callback = function(text) end
-})
-
-ExtrasTab:CreateButton({
-    Name = "Resgatar Código",
-    Callback = function()
-        local txt = codeBox and codeBox.Text or ""
-        if txt ~= "" then
-            callRF("CodeService", "Redeem", txt)
-            Rayfield:Notify({Title = "Código Enviado", Content = "Tentando resgatar: " .. txt, Duration = 4, Image = 4483362458})
-        end
-    end
-})
-
-ExtrasTab:CreateSection("Recompensas")
-
-ExtrasTab:CreateButton({
-    Name = "Resgatar Todas as Quests",
-    Callback = function()
-        callRF("QuestService", "ClaimAll")
-        Rayfield:Notify({Title = "Quests", Content = "Tentando resgatar todas as quests.", Duration = 4, Image = 4483362458})
-    end
-})
-
-ExtrasTab:CreateButton({
-    Name = "Resgatar Daily Reward",
-    Callback = function()
-        callRF("GameService", "AwardDailyReward")
-        Rayfield:Notify({Title = "Daily Reward", Content = "Tentando resgatar recompensa diária.", Duration = 4, Image = 4483362458})
-    end
-})
-
-ExtrasTab:CreateSection("Teleportes")
-
-ExtrasTab:CreateButton({
-    Name = "Voltar para o Lobby",
-    Callback = function()
-        callRF("GameService", "ReturnToLobby")
-    end
-})
-
-ExtrasTab:CreateButton({
-    Name = "Entrar em Treinamento",
-    Callback = function()
-        callRF("GameService", "RequestTrainingJoin")
-    end
-})
-
--- ==========================================
--- VISUAL (ESP)
+-- ABA VISUAL (ESP / BALL PREDICTOR)
 -- ==========================================
 local VisualTab = Window:CreateTab("Visual", 4483362458)
+
 VisualTab:CreateSection("ESP da Bola")
 
 local espEnabled = false
 local ballESP = {}
 
-local function createESP(m)
-    if not espEnabled or not m.Parent then return end
-    if ballESP[m] then return end
-    local hl = Instance.new("Highlight")
-    hl.Name = "AkiraBallESP"
-    hl.Adornee = m
-    hl.FillColor = Color3.fromRGB(0, 255, 100)
-    hl.FillTransparency = 0.5
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.OutlineTransparency = 0
-    hl.Parent = m
-    ballESP[m] = hl
+local function createESP(ballModel)
+    if not espEnabled then return end
+    local part = getBallPart(ballModel)
+    if not part then return end
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "BallESP"
+    highlight.Adornee = ballModel
+    highlight.FillColor = Color3.fromRGB(0, 255, 100)
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.OutlineTransparency = 0
+    highlight.Parent = ballModel
+    ballESP[ballModel] = highlight
 end
 
-local function removeESP(m)
-    if ballESP[m] then ballESP[m]:Destroy(); ballESP[m] = nil end
+local function removeESP(ballModel)
+    if ballESP[ballModel] then ballESP[ballModel]:Destroy(); ballESP[ballModel] = nil end
 end
 
 VisualTab:CreateToggle({
     Name = "ESP da Bola",
     CurrentValue = false,
     Flag = "BallESP",
-    Callback = function(v)
-        espEnabled = v
-        if v then
-            for _, o in ipairs(Workspace:GetDescendants()) do
-                if isBall(o) then createESP(o) end
+    Callback = function(Value)
+        espEnabled = Value
+        if espEnabled then
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if isBall(obj) then createESP(obj) end
             end
         else
-            for m, _ in pairs(ballESP) do removeESP(m) end
+            for ballModel, _ in pairs(ballESP) do removeESP(ballModel) end
         end
     end
 })
 
-Workspace.DescendantAdded:Connect(function(o)
-    if isBall(o) and espEnabled then createESP(o) end
+Workspace.DescendantAdded:Connect(function(obj)
+    if isBall(obj) and espEnabled then createESP(obj) end
 end)
 
 -- ==========================================
--- FIM
+-- FIM DO SCRIPT
 -- ==========================================
 Rayfield:Notify({
-    Title = "Akira Hub v2 Carregado!",
-    Content = "Todas as funções corrigidas e prontas.",
+    Title = "Akira Hub Carregado!",
+    Content = "Todas as funções estão prontas para uso.",
     Duration = 5,
     Image = 4483362458
 })
