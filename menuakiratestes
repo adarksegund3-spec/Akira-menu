@@ -1,631 +1,1034 @@
 --[[
     SCRIPT: Akira Hub | Volleyball Legends
-    VERSÃO: v1
+    VERSÃO: v2.2 — Ultra Safe Edition
     DESENVOLVEDOR: akira007p
-    DESCRIÇÃO: Script profissional para Volleyball Legends (Haikyuu) com Auto Farm, Hitbox, Status, Auto Spin, ESP e mais.
+    
+    ✅ SÓ CONTÉM FUNÇÕES SEGURAS:
+    - Multipliers (atributos locais)
+    - Auto Farm (movimento do jogador)
+    - Anti-AFK (simula movimento real)
+    - Hitbox (client-side)
+    - ESP (client-side)
+    - Status (leitura apenas)
+    
+    ❌ REMOVIDO TUDO QUE PODIA DAR BAN:
+    - Invest Mastery / Ball Launcher / Vote Map
+    - Roll Style / Roll Ability
+    - Claim Quest / Daily / Level
+    - Crate Open
 ]]
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
+-- ============================================
+-- 1. SERVIÇOS
+-- ============================================
+local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
 local HttpService = game:GetService("HttpService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MarketplaceService = game:GetService("MarketplaceService")
+local TweenService = game:GetService("TweenService")
 
--- ==========================================
--- CONFIGURAÇÕES E SALVAMENTO
--- ==========================================
-local configFile = "AkiraHubVolleyballConfig.json"
+local LocalPlayer = Players.LocalPlayer
+local RAW_LOGO_ID = 82075192801584
+local RAW_BACKGROUND_ID = 130570516904370
 
+if CoreGui:FindFirstChild("AkiraHubCustomUI") then
+    CoreGui.AkiraHubCustomUI:Destroy()
+end
+
+-- ============================================
+-- 2. CONFIG
+-- ============================================
+local CONFIG_FILE = "AkiraHubVolleyballConfig.json"
 local config = {
-    spikePower = 1,
-    diveSpeed = 1,
-    blockPower = 1,
-    bumpPower = 1,
-    servePower = 1,
-    jumpPower = 1,
-    speed = 1,
-    setPower = 1,
-    tiltPower = 1,
-    powerfulServe = false,
-    autoRotate = false,
-    hitboxEnabled = false,
-    hitboxSize = 15,
-    autoSpin = false,
-    espEnabled = false
+    spikePower = 1, diveSpeed = 1, blockPower = 1, bumpPower = 1,
+    servePower = 1, jumpPower = 1, speed = 1, setPower = 1,
+    tiltPower = 1, dashPower = 1,
+    hitboxEnabled = false, hitboxSize = 15,
+    espEnabled = false, menuTransparent = false,
+    autoFarmNormal = false, autoInteract = false,
+    autoJump = false, antiAFK = false, autoFarmFull = false,
+    interactDistance = 12,
 }
 
 local function loadConfig()
-    if isfile(configFile) then
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(readfile(configFile))
+    if isfile and isfile(CONFIG_FILE) then
+        local ok, result = pcall(function()
+            return HttpService:JSONDecode(readfile(CONFIG_FILE))
         end)
-        if success then
+        if ok and type(result) == "table" then
             for k, v in pairs(result) do config[k] = v end
         end
     end
 end
-
 local function saveConfig()
-    writefile(configFile, HttpService:JSONEncode(config))
+    if writefile then
+        pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(config)) end)
+    end
 end
-
 loadConfig()
 
--- ==========================================
--- JANELA PRINCIPAL
--- ==========================================
-local Window = Rayfield:CreateWindow({
-    Name = "Akira Hub | Volleyball Legends",
-    LoadingTitle = "Akira Hub",
-    LoadingSubtitle = "por akira007p",
-    ConfigurationSaving = { Enabled = false },
-    Discord = { Enabled = true, Invite = "DP69yEHWz" },
-    KeySystem = false
-})
+-- ============================================
+-- 3. UTILITÁRIOS
+-- ============================================
+local U = {}
+local remoteCache = {}
 
--- ==========================================
--- ABA PRINCIPAL (PERFIL DO JOGADOR)
--- ==========================================
-local HomeTab = Window:CreateTab("Principal", 4483362458)
+function U.getKnitRoot()
+    local pkgs = ReplicatedStorage:FindFirstChild("Packages")
+    if not pkgs then return nil end
+    local idx = pkgs:FindFirstChild("_Index")
+    if not idx then return nil end
+    for _, f in ipairs(idx:GetChildren()) do
+        if f.Name:find("sleitnick_knit") then return f end
+    end
+    return nil
+end
 
-HomeTab:CreateSection("Perfil do Jogador")
+function U.getRemote(serviceName, remoteType, remoteName)
+    local key = serviceName .. "/" .. remoteType .. "/" .. remoteName
+    local cached = remoteCache[key]
+    if cached and cached.Parent then return cached end
+    local root = U.getKnitRoot()
+    if not root then return nil end
+    local knit = root:FindFirstChild("knit")
+    local svcs = knit and knit:FindFirstChild("Services")
+    local svc = svcs and svcs:FindFirstChild(serviceName)
+    if not svc then return nil end
+    local cont = svc:FindFirstChild(remoteType)
+    if not cont then return nil end
+    local r = cont:FindFirstChild(remoteName)
+    if r then remoteCache[key] = r end
+    return r
+end
 
--- Skin do jogador
-local skinFrame = Instance.new("Frame")
-skinFrame.Size = UDim2.new(0, 80, 0, 80)
-skinFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-skinFrame.BorderSizePixel = 0
-skinFrame.Parent = HomeTab.Container
+function U.invoke(serviceName, remoteType, remoteName, ...)
+    local r = U.getRemote(serviceName, remoteType, remoteName)
+    if not r then return false, "Remote ausente" end
+    local args = {...}
+    local ok, res = pcall(function() return r:InvokeServer(table.unpack(args)) end)
+    return ok, res
+end
 
-local skinImage = Instance.new("ImageLabel")
-skinImage.Size = UDim2.new(1, -4, 1, -4)
-skinImage.Position = UDim2.new(0, 2, 0, 2)
-skinImage.BackgroundTransparency = 1
-skinImage.Parent = skinFrame
+function U.notify(title, message, duration)
+    duration = duration or 4
+    local parent = CoreGui:FindFirstChild("AkiraHubCustomUI")
+    if not parent then return end
+    local N = Instance.new("Frame")
+    N.Size = UDim2.new(0, 260, 0, 65)
+    N.Position = UDim2.new(1, 270, 0.82, 0)
+    N.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+    N.BackgroundTransparency = 0.1
+    N.ZIndex = 100
+    N.Parent = parent
+
+    Instance.new("UICorner", N).CornerRadius = UDim.new(0, 8)
+    local st = Instance.new("UIStroke", N)
+    st.Color = Color3.fromRGB(80, 140, 255)
+    st.Thickness = 1.5
+
+    local ic = Instance.new("ImageLabel", N)
+    ic.Size = UDim2.new(0, 36, 0, 36)
+    ic.Position = UDim2.new(0, 10, 0.5, -18)
+    local logo = parent:FindFirstChild("LogoBtn")
+    ic.Image = logo and logo.Image or ""
+    ic.BackgroundTransparency = 1
+    ic.ZIndex = 101
+    Instance.new("UICorner", ic).CornerRadius = UDim.new(1, 0)
+
+    local t = Instance.new("TextLabel", N)
+    t.Text = title
+    t.Size = UDim2.new(1, -60, 0, 20)
+    t.Position = UDim2.new(0, 52, 0, 10)
+    t.Font = Enum.Font.GothamBold
+    t.TextColor3 = Color3.fromRGB(255, 255, 255)
+    t.TextSize = 12
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.BackgroundTransparency = 1
+    t.ZIndex = 101
+
+    local m = Instance.new("TextLabel", N)
+    m.Text = message
+    m.Size = UDim2.new(1, -60, 0, 25)
+    m.Position = UDim2.new(0, 52, 0, 28)
+    m.Font = Enum.Font.Gotham
+    m.TextColor3 = Color3.fromRGB(200, 200, 210)
+    m.TextSize = 10
+    m.TextWrapped = true
+    m.TextXAlignment = Enum.TextXAlignment.Left
+    m.BackgroundTransparency = 1
+    m.ZIndex = 101
+
+    N:TweenPosition(UDim2.new(1, -270, 0.82, 0), Enum.EasingDirection.Out, Enum.EasingStyle.Quart, 0.5, true)
+    task.delay(duration, function()
+        if N and N.Parent then
+            N:TweenPosition(UDim2.new(1, 270, 0.82, 0), Enum.EasingDirection.In, Enum.EasingStyle.Quart, 0.4, true, function()
+                N:Destroy()
+            end)
+        end
+    end)
+end
+
+-- ============================================
+-- 4. GERENCIADOR DE CONEXÕES
+-- ============================================
+local CM = { connections = {}, loops = {} }
+
+function CM.track(conn)
+    table.insert(CM.connections, conn)
+    return conn
+end
+
+function CM.startLoop(name, fn)
+    CM.stopLoop(name)
+    CM.loops[name] = task.spawn(fn)
+end
+
+function CM.stopLoop(name)
+    if CM.loops[name] then
+        pcall(function() task.cancel(CM.loops[name]) end)
+        CM.loops[name] = nil
+    end
+end
+
+-- ============================================
+-- 5. MÓDULOS
+-- ============================================
+
+-- ============ BALL ============
+local Ball = {}
+
+function Ball.find()
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj.Name:find("CLIENT_BALL") then
+            local part = obj:FindFirstChild("Cube.001")
+                or obj:FindFirstChild("Sphere.001")
+                or obj.PrimaryPart
+                or obj:FindFirstChildWhichIsA("BasePart", true)
+            if part then return part, obj end
+        end
+    end
+    return nil, nil
+end
+
+function Ball.isBallModel(obj)
+    return obj:IsA("Model") and string.find(obj.Name, "CLIENT_BALL", 1, true) ~= nil
+end
+
+-- ============ PLAYER ============
+local P = {}
+
+function P.char() return LocalPlayer.Character end
+function P.hum() local c = P.char(); return c and c:FindFirstChildOfClass("Humanoid") end
+function P.root() local c = P.char(); return c and c:FindFirstChild("HumanoidRootPart") end
+function P.alive() local h = P.hum(); return h and h.Health > 0 end
+function P.team() return LocalPlayer.Team and LocalPlayer.Team.Name or "Nenhum" end
+function P.tool() local c = P.char(); return c and c:FindFirstChildOfClass("Tool") end
+
+function P.nearestPlayer(maxDist)
+    local myRoot = P.root()
+    if not myRoot then return nil, nil end
+    local bestD, bestP = maxDist or math.huge, nil
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LocalPlayer and pl.Character then
+            local r = pl.Character:FindFirstChild("HumanoidRootPart")
+            if r then
+                local d = (r.Position - myRoot.Position).Magnitude
+                if d < bestD then bestD, bestP = d, pl end
+            end
+        end
+    end
+    return bestP, bestD
+end
+
+function P.countAlive()
+    local n = 0
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl.Character then
+            local h = pl.Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 then n = n + 1 end
+        end
+    end
+    return n
+end
+
+-- ============ MULTIPLIERS ============
+local Mult = {}
+Mult.map = {
+    jumpPower = "Multiplier_JumpPower",
+    spikePower = "Multiplier_SpikePower",
+    blockPower = "Multiplier_BlockPower",
+    bumpPower = "Multiplier_BumpPower",
+    servePower = "Multiplier_ServePower",
+    setPower = "Multiplier_SetPower",
+    speed = "Multiplier_Speed",
+    diveSpeed = "Multiplier_DiveSpeed",
+    tiltPower = "Multiplier_TiltPower",
+    dashPower = "Multiplier_DashPower",
+}
+
+function Mult.applyAll()
+    for key, attr in pairs(Mult.map) do
+        if config[key] then
+            pcall(function() LocalPlayer:SetAttribute(attr, config[key]) end)
+        end
+    end
+end
+
+function Mult.set(key, value)
+    config[key] = value
+    local attr = Mult.map[key]
+    if attr then pcall(function() LocalPlayer:SetAttribute(attr, value) end) end
+    saveConfig()
+end
+
+Mult.applyAll()
+CM.track(LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    Mult.applyAll()
+end))
+
+-- ============ GAME (só o essencial, tudo seguro) ============
+local Game = {}
+
+-- Anti-AFK: simula movimento real via remote do próprio jogo
+function Game.registerMoved()
+    return U.invoke("GameService", "RF", "RegisterMoved")
+end
+
+-- Farm loop: entra/sai (comportamento que o player faria)
+function Game.joinMatch() return U.invoke("GameService", "RF", "RequestJoin") end
+function Game.returnLobby() return U.invoke("GameService", "RF", "ReturnToLobby") end
+
+-- ============================================
+-- 6. UI FRAMEWORK
+-- ============================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AkiraHubCustomUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+local LogoBtn = Instance.new("ImageButton")
+LogoBtn.Name = "LogoBtn"
+LogoBtn.Size = UDim2.new(0, 50, 0, 50)
+LogoBtn.Position = UDim2.new(0.85, 0, 0.15, 0)
+LogoBtn.Image = "rbxassetid://" .. RAW_LOGO_ID
+LogoBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+LogoBtn.BorderSizePixel = 0
+LogoBtn.Parent = ScreenGui
+Instance.new("UICorner", LogoBtn).CornerRadius = UDim.new(1, 0)
+local LogoStroke = Instance.new("UIStroke", LogoBtn)
+LogoStroke.Color = Color3.fromRGB(80, 140, 255)
+LogoStroke.Thickness = 2
+
+do
+    local drag, dIn, dStart, dPos
+    LogoBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            drag, dStart, dPos = true, input.Position, LogoBtn.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then drag = false end
+            end)
+        end
+    end)
+    LogoBtn.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dIn = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dIn and drag then
+            local delta = input.Position - dStart
+            LogoBtn.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset + delta.X, dPos.Y.Scale, dPos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+local OPEN_POS = UDim2.new(0.5, -280, 0.5, -160)
+local CLOSED_POS = UDim2.new(0.5, -280, 0.5, -130)
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 560, 0, 320)
+MainFrame.Position = OPEN_POS
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MainFrame.BackgroundTransparency = 0
+MainFrame.ClipsDescendants = true
+MainFrame.Visible = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = Color3.fromRGB(60, 60, 75)
+MainStroke.Thickness = 1
+
+local BackgroundImg = Instance.new("ImageLabel")
+BackgroundImg.Name = "BackgroundImg"
+BackgroundImg.Size = UDim2.new(1, 0, 1, 0)
+BackgroundImg.Image = "rbxassetid://" .. RAW_BACKGROUND_ID
+BackgroundImg.BackgroundTransparency = 1
+BackgroundImg.ImageTransparency = 0
+BackgroundImg.ScaleType = Enum.ScaleType.Crop
+BackgroundImg.ZIndex = 1
+BackgroundImg.Parent = MainFrame
 
 task.spawn(function()
-    local success, thumb = pcall(function()
-        return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size420x420)
+    pcall(function()
+        local il = MarketplaceService:GetProductInfo(RAW_LOGO_ID, Enum.InfoType.Asset)
+        if il and il.AssetTypeId == 13 and il.AssetId then
+            LogoBtn.Image = "rbxassetid://" .. tostring(il.AssetId)
+        end
+        local ib = MarketplaceService:GetProductInfo(RAW_BACKGROUND_ID, Enum.InfoType.Asset)
+        if ib and ib.AssetTypeId == 13 and ib.AssetId then
+            BackgroundImg.Image = "rbxassetid://" .. tostring(ib.AssetId)
+        end
     end)
-    if success then skinImage.Image = thumb end
 end)
 
-HomeTab:CreateLabel("Desenvolvedor: akira007p")
-HomeTab:CreateLabel("Usuário: " .. LocalPlayer.Name)
-HomeTab:CreateLabel("Executor: " .. (identifyexecutor() or "Desconhecido"))
-HomeTab:CreateLabel("Versão: v1")
-HomeTab:CreateLabel("Discord: https://discord.gg/DP69yEHWz")
+-- ============================================
+-- 7. TRANSPARÊNCIA
+-- ============================================
+local menuTransparent = config.menuTransparent or false
+local transpTargets = {}
 
-HomeTab:CreateButton({
-    Name = "Copiar Link do Discord",
-    Callback = function()
+local function registerTransp(el, normal, transparent)
+    table.insert(transpTargets, {El = el, N = normal, T = transparent})
+end
+
+local function applyTransparency(on)
+    for _, t in ipairs(transpTargets) do
+        if t.El and t.El.Parent then
+            t.El.BackgroundTransparency = on and t.T or t.N
+        end
+    end
+    if BackgroundImg and BackgroundImg.Parent then
+        BackgroundImg.ImageTransparency = on and 0.7 or 0
+    end
+end
+
+registerTransp(MainFrame, 0, 0.5)
+
+local uiVisible = true
+local animating = false
+
+local function toggleUI()
+    if animating then return end
+    animating = true
+    uiVisible = not uiVisible
+    local bgTarget = menuTransparent and 0.7 or 0
+    if uiVisible then
+        MainFrame.Visible = true
+        MainFrame.Position = CLOSED_POS
+        TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = OPEN_POS}):Play()
+        TweenService:Create(BackgroundImg, TweenInfo.new(0.3), {ImageTransparency = bgTarget}):Play()
+        TweenService:Create(MainStroke, TweenInfo.new(0.3), {Transparency = 0}):Play()
+        task.wait(0.4)
+    else
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Position = CLOSED_POS}):Play()
+        TweenService:Create(BackgroundImg, TweenInfo.new(0.25), {ImageTransparency = 1}):Play()
+        TweenService:Create(MainStroke, TweenInfo.new(0.25), {Transparency = 1}):Play()
+        task.wait(0.3)
+        MainFrame.Visible = false
+    end
+    animating = false
+end
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 35)
+TopBar.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+TopBar.BackgroundTransparency = 0.6
+TopBar.BorderSizePixel = 0
+TopBar.ZIndex = 2
+TopBar.Parent = MainFrame
+registerTransp(TopBar, 0.6, 0.9)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Text = "  👑 Akira Hub | Volleyball Legends"
+TitleLabel.Size = UDim2.new(0, 300, 1, 0)
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 13
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.ZIndex = 3
+TitleLabel.Parent = TopBar
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Text = "✕"
+CloseBtn.Size = UDim2.new(0, 35, 1, 0)
+CloseBtn.Position = UDim2.new(1, -35, 0, 0)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
+CloseBtn.TextSize = 14
+CloseBtn.BackgroundTransparency = 1
+CloseBtn.ZIndex = 3
+CloseBtn.Parent = TopBar
+
+CloseBtn.MouseButton1Click:Connect(toggleUI)
+LogoBtn.MouseButton1Click:Connect(toggleUI)
+
+do
+    local drag, dIn, dStart, dPos
+    TopBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            drag, dStart, dPos = true, input.Position, MainFrame.Position
+        end
+    end)
+    TopBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dIn = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dIn and drag then
+            local delta = input.Position - dStart
+            MainFrame.Position = UDim2.new(dPos.X.Scale, dPos.X.Offset + delta.X, dPos.Y.Scale, dPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            drag = false
+        end
+    end)
+end
+
+local SideBar = Instance.new("Frame")
+SideBar.Size = UDim2.new(0, 140, 1, -35)
+SideBar.Position = UDim2.new(0, 0, 0, 35)
+SideBar.BackgroundTransparency = 1
+SideBar.ZIndex = 2
+SideBar.Parent = MainFrame
+
+local TabContainer = Instance.new("ScrollingFrame")
+TabContainer.Size = UDim2.new(1, 0, 1, -10)
+TabContainer.Position = UDim2.new(0, 0, 0, 5)
+TabContainer.BackgroundTransparency = 1
+TabContainer.ScrollBarThickness = 2
+TabContainer.ZIndex = 2
+TabContainer.Parent = SideBar
+
+local TabLayout = Instance.new("UIListLayout", TabContainer)
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Padding = UDim.new(0, 4)
+
+local ContentArea = Instance.new("Frame")
+ContentArea.Size = UDim2.new(1, -150, 1, -45)
+ContentArea.Position = UDim2.new(0, 145, 0, 40)
+ContentArea.BackgroundTransparency = 1
+ContentArea.ZIndex = 2
+ContentArea.Parent = MainFrame
+
+local tabs = {}
+local activeTab = nil
+
+local function createTab(name, icon)
+    local Btn = Instance.new("TextButton")
+    Btn.Size = UDim2.new(1, -10, 0, 32)
+    Btn.Position = UDim2.new(0, 5, 0, 0)
+    Btn.BackgroundTransparency = 1
+    Btn.BorderSizePixel = 0
+    Btn.Text = "  " .. (icon or "📌") .. "  " .. name
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.TextColor3 = Color3.fromRGB(190, 190, 200)
+    Btn.TextSize = 13
+    Btn.TextXAlignment = Enum.TextXAlignment.Left
+    Btn.AutoButtonColor = false
+    Btn.ZIndex = 3
+    Btn.Parent = TabContainer
+
+    local Page = Instance.new("ScrollingFrame")
+    Page.Name = name .. "Page"
+    Page.Size = UDim2.new(1, 0, 1, 0)
+    Page.BackgroundTransparency = 1
+    Page.Visible = false
+    Page.ScrollBarThickness = 3
+    Page.ZIndex = 2
+    Page.Parent = ContentArea
+
+    local L = Instance.new("UIListLayout", Page)
+    L.SortOrder = Enum.SortOrder.LayoutOrder
+    L.Padding = UDim.new(0, 8)
+
+    Btn.MouseButton1Click:Connect(function()
+        for _, t in pairs(tabs) do
+            t.Page.Visible = false
+            t.Button.TextColor3 = Color3.fromRGB(190, 190, 200)
+            t.Button.Font = Enum.Font.GothamMedium
+        end
+        Page.Visible = true
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.Font = Enum.Font.GothamBold
+    end)
+
+    tabs[name] = {Button = Btn, Page = Page}
+    if not activeTab then
+        activeTab = name
+        Page.Visible = true
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.Font = Enum.Font.GothamBold
+    end
+    return Page
+end
+
+local function addSection(parent, title)
+    local L = Instance.new("TextLabel")
+    L.Text = title
+    L.Size = UDim2.new(1, -10, 0, 20)
+    L.Font = Enum.Font.GothamBold
+    L.TextColor3 = Color3.fromRGB(255, 255, 255)
+    L.TextSize = 13
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+    L.ZIndex = 3
+    L.Parent = parent
+end
+
+local function addLabel(parent, text, height, color)
+    local L = Instance.new("TextLabel")
+    L.Text = text
+    L.Size = UDim2.new(1, -10, 0, height or 20)
+    L.Font = Enum.Font.Gotham
+    L.TextColor3 = color or Color3.fromRGB(220, 220, 230)
+    L.TextSize = 11
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.TextYAlignment = Enum.TextYAlignment.Top
+    L.TextWrapped = true
+    L.BackgroundTransparency = 1
+    L.ZIndex = 3
+    L.Parent = parent
+    return L
+end
+
+local function addToggle(parent, title, default, callback)
+    local C = Instance.new("Frame")
+    C.Size = UDim2.new(1, -10, 0, 42)
+    C.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    C.BackgroundTransparency = 0.5
+    C.ZIndex = 3
+    C.Parent = parent
+    registerTransp(C, 0.5, 0.85)
+    Instance.new("UICorner", C).CornerRadius = UDim.new(0, 8)
+
+    local L = Instance.new("TextLabel", C)
+    L.Text = title
+    L.Size = UDim2.new(0.7, 0, 1, 0)
+    L.Position = UDim2.new(0, 10, 0, 0)
+    L.Font = Enum.Font.GothamSemibold
+    L.TextColor3 = Color3.fromRGB(240, 240, 240)
+    L.TextSize = 12
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+    L.ZIndex = 4
+
+    local Btn = Instance.new("TextButton", C)
+    Btn.Size = UDim2.new(0, 42, 0, 22)
+    Btn.Position = UDim2.new(1, -50, 0.5, -11)
+    Btn.BackgroundColor3 = default and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(60, 60, 70)
+    Btn.Text = ""
+    Btn.ZIndex = 4
+    Instance.new("UICorner", Btn).CornerRadius = UDim.new(1, 0)
+
+    local Cir = Instance.new("Frame", Btn)
+    Cir.Size = UDim2.new(0, 16, 0, 16)
+    Cir.Position = default and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+    Cir.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Cir.ZIndex = 5
+    Instance.new("UICorner", Cir).CornerRadius = UDim.new(1, 0)
+
+    local state = default
+    Btn.MouseButton1Click:Connect(function()
+        state = not state
+        Btn.BackgroundColor3 = state and Color3.fromRGB(46, 204, 113) or Color3.fromRGB(60, 60, 70)
+        Cir.Position = state and UDim2.new(1, -19, 0.5, -8) or UDim2.new(0, 3, 0.5, -8)
+        callback(state)
+    end)
+end
+
+local function addSlider(parent, title, min, max, default, callback)
+    local C = Instance.new("Frame")
+    C.Size = UDim2.new(1, -10, 0, 48)
+    C.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    C.BackgroundTransparency = 0.5
+    C.ZIndex = 3
+    C.Parent = parent
+    registerTransp(C, 0.5, 0.85)
+    Instance.new("UICorner", C).CornerRadius = UDim.new(0, 8)
+
+    local L = Instance.new("TextLabel", C)
+    L.Text = title
+    L.Size = UDim2.new(0.6, 0, 0, 20)
+    L.Position = UDim2.new(0, 10, 0, 4)
+    L.Font = Enum.Font.GothamSemibold
+    L.TextColor3 = Color3.fromRGB(240, 240, 240)
+    L.TextSize = 11
+    L.TextXAlignment = Enum.TextXAlignment.Left
+    L.BackgroundTransparency = 1
+    L.ZIndex = 4
+
+    local VL = Instance.new("TextLabel", C)
+    VL.Text = tostring(default)
+    VL.Size = UDim2.new(0.3, 0, 0, 20)
+    VL.Position = UDim2.new(0.7, -10, 0, 4)
+    VL.Font = Enum.Font.GothamBold
+    VL.TextColor3 = Color3.fromRGB(80, 140, 255)
+    VL.TextSize = 11
+    VL.TextXAlignment = Enum.TextXAlignment.Right
+    VL.BackgroundTransparency = 1
+    VL.ZIndex = 4
+
+    local Bar = Instance.new("Frame", C)
+    Bar.Size = UDim2.new(1, -20, 0, 6)
+    Bar.Position = UDim2.new(0, 10, 1, -14)
+    Bar.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    Bar.ZIndex = 4
+    Instance.new("UICorner", Bar).CornerRadius = UDim.new(1, 0)
+
+    local Fill = Instance.new("Frame", Bar)
+    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(80, 140, 255)
+    Fill.ZIndex = 5
+    Instance.new("UICorner", Fill).CornerRadius = UDim.new(1, 0)
+
+    local dragging = false
+    local function update(input)
+        local pos = math.clamp((input.Position.X - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+        local val = math.floor((min + (max - min) * pos) * 10) / 10
+        Fill.Size = UDim2.new(pos, 0, 1, 0)
+        VL.Text = tostring(val)
+        callback(val)
+    end
+
+    Bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            update(input)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            update(input)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+local function addButton(parent, text, callback)
+    local B = Instance.new("TextButton")
+    B.Size = UDim2.new(1, -10, 0, 32)
+    B.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    B.BackgroundTransparency = 0.5
+    B.Text = text
+    B.Font = Enum.Font.GothamBold
+    B.TextColor3 = Color3.fromRGB(240, 240, 240)
+    B.TextSize = 12
+    B.ZIndex = 3
+    B.Parent = parent
+    registerTransp(B, 0.5, 0.85)
+    Instance.new("UICorner", B).CornerRadius = UDim.new(0, 6)
+    B.MouseButton1Click:Connect(callback)
+end
+
+-- ============================================
+-- 8. ABAS
+-- ============================================
+
+-- ============ PRINCIPAL ============
+local Home = createTab("Principal", "🏠")
+addSection(Home, "Informações")
+addLabel(Home, string.format(
+    "Desenvolvedor: akira007p\nUsuário: %s\nExecutor: %s\nVersão: v2.2 Ultra Safe\nPlaceId: %d",
+    LocalPlayer.Name,
+    identifyexecutor and identifyexecutor() or "Delta",
+    game.PlaceId
+), 80)
+
+addSection(Home, "Aparência")
+addToggle(Home, "Deixar menu transparente", menuTransparent, function(v)
+    menuTransparent = v
+    config.menuTransparent = v
+    saveConfig()
+    applyTransparency(v)
+    U.notify("Aparência", v and "Transparente ON" or "Transparente OFF", 2)
+end)
+
+addButton(Home, "Copiar Link do Discord", function()
+    if setclipboard then
         setclipboard("https://discord.gg/DP69yEHWz")
-        Rayfield:Notify({Title = "Copiado!", Content = "Link do Discord copiado.", Duration = 4, Image = 4483362458})
+        U.notify("Discord", "Link copiado!", 2)
     end
-})
+end)
 
--- ==========================================
--- ABA AUTO FARM
--- ==========================================
-local FarmTab = Window:CreateTab("Auto Farm", 4483362458)
+-- ============ AUTO FARM ============
+local Farm = createTab("Auto Farm", "⚡")
+addSection(Farm, "Farm Automático")
 
-FarmTab:CreateSection("Configurações de Farm")
-
-local isRunning = false
-local enablejoin = false
-local escPressed = false
-
-local humanoid = LocalPlayer.Character:WaitForChild("Humanoid")
-local humanoidRootPart = LocalPlayer.Character:WaitForChild("HumanoidRootPart")
-
-local function pressSpace()
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-    task.wait(0.1)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-end
-
-local function pressClick()
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-end
-
-local function getRandomTargetPart()
-    local positionsFolder = Workspace.Map.BallNoCollide.Positions["2"]
-    local parts = {}
-    for _, part in ipairs(positionsFolder:GetChildren()) do
-        if part:IsA("BasePart") then table.insert(parts, part) end
-    end
-    if #parts > 0 then return parts[math.random(1, #parts)] end
-    return nil
-end
-
-local roundOverStats = LocalPlayer.PlayerGui.Interface.RoundOverStats
-
-local function pressEscTwice()
-    task.wait(5)
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Escape, false, game)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Escape, false, game)
-    task.wait(0.3)
-    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Escape, false, game)
-    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Escape, false, game)
-    task.wait(0.7)
-end
-
-local function checkRoundOverStats()
-    while true do
-        if roundOverStats.Visible then
-            if not escPressed then
-                pressEscTwice()
-                escPressed = true
-            end
-        else
-            escPressed = false
-        end
-        task.wait(0.5)
-    end
-end
-
-local ballPrefix = "CLIENT_BALL_"
-local function getBall()
-    for _, object in pairs(Workspace:GetChildren()) do
-        if object:IsA("Model") and object.Name:match(ballPrefix) then
-            return object:FindFirstChild("Sphere.001") or object:FindFirstChild("Cube.001")
-        end
-    end
-    return nil
-end
-
-task.spawn(checkRoundOverStats)
-
-task.spawn(function()
-    while task.wait(0.3) do
-        if not isRunning then continue end
-        local ballPart = getBall()
-        if ballPart then
-            humanoid:MoveTo(ballPart.Position)
-            local distance = (ballPart.Position - humanoidRootPart.Position).Magnitude
-            if distance <= 15 then
-                local targetPart = getRandomTargetPart()
-                if targetPart then
-                    local lookVector = (targetPart.Position - humanoidRootPart.Position).Unit
-                    humanoidRootPart.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + lookVector)
-                end
-                if ballPart.Position.Y > humanoidRootPart.Position.Y + 5 then
-                    pressSpace()
-                    pressClick()
+addToggle(Farm, "Auto Farm (seguir bola)", config.autoFarmNormal, function(v)
+    config.autoFarmNormal = v; saveConfig()
+    if v then
+        CM.startLoop("autoFarm", function()
+            while config.autoFarmNormal do
+                task.wait(0.15)
+                local hum, root = P.hum(), P.root()
+                if hum and root then
+                    local bp = Ball.find()
+                    if bp then
+                        hum:MoveTo(bp.Position)
+                        if config.autoInteract then
+                            local d = (bp.Position - root.Position).Magnitude
+                            if d < (config.interactDistance or 12) then
+                                local r = U.getRemote("BallService", "RF", "Interact")
+                                if r then pcall(function() r:InvokeServer() end) end
+                            end
+                        end
+                    end
                 end
             end
-        end
+        end)
+    else
+        CM.stopLoop("autoFarm")
     end
 end)
 
-local function teamSelection()
-    if not enablejoin then return end
-    task.wait(10)
-    local teamSelectionGui = LocalPlayer.PlayerGui.Interface.TeamSelection
-    local gameInterface = LocalPlayer.PlayerGui.Interface.Game
-    if not gameInterface.Visible then teamSelectionGui.Visible = true end
-    while not gameInterface.Visible and enablejoin do
-        local randomNum = math.random(1, 6)
-        local button = teamSelectionGui["2"][tostring(randomNum)]
-        if button and button:IsA("ImageButton") then
-            local absPos = button.AbsolutePosition
-            local absSize = button.AbsoluteSize
-            local clickPosition = absPos + (absSize / 2)
-            VirtualInputManager:SendMouseButtonEvent(clickPosition.X, clickPosition.Y, 0, true, game, 1)
-            VirtualInputManager:SendMouseButtonEvent(clickPosition.X, clickPosition.Y, 0, false, game, 1)
-        end
-        task.wait(math.random(5, 15) / 10)
-    end
-    if gameInterface.Visible then teamSelectionGui.Visible = false end
-end
-
-LocalPlayer.CharacterAdded:Connect(function(character)
-    if enablejoin then teamSelection() end
+addToggle(Farm, "🎯 Auto Interact (bater)", config.autoInteract, function(v)
+    config.autoInteract = v; saveConfig()
 end)
 
-FarmTab:CreateToggle({
-    Name = "Auto Farm",
-    CurrentValue = false,
-    Flag = "AutoFarm",
-    Callback = function(Value)
-        isRunning = Value
-        Rayfield:Notify({Title = "Auto Farm", Content = Value and "Ativado" or "Desativado", Duration = 3, Image = 4483362458})
-    end
-})
-
-FarmTab:CreateToggle({
-    Name = "Entrar em Partida Automático",
-    CurrentValue = false,
-    Flag = "AutoJoin",
-    Callback = function(Value)
-        enablejoin = Value
-        if enablejoin then teamSelection() end
-    end
-})
-
-FarmTab:CreateButton({
-    Name = "Quebrar Partida",
-    Callback = function()
-        game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.GameService.RF.Serve:InvokeServer(nil, 0.95)
-    end
-})
-
-FarmTab:CreateSection("Saque Poderoso")
-
-FarmTab:CreateToggle({
-    Name = "Habilitar Saque Poderoso (Z)",
-    CurrentValue = false,
-    Flag = "PowerfulServe",
-    Callback = function(Value)
-        config.powerfulServe = Value
-        saveConfig()
-    end
-})
-
-UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-    if not gameProcessedEvent and input.KeyCode == Enum.KeyCode.Z then
-        if config.powerfulServe then
-            game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.GameService.RF.Serve:InvokeServer(Vector3.new(0, 0, 0), math.huge)
-        end
+addSection(Farm, "Farm Completo")
+addToggle(Farm, "🔄 Loop: Entrar → Jogar → Lobby", config.autoFarmFull, function(v)
+    config.autoFarmFull = v; saveConfig()
+    if v then
+        U.notify("Farm Completo", "Loop iniciado", 2)
+        CM.startLoop("farmLoop", function()
+            while config.autoFarmFull do
+                Game.joinMatch()
+                task.wait(45)
+                if not config.autoFarmFull then break end
+                Game.returnLobby()
+                task.wait(15)
+            end
+        end)
+    else
+        CM.stopLoop("farmLoop")
+        U.notify("Farm Completo", "Loop parado", 2)
     end
 end)
 
-FarmTab:CreateSection("Diversos")
+addButton(Farm, "▶ Entrar em Partida Agora", function()
+    local ok = Game.joinMatch()
+    U.notify("Partida", ok and "Entrando..." or "Remote não encontrado", 2)
+end)
 
-local autoRotateConnection
-local function autorotateon()
-    autoRotateConnection = RunService.Heartbeat:Connect(function()
-        if humanoid.AutoRotate == false then humanoid.AutoRotate = true end
-    end)
-end
-local function autorotateoff()
-    if autoRotateConnection then autoRotateConnection:Disconnect(); autoRotateConnection = nil end
-end
+addButton(Farm, "🏠 Voltar ao Lobby", function()
+    local ok = Game.returnLobby()
+    U.notify("Lobby", ok and "Voltando..." or "Remote não encontrado", 2)
+end)
 
-FarmTab:CreateToggle({
-    Name = "Habilitar Rotação no Ar",
-    CurrentValue = config.autoRotate,
-    Flag = "AutoRotate",
-    Callback = function(State)
-        config.autoRotate = State
-        saveConfig()
-        if State then autorotateon() else autorotateoff() end
+addSection(Farm, "Anti-AFK")
+addToggle(Farm, "🔋 Anti-AFK (RegisterMoved)", config.antiAFK, function(v)
+    config.antiAFK = v; saveConfig()
+    if v then
+        CM.startLoop("antiAFK", function()
+            while config.antiAFK do
+                task.wait(20)
+                Game.registerMoved()
+            end
+        end)
+    else
+        CM.stopLoop("antiAFK")
     end
-})
+end)
 
--- ==========================================
--- ABA HITBOX (INTEGRADO DO SCRIPT FORNECIDO)
--- ==========================================
-local HitboxTab = Window:CreateTab("Hitbox", 4483362458)
+-- ============ HITBOX ============
+local Hitbox = createTab("Hitbox", "🎯")
+addSection(Hitbox, "Hitbox da Bola")
 
-HitboxTab:CreateSection("Hitbox da Bola")
+local hitboxes = {}
 
-local BALL_NAME = "CLIENT_BALL"
-local HitboxEnabled = false
-local HitboxSize = 15
-local MIN_SIZE = 6
-local MAX_SIZE = 50
-local Hitboxes = {}
-local TrackedBalls = {}
-local TouchingParts = {}
-
-local function isBall(object)
-    return object:IsA("Model") and string.find(object.Name, BALL_NAME, 1, true) ~= nil
+local function removeHitbox(model)
+    if hitboxes[model] and hitboxes[model].Parent then hitboxes[model]:Destroy() end
+    hitboxes[model] = nil
 end
 
-local function getBallPart(ballModel)
-    if ballModel.PrimaryPart then return ballModel.PrimaryPart end
-    return ballModel:FindFirstChildWhichIsA("BasePart", true)
-end
+local function createHitbox(model)
+    if not config.hitboxEnabled or not model or not model.Parent then return end
+    local part = model:FindFirstChild("Cube.001")
+        or model:FindFirstChild("Sphere.001")
+        or model.PrimaryPart
+        or model:FindFirstChildWhichIsA("BasePart", true)
+    if not part then return end
+    removeHitbox(model)
 
-local function removeHitbox(ballModel)
-    local hitbox = Hitboxes[ballModel]
-    if hitbox and hitbox.Parent then hitbox:Destroy() end
-    Hitboxes[ballModel] = nil
-    TouchingParts[ballModel] = nil
-end
+    local hb = Instance.new("Part")
+    hb.Name = "AkiraHitbox"
+    hb.Shape = Enum.PartType.Ball
+    hb.Size = Vector3.new(config.hitboxSize, config.hitboxSize, config.hitboxSize)
+    hb.CFrame = part.CFrame
+    hb.Color = Color3.fromRGB(50, 255, 100)
+    hb.Material = Enum.Material.ForceField
+    hb.Transparency = 0.65
+    hb.CanCollide = false
+    hb.Massless = true
+    hb.Parent = model
 
-local function createHitbox(ballModel)
-    if not HitboxEnabled then return end
-    if not ballModel or not ballModel.Parent then return end
-    local ballPart = getBallPart(ballModel)
-    if not ballPart then return end
-    local existing = Hitboxes[ballModel]
-    if existing and existing.Parent then
-        existing.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-        return
-    end
-    local hitbox = Instance.new("Part")
-    hitbox.Name = "Hitbox"
-    hitbox.Shape = Enum.PartType.Ball
-    hitbox.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-    hitbox.CFrame = ballPart.CFrame
-    hitbox.Color = Color3.fromRGB(50, 255, 100)
-    hitbox.Material = Enum.Material.ForceField
-    hitbox.Transparency = 0.65
-    hitbox.CanCollide = false
-    hitbox.CanTouch = true
-    hitbox.CanQuery = true
-    hitbox.CastShadow = false
-    hitbox.Massless = true
-    hitbox.Anchored = false
-    hitbox.Parent = ballModel
     local weld = Instance.new("WeldConstraint")
-    weld.Part0 = ballPart
-    weld.Part1 = hitbox
-    weld.Parent = hitbox
-    Hitboxes[ballModel] = hitbox
-    TouchingParts[ballModel] = {}
-    hitbox.Touched:Connect(function(otherPart)
-        if HitboxEnabled then end
-    end)
+    weld.Part0 = part
+    weld.Part1 = hb
+    weld.Parent = hb
+
+    hitboxes[model] = hb
 end
 
-local function trackBall(ballModel)
-    if TrackedBalls[ballModel] then return end
-    TrackedBalls[ballModel] = true
-    if HitboxEnabled then createHitbox(ballModel) end
-    ballModel.AncestryChanged:Connect(function(_, parent)
-        if parent == nil then
-            removeHitbox(ballModel)
-            TrackedBalls[ballModel] = nil
+addToggle(Hitbox, "Hitbox Aumentada", config.hitboxEnabled, function(v)
+    config.hitboxEnabled = v; saveConfig()
+    if v then
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if Ball.isBallModel(obj) then createHitbox(obj) end
         end
-    end)
-end
-
-local function scanForBalls()
-    for _, object in ipairs(Workspace:GetDescendants()) do
-        if isBall(object) then trackBall(object) end
-    end
-end
-
-local function enableHitboxes()
-    HitboxEnabled = true
-    for ballModel in pairs(TrackedBalls) do
-        if ballModel.Parent then createHitbox(ballModel) end
-    end
-end
-
-local function disableHitboxes()
-    HitboxEnabled = false
-    for ballModel in pairs(Hitboxes) do removeHitbox(ballModel) end
-    table.clear(Hitboxes)
-    table.clear(TouchingParts)
-end
-
-local function setHitboxSize(size)
-    HitboxSize = math.clamp(math.round(size), MIN_SIZE, MAX_SIZE)
-    for ballModel, hitbox in pairs(Hitboxes) do
-        if ballModel.Parent and hitbox.Parent then
-            hitbox.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-        else
-            Hitboxes[ballModel] = nil
-        end
-    end
-end
-
-RunService.Heartbeat:Connect(function()
-    if not HitboxEnabled then return end
-    for ballModel, hitbox in pairs(Hitboxes) do
-        if not ballModel.Parent or not hitbox.Parent then
-            removeHitbox(ballModel)
-            continue
-        end
-        local overlapParams = OverlapParams.new()
-        overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-        overlapParams.FilterDescendantsInstances = { ballModel }
-        local currentParts = {}
-        for _, part in ipairs(Workspace:GetPartsInPart(hitbox, overlapParams)) do
-            currentParts[part] = true
-        end
-        TouchingParts[ballModel] = currentParts
+    else
+        for m, _ in pairs(hitboxes) do removeHitbox(m) end
     end
 end)
 
-HitboxTab:CreateToggle({
-    Name = "Hitbox",
-    CurrentValue = false,
-    Flag = "HitboxToggle",
-    Callback = function(Value)
-        if Value then enableHitboxes() else disableHitboxes() end
-    end,
-})
-
-HitboxTab:CreateSlider({
-    Name = "Tamanho da Hitbox",
-    Range = {MIN_SIZE, MAX_SIZE},
-    Increment = 1,
-    CurrentValue = HitboxSize,
-    Flag = "HitboxSize",
-    Callback = function(Value)
-        setHitboxSize(Value)
-    end,
-})
-
-Workspace.DescendantAdded:Connect(function(object)
-    if isBall(object) then trackBall(object) end
+addSlider(Hitbox, "Tamanho da Hitbox", 6, 50, config.hitboxSize, function(v)
+    config.hitboxSize = v; saveConfig()
+    for _, hb in pairs(hitboxes) do
+        if hb and hb.Parent then
+            hb.Size = Vector3.new(v, v, v)
+        end
+    end
 end)
 
-scanForBalls()
+CM.track(Workspace.ChildAdded:Connect(function(obj)
+    if Ball.isBallModel(obj) and config.hitboxEnabled then createHitbox(obj) end
+end))
 
--- ==========================================
--- ABA STATUS (ALTERADOR DE STATUS)
--- ==========================================
-local StatusTab = Window:CreateTab("Status", 4483362458)
+-- ============ STATUS ============
+local Status = createTab("Status", "📊")
+addSection(Status, "Multiplicadores (1.0 = Normal)")
 
-StatusTab:CreateSection("Alterador de Status")
+addSlider(Status, "Força de Pulo", 0.5, 5, config.jumpPower, function(v) Mult.set("jumpPower", v) end)
+addSlider(Status, "Cortada (Spike)", 0.5, 5, config.spikePower, function(v) Mult.set("spikePower", v) end)
+addSlider(Status, "Bloqueio (Block)", 0.5, 5, config.blockPower, function(v) Mult.set("blockPower", v) end)
+addSlider(Status, "Recepção (Bump)", 0.5, 5, config.bumpPower, function(v) Mult.set("bumpPower", v) end)
+addSlider(Status, "Saque (Serve)", 0.5, 5, config.servePower, function(v) Mult.set("servePower", v) end)
+addSlider(Status, "Levantamento (Set)", 0.5, 5, config.setPower, function(v) Mult.set("setPower", v) end)
+addSlider(Status, "Velocidade", 0.5, 5, config.speed, function(v) Mult.set("speed", v) end)
+addSlider(Status, "Mergulho (Dive)", 0.5, 5, config.diveSpeed, function(v) Mult.set("diveSpeed", v) end)
+addSlider(Status, "Tilt", 0.5, 5, config.tiltPower, function(v) Mult.set("tiltPower", v) end)
+addSlider(Status, "⚡ Dash", 0.5, 5, config.dashPower, function(v) Mult.set("dashPower", v) end)
 
-StatusTab:CreateSlider({
-    Name = "Velocidade de Mergulho",
-    Range = {0, 5}, Increment = 0.1, CurrentValue = config.diveSpeed,
-    Flag = "DiveSpeed",
-    Callback = function(value) LocalPlayer:SetAttribute("GameDiveSpeedMultiplier", value); config.diveSpeed = value; saveConfig() end
-})
+addSection(Status, "📡 Informações ao Vivo")
+local statusLive = addLabel(Status, "Carregando...", 140, Color3.fromRGB(180, 220, 255))
 
-StatusTab:CreateSlider({
-    Name = "Força de Cortada",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.spikePower,
-    Flag = "SpikePower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameSpikePowerMultiplier", value); config.spikePower = value; saveConfig() end
-})
+CM.startLoop("statusLive", function()
+    while task.wait(0.4) do
+        if not statusLive or not statusLive.Parent then break end
+        local hum = P.hum()
+        local root = P.root()
+        local tool = P.tool()
+        local ballPart = Ball.find()
+        local nearP, nearD = P.nearestPlayer(1000)
 
-StatusTab:CreateSlider({
-    Name = "Força de Inclinação",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.tiltPower,
-    Flag = "TiltPower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameTiltPowerMultiplier", value); config.tiltPower = value; saveConfig() end
-})
+        local lines = {}
+        local function add(s) table.insert(lines, s) end
 
-StatusTab:CreateSlider({
-    Name = "Velocidade",
-    Range = {0, 1.5}, Increment = 0.1, CurrentValue = config.speed,
-    Flag = "Speed",
-    Callback = function(value) LocalPlayer:SetAttribute("GameSpeedMultiplier", value); config.speed = value; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Levantamento",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.setPower,
-    Flag = "SetPower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameSetPowerMultiplier", value); config.setPower = value; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Saque",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.servePower,
-    Flag = "ServePower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameServePowerMultiplier", value); config.servePower = value; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Pulo",
-    Range = {0, 5}, Increment = 0.1, CurrentValue = config.jumpPower,
-    Flag = "JumpPower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameJumpPowerMultiplier", value); config.jumpPower = value; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Manchete",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.bumpPower,
-    Flag = "BumpPower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameBumpPowerMultiplier", value); config.bumpPower = value; saveConfig() end
-})
-
-StatusTab:CreateSlider({
-    Name = "Força de Bloqueio",
-    Range = {0, 500}, Increment = 0.1, CurrentValue = config.blockPower,
-    Flag = "BlockPower",
-    Callback = function(value) LocalPlayer:SetAttribute("GameBlockPowerMultiplier", value); config.blockPower = value; saveConfig() end
-})
-
--- ==========================================
--- ABA AUTO SPIN (GIRO AUTOMÁTICO)
--- ==========================================
-local SpinTab = Window:CreateTab("Auto Spin", 4483362458)
-
-SpinTab:CreateSection("Giro Automático")
-
-local autoSpin = false
-local desiredStyles = {}
-
-SpinTab:CreateToggle({
-    Name = "Auto Spin",
-    CurrentValue = false,
-    Flag = "AutoSpin",
-    Callback = function(Value)
-        autoSpin = Value
-        if autoSpin then startAutoSpin() end
-    end
-})
-
-SpinTab:CreateDropdown({
-    Name = "Selecionar Estilo Desejado",
-    Options = {"Oikawa", "Bokuto", "Kageyama", "Sawamura", "Ushijima", "Kozume", "Kuroo", "Yamamoto", "Azumane", "Yaku", "Hinata"},
-    CurrentOption = {"Hinata"},
-    MultipleOptions = true,
-    Flag = "DesiredStyles",
-    Callback = function(Option)
-        desiredStyles = Option
-    end
-})
-
-function startAutoSpin()
-    coroutine.wrap(function()
-        while autoSpin do
-            local currentStyle = LocalPlayer.PlayerGui.Interface.Lobby.Styles.TopPanel.DisplayName.Text
-            if table.find(desiredStyles, currentStyle) then
-                autoSpin = false
-                Rayfield:Notify({Title = "Estilo Obtido!", Content = "Você conseguiu: " .. currentStyle, Duration = 4, Image = 4483362458})
-                break
+        if hum then
+            add(string.format("❤ Vida: %d / %d", math.floor(hum.Health), math.floor(hum.MaxHealth)))
+            add(string.format("🏃 WalkSpeed: %.1f", hum.WalkSpeed))
+            if hum.UseJumpPower then
+                add(string.format("🦘 JumpPower: %.1f", hum.JumpPower))
             else
-                game:GetService("ReplicatedStorage").Packages._Index["sleitnick_knit@1.7.0"].knit.Services.StylesService.RF.Roll:InvokeServer(false)
-                task.wait(0.5)
+                add(string.format("🦘 JumpHeight: %.1f", hum.JumpHeight))
             end
+            add(string.format("📊 Estado: %s", hum:GetState().Name))
+            add(string.format("👥 Equipe: %s", P.team()))
+            add(string.format("🔧 Ferramenta: %s", tool and tool.Name or "Nenhuma"))
+        else
+            add("💀 Sem personagem")
         end
-    end)()
-end
 
--- ==========================================
--- ABA VISUAL (ESP / BALL PREDICTOR)
--- ==========================================
-local VisualTab = Window:CreateTab("Visual", 4483362458)
+        if ballPart then
+            local myRoot = P.root()
+            if myRoot then
+                local d = (ballPart.Position - myRoot.Position).Magnitude
+                add(string.format("🏐 Bola: %.1f studs", d))
+            end
+        else
+            add("🏐 Bola: fora de jogo")
+        end
 
-VisualTab:CreateSection("ESP da Bola")
+        add(string.format("👥 Vivos: %d / %d", P.countAlive(), #Players:GetPlayers()))
+        if nearP and nearD then
+            add(string.format("🎯 Próximo: %s (%.0f)", nearP.Name, nearD))
+        end
 
-local espEnabled = false
+        add("")
+        add(string.format("⚡ Farm: %s | 🎯 Interact: %s",
+            config.autoFarmNormal and "ON" or "OFF",
+            config.autoInteract and "ON" or "OFF"))
+        add(string.format("🔄 FarmLoop: %s | 🔋 AntiAFK: %s",
+            config.autoFarmFull and "ON" or "OFF",
+            config.antiAFK and "ON" or "OFF"))
+        add(string.format("🎯 Hitbox: %s | 👁 ESP: %s",
+            config.hitboxEnabled and "ON" or "OFF",
+            config.espEnabled and "ON" or "OFF"))
+
+        statusLive.Text = table.concat(lines, "\n")
+    end
+end)
+
+-- ============ VISUAL ============
+local Visual = createTab("Visual", "👁️")
+addSection(Visual, "ESP da Bola")
+
 local ballESP = {}
 
-local function createESP(ballModel)
-    if not espEnabled then return end
-    local part = getBallPart(ballModel)
-    if not part then return end
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "BallESP"
-    highlight.Adornee = ballModel
-    highlight.FillColor = Color3.fromRGB(0, 255, 100)
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.OutlineTransparency = 0
-    highlight.Parent = ballModel
-    ballESP[ballModel] = highlight
+local function removeESP(model)
+    if ballESP[model] and ballESP[model].Parent then ballESP[model]:Destroy() end
+    ballESP[model] = nil
 end
 
-local function removeESP(ballModel)
-    if ballESP[ballModel] then ballESP[ballModel]:Destroy(); ballESP[ballModel] = nil end
+local function createESP(model)
+    if not config.espEnabled or not model or ballESP[model] then return end
+    local hl = Instance.new("Highlight")
+    hl.Name = "AkiraESP"
+    hl.Adornee = model
+    hl.FillColor = Color3.fromRGB(0, 255, 100)
+    hl.FillTransparency = 0.5
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.Parent = model
+    ballESP[model] = hl
 end
 
-VisualTab:CreateToggle({
-    Name = "ESP da Bola",
-    CurrentValue = false,
-    Flag = "BallESP",
-    Callback = function(Value)
-        espEnabled = Value
-        if espEnabled then
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if isBall(obj) then createESP(obj) end
-            end
-        else
-            for ballModel, _ in pairs(ballESP) do removeESP(ballModel) end
+addToggle(Visual, "ESP da Bola", config.espEnabled, function(v)
+    config.espEnabled = v; saveConfig()
+    if v then
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if Ball.isBallModel(obj) then createESP(obj) end
         end
+    else
+        for m, _ in pairs(ballESP) do removeESP(m) end
     end
-})
-
-Workspace.DescendantAdded:Connect(function(obj)
-    if isBall(obj) and espEnabled then createESP(obj) end
 end)
 
--- ==========================================
--- FIM DO SCRIPT
--- ==========================================
-Rayfield:Notify({
-    Title = "Akira Hub Carregado!",
-    Content = "Todas as funções estão prontas para uso.",
-    Duration = 5,
-    Image = 4483362458
-})
+CM.track(Workspace.ChildAdded:Connect(function(obj)
+    if Ball.isBallModel(obj) and config.espEnabled then createESP(obj) end
+end))
+
+-- ============================================
+-- APLICAR TRANSPARÊNCIA SALVA
+-- ============================================
+if menuTransparent then
+    task.wait(0.5)
+    applyTransparency(true)
+end
+
+-- ============================================
+-- NOTIFICAÇÃO INICIAL
+-- ============================================
+U.notify("Akira Hub v2.2", "Ultra Safe — só funções seguras!", 5)
