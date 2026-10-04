@@ -416,7 +416,7 @@ end
 local IconMap = {
     autoBtn = "click",   -- ícone padrão no canto dos botões de ação (nil = desliga)
     sections = {
-        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Discord"] = "discord", ["Seletor de UI"] = "settings", ["Tema"] = "settings",
+        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Discord"] = "discord", ["Tema"] = "settings",
         ["Atalhos Rápidos"] = "click", ["Info"] = "hacker", ["Créditos Open Source"] = "link",
         ["Hubs Universais"] = "code", ["Hubs"] = "code", ["Utilitários"] = "devlogo",
         ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "settings",
@@ -745,6 +745,8 @@ local function createTabContent(name)
     f.ScrollBarImageTransparency = 0.3
     f.Visible = false; f.ZIndex = 3
     Tabs[name] = f
+    State.tabFrames = State.tabFrames or {}; State.tabFrames[f] = name
+    State.tabOrder = State.tabOrder or {}; table.insert(State.tabOrder, name)
     return f
 end
 
@@ -829,6 +831,8 @@ function C.toggle(parent, text, y, default, cb)
         if cb then pcall(cb, st) end
         showToast(text..(st and " ativado" or " desativado"), st and "success" or "info")
     end)
+    State.toggleSet = State.toggleSet or {}
+    State.toggleSet[b] = function(v) v = v and true or false; if st ~= v then st = v; render() end end
     return b
 end
 
@@ -939,6 +943,9 @@ function C.slider(parent, label, min, max, default, y, cb)
             dragging = false; lockScroll(false)
         end
     end)
+    State.sliderSet = State.sliderSet or {}
+    State.sliderSet[f] = function(x) val = x; setVisual(x) end
+    return f
 end
 
 function C.card(parent, y, h)
@@ -1009,6 +1016,73 @@ function C.input(parent, placeholder, y, default, cb)
     i.Position = UDim2.new(0,8,0,0); i.Size = UDim2.new(1,-16,1,0)
     i.FocusLost:Connect(function() if cb then pcall(cb, i.Text) end end)
     return i
+end
+
+-- ── Gravador de itens: alimenta as UIs alternativas com o menu completo ──
+do
+    State.spec = {}
+    local function tabOf(p)
+        while p do
+            local n = State.tabFrames and State.tabFrames[p]
+            if n then return n end
+            p = p.Parent
+        end
+    end
+    local function rec(parent, it)
+        if State.specFrozen then return end
+        local n = tabOf(parent)
+        if not n then return end
+        local l = State.spec[n]
+        if not l then l = {}; State.spec[n] = l end
+        l[#l + 1] = it
+    end
+    local oSec, oTog, oBtn, oSli, oInp = C.section, C.toggle, C.button, C.slider, C.input
+
+    C.section = function(parent, title, y)
+        rec(parent, {k = "section", title = title})
+        return oSec(parent, title, y)
+    end
+    C.button = function(parent, text, y, cb, opt)
+        rec(parent, {k = "button", text = text, cb = function()
+            if not cb then return end
+            showToast("▶ " .. text, "info")
+            local ok, err = pcall(cb)
+            if not ok then
+                warn("[AKZ] Erro em '" .. text .. "': " .. tostring(err))
+                showToast("⚠ Falha em " .. text, "error")
+            end
+        end})
+        return oBtn(parent, text, y, cb, opt)
+    end
+    C.toggle = function(parent, text, y, default, cb)
+        local it = {k = "toggle", text = text, state = default or false}
+        it.cb = function(v)
+            it.state = v
+            if cb then pcall(cb, v) end
+        end
+        it.btn = oTog(parent, text, y, default, it.cb)
+        rec(parent, it)
+        return it.btn
+    end
+    C.slider = function(parent, label, min, max, default, y, cb)
+        local it = {k = "slider", text = label, min = min, max = max, val = default}
+        it.cb = function(v)
+            it.val = v
+            if cb then pcall(cb, v) end
+        end
+        it.frame = oSli(parent, label, min, max, default, y, it.cb)
+        rec(parent, it)
+    end
+    C.input = function(parent, placeholder, y, default, cb)
+        local it = {k = "input", text = placeholder, val = default}
+        it.cb = function(t)
+            it.val = t
+            if cb then pcall(cb, t) end
+        end
+        local box = oInp(parent, placeholder, y, default, it.cb)
+        rec(parent, it)
+        return box
+    end
 end
 
 -- Fling real: gruda no alvo girando rápido por 0.5s e volta para a posição original.
@@ -1378,130 +1452,6 @@ do
     end)
     y = y + DC_H + 8
 
-    -- ── BLOCO: SELETOR DE UI ──
-    y = C.section(tPrin, "Seletor de UI", y)
-    do
-        -- atalhos mostrados dentro de cada UI externa (mesmos do hub)
-        local QUICK = {
-            {"Infinite Yield (Admin)", function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-            end},
-            {"AirHub V2 (ESP + Aimbot)", function() loadOnce("airhub", AIRHUB_URL) end},
-            {"FlyGuiV3", function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-            end},
-            {"All Emotes", function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-            end},
-        }
-        local BRAND, BY = "AKZ HUB", "by Akira / Angel"
-
-        local UI_LIST = {
-            {name = "FluentPro", tag = "Fluent modded", run = function()
-                loadstring(game:HttpGet("https://raw.githubusercontent.com/StyearX/Fluent-modded/refs/heads/main/Fluent/Example/FluentPro%20Example"))()
-            end},
-            {name = "Luna", tag = "Nebula Softworks", run = function()
-                local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/main/source.lua", true))()
-                local W = Luna:CreateWindow({
-                    Name = BRAND, Subtitle = BY, LoadingEnabled = false,
-                    LoadingTitle = BRAND, LoadingSubtitle = BY,
-                    ConfigSettings = {RootFolder = nil, ConfigFolder = "AKZHub"},
-                    KeySystem = false,
-                })
-                local T = W:CreateTab({Name = "Atalhos", Icon = "build", ImageSource = "Material", ShowTitle = true})
-                for _, q in ipairs(QUICK) do T:CreateButton({Name = q[1], Callback = q[2]}) end
-            end},
-            {name = "Drip Client", tag = "Black / White", run = function()
-                local Drip = loadstring(game:HttpGet("https://raw.githubusercontent.com/Young-Apfelmus/Drip-Library/main/drip-ui-library.lua"))()
-                pcall(function() Drip:AutoLoadLucide() end)
-                local win = Drip:CreateWindow({Title = BRAND, Subtitle = BY, ToggleBind = Enum.KeyCode.RightShift})
-                local okI, ico = pcall(function() return Drip.icon("home") end)
-                local tab = win:Tab("Atalhos", okI and ico or nil)
-                for _, q in ipairs(QUICK) do tab:Button({Title = q[1], Callback = q[2]}) end
-            end},
-            {name = "Rayfield", tag = "Sirius", run = function()
-                local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-                local W = Rayfield:CreateWindow({
-                    Name = BRAND, LoadingTitle = BRAND, LoadingSubtitle = BY,
-                    ConfigurationSaving = {Enabled = false}, KeySystem = false,
-                })
-                local T = W:CreateTab("Atalhos", 4483362458)
-                for _, q in ipairs(QUICK) do T:CreateButton({Name = q[1], Callback = q[2]}) end
-            end},
-            {name = "Orion", tag = "Shlexware", run = function()
-                local Orion = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
-                local W = Orion:MakeWindow({Name = BRAND, HidePremium = false, SaveConfig = false, ConfigFolder = "AKZHub"})
-                local T = W:MakeTab({Name = "Atalhos", Icon = "rbxassetid://4483345998", PremiumOnly = false})
-                for _, q in ipairs(QUICK) do T:AddButton({Name = q[1], Callback = q[2]}) end
-                Orion:Init()
-            end},
-            {name = "Fluent", tag = "dawid-scripts", run = function()
-                local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
-                local W = Fluent:CreateWindow({
-                    Title = BRAND, SubTitle = BY, TabWidth = 140, Size = UDim2.fromOffset(420, 300),
-                    Acrylic = false, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl,
-                })
-                local T = W:AddTab({Title = "Atalhos", Icon = "home"})
-                for _, q in ipairs(QUICK) do T:AddButton({Title = q[1], Callback = q[2]}) end
-                W:SelectTab(1)
-            end},
-        }
-
-        local ROW_H = 24
-        local selH = 8 + #UI_LIST * ROW_H + 6 + BTN_H + 8
-        local sc = C.card(tPrin, y, selH)
-        local selected = 1
-        local rowBtns = {}
-
-        local function refreshSel()
-            for i, r in ipairs(rowBtns) do
-                local on = (i == selected)
-                r.Text = (on and "●  " or "    ") .. UI_LIST[i].name
-                r.TextColor3 = on and WHITE or Color3.fromRGB(150,150,150)
-                tween(r, 0.15, {
-                    BackgroundTransparency = on and 0.35 or 1,
-                    BackgroundColor3 = Color3.fromRGB(80,15,15),
-                })
-            end
-        end
-
-        for i, ui in ipairs(UI_LIST) do
-            local r = Instance.new("TextButton", sc)
-            r.Name = "UIRow_" .. ui.name
-            r.Font = Enum.Font.GothamMedium; r.TextSize = 10
-            r.TextXAlignment = Enum.TextXAlignment.Left
-            r.BackgroundColor3 = Color3.fromRGB(80,15,15); r.BackgroundTransparency = 1
-            r.BorderSizePixel = 0; r.AutoButtonColor = false
-            r.Position = UDim2.new(0, 8, 0, 8 + (i - 1) * ROW_H)
-            r.Size = UDim2.new(1, -16, 0, ROW_H - 2)
-            Instance.new("UICorner", r).CornerRadius = UDim.new(0, 5)
-            local tg = Instance.new("TextLabel", r)
-            tg.BackgroundTransparency = 1; tg.Font = Enum.Font.Gotham; tg.TextSize = 9
-            tg.TextColor3 = Color3.fromRGB(110,110,110); tg.Text = ui.tag
-            tg.TextXAlignment = Enum.TextXAlignment.Right
-            tg.AnchorPoint = Vector2.new(1, 0.5); tg.Position = UDim2.new(1, -8, 0.5, 0)
-            tg.Size = UDim2.new(0.5, 0, 0, 12)
-            rowBtns[i] = r
-            r.MouseButton1Click:Connect(function() selected = i; refreshSel() end)
-        end
-        refreshSel()
-
-        C.button(sc, "ABRIR UI SELECIONADA", 8 + #UI_LIST * ROW_H + 6, function()
-            local ui = UI_LIST[selected]
-            showToast("Abrindo " .. ui.name .. "...", "info")
-            task.spawn(function()
-                local ok, e = pcall(ui.run)
-                if ok then
-                    showToast("✓ " .. ui.name .. " carregada", "success")
-                else
-                    warn("[AKZ HUB] UI " .. ui.name .. ": " .. tostring(e))
-                    showToast("⚠ " .. ui.name .. " falhou ao abrir", "error")
-                end
-            end)
-        end, {right = "click"})
-        y = y + selH + 8
-    end
-
     -- ── BLOCO 3: TEMA (o botão é montado no fim do script) ──
     y = C.section(tPrin, "Tema", y)
     local tm = C.card(tPrin, y, 44)
@@ -1527,6 +1477,97 @@ do
     C.button(holder, "All Emotes", hy, function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
     end, {right = "click"})
+
+    -- ── SELETOR DE UI: troca o menu inteiro (todas as abas) por outra interface ──
+    do
+        local usy = C.section(holder, "Interface (UI)", hy + BTN_H + GAP + 6)
+        local uc = C.card(holder, usy, 44)
+        uc.ClipsDescendants = true
+        holder.Size = UDim2.new(1, 0, 0, usy + 44 + 12)
+
+        local UB = Instance.new("TextButton", uc)
+        UB.Font = Enum.Font.Gotham; UB.Text = "  Trocar interface  ^"
+        UB.TextColor3 = Color3.fromRGB(220,220,220); UB.TextSize = 11
+        UB.TextXAlignment = Enum.TextXAlignment.Left
+        UB.BackgroundColor3 = Color3.fromRGB(20,5,5); UB.BackgroundTransparency = 0.35
+        UB.BorderSizePixel = 0; UB.AutoButtonColor = false
+        UB.Position = UDim2.new(0, 8, 0, 8); UB.Size = UDim2.new(1, -16, 0, 28); UB.ZIndex = 4
+        Instance.new("UICorner", UB).CornerRadius = UDim.new(0, 6)
+        local UBS = Instance.new("UIStroke", UB)
+        UBS.Color = Color3.fromRGB(80,20,20); UBS.Thickness = 1; UBS.Transparency = 0.4
+        hoverFX(UB)
+        Instance.new("UIPadding", UB).PaddingLeft = UDim.new(0, 26)
+        CreateIcon(UB, "gamehub", 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6, fade = false})
+
+        local CurU = Instance.new("TextLabel", UB)
+        CurU.Font = Enum.Font.GothamMedium; CurU.TextSize = 10
+        CurU.TextColor3 = Color3.fromRGB(150,150,150); CurU.BackgroundTransparency = 1
+        CurU.TextXAlignment = Enum.TextXAlignment.Right
+        CurU.AnchorPoint = Vector2.new(1, 0.5); CurU.Position = UDim2.new(1, -10, 0.5, 0)
+        CurU.Size = UDim2.new(0, 110, 0, 14); CurU.ZIndex = 5
+        CurU.Text = "AKZ HUB"
+
+        local rows, open, cur = {}, false, "AKZ HUB"
+        local ROW_H = 24
+        local setOpen
+
+        local function refresh()
+            for name, r in pairs(rows) do
+                local on = (name == cur)
+                r.Text = (on and "●  " or "    ") .. name
+                r.TextColor3 = on and WHITE or Color3.fromRGB(150,150,150)
+                tween(r, 0.15, {
+                    BackgroundTransparency = on and 0.35 or 1,
+                    BackgroundColor3 = Color3.fromRGB(80,15,15),
+                })
+            end
+            CurU.Text = cur
+        end
+
+        local function ensureRows()
+            if next(rows) then return end
+            for i, name in ipairs(State.uiNames or {}) do
+                local r = Instance.new("TextButton", uc)
+                r.Name = "UIRow_" .. name
+                r.Font = Enum.Font.GothamMedium; r.TextSize = 10
+                r.TextXAlignment = Enum.TextXAlignment.Left
+                r.BackgroundColor3 = Color3.fromRGB(80,15,15); r.BackgroundTransparency = 1
+                r.BorderSizePixel = 0; r.AutoButtonColor = false
+                r.Position = UDim2.new(0, 8, 0, 42 + (i - 1) * ROW_H)
+                r.Size = UDim2.new(1, -16, 0, ROW_H - 2); r.ZIndex = 4
+                Instance.new("UICorner", r).CornerRadius = UDim.new(0, 5)
+                local tg = Instance.new("TextLabel", r)
+                tg.BackgroundTransparency = 1; tg.Font = Enum.Font.Gotham; tg.TextSize = 9
+                tg.TextColor3 = Color3.fromRGB(110,110,110)
+                tg.Text = (State.uiTags and State.uiTags[name]) or ""
+                tg.TextXAlignment = Enum.TextXAlignment.Right
+                tg.AnchorPoint = Vector2.new(1, 0.5); tg.Position = UDim2.new(1, -8, 0.5, 0)
+                tg.Size = UDim2.new(0.5, 0, 0, 12); tg.ZIndex = 5
+                rows[name] = r
+                r.MouseButton1Click:Connect(function()
+                    if State.uiSwitch then State.uiSwitch(name) end
+                    setOpen(false)
+                end)
+            end
+            refresh()
+        end
+
+        setOpen = function(v)
+            if v then ensureRows() end
+            open = v
+            local h = v and (42 + #(State.uiNames or {}) * ROW_H + 6) or 44
+            if v then for _, r in pairs(rows) do r.Visible = true end end
+            tween(uc, 0.18, {Size = UDim2.new(1, -16, 0, h)})
+            holder.Size = UDim2.new(1, 0, 0, usy + h + 12)
+            if not v then
+                task.delay(0.2, function()
+                    if not open then for _, r in pairs(rows) do r.Visible = false end end
+                end)
+            end
+        end
+        UB.MouseButton1Click:Connect(function() setOpen(not open) end)
+        State.uiLabel = function(n) cur = n; refresh() end
+    end
 end
 
 -- ══════════════════════════════════════════════════════════
@@ -3281,6 +3322,7 @@ end); y = y + BTN_H + GAP
 y = C.section(tCfg, "Sistema", y)
 C.button(tCfg, "Unload Menu", y, function()
     cleanConns()
+    if State.destroyExt then State.destroyExt() end
     ScreenGui:Destroy()
     ToastGui:Destroy()
 end); y = y + BTN_H + GAP
@@ -3317,6 +3359,7 @@ C.button(tSob, "Discord: discord.gg/kc7myVSq3", y, function()
 end, {left = "discord", right = "link"}); y = y + BTN_H + GAP
 C.button(tSob, "Unload Menu", y, function()
     cleanConns()
+    if State.destroyExt then State.destroyExt() end
     ScreenGui:Destroy()
     ToastGui:Destroy()
 end)
@@ -3405,6 +3448,7 @@ LI.ZIndex = 2; LI.Active = false
 local LS = Instance.new("UIStroke", Act)
 LS.Color = Color3.fromRGB(200,30,30); LS.Thickness = 2
 makeDraggable(Act, nil, function()
+    if State.extActive and State.extToggle then State.extToggle(); return end
     Home.Visible = not Home.Visible
     if Home.Visible then showToast("Menu aberto", "info") end
 end)
@@ -3712,6 +3756,346 @@ end)
 
     ThemeBtn.MouseButton1Click:Connect(function() setOpen(not open) end)
 end)()
+
+-- ══════════════════════════════════════════════════════════
+-- UIs ALTERNATIVAS — troca o menu COMPLETO (todas as abas/funções) por
+-- outra biblioteca de interface. Os itens vêm do gravador (State.spec),
+-- então qualquer função nova adicionada via C.button/C.toggle/C.slider/
+-- C.input/C.section aparece automaticamente em todas as UIs.
+-- ══════════════════════════════════════════════════════════
+do
+    State.specFrozen = true
+    local BRAND, BY = "AKZ HUB", "by Akira / Angel"
+    local NATIVE = "AKZ HUB"
+    local ext = {gui = {}, destroyers = {}, hidden = false}
+    local curUI, busy = NATIVE, false
+
+    local function stepOf(it) return ((it.max - it.min) <= 10) and 0.1 or 1 end
+
+    -- ───────── monta a lista de abas (completa) ─────────
+    local UIL = {}
+    local function buildTabs(target)
+        local tabs = {}
+        local sw = {{k = "section", title = "Interface atual: " .. target}}
+        for _, u in ipairs(UIL) do
+            if u.name ~= target then
+                sw[#sw + 1] = {k = "button",
+                    text = (u.name == NATIVE) and "↩ Voltar ao AKZ HUB original (Jogos / Status)" or ("Trocar para " .. u.name),
+                    cb = function() task.delay(0.15, function() State.uiSwitch(u.name) end) end}
+            end
+        end
+        tabs[1] = {name = "Interface", items = sw}
+        for _, name in ipairs(State.tabOrder or {}) do
+            local items, clean = State.spec[name] or {}, {}
+            for i, it in ipairs(items) do
+                if it.k == "section" then
+                    local nx = items[i + 1]
+                    if nx and nx.k ~= "section" then clean[#clean + 1] = it end   -- ignora seções vazias
+                else
+                    clean[#clean + 1] = it
+                end
+            end
+            if name == "Principal" then
+                table.insert(clean, 1, {k = "button", text = "Entrar no Discord (convite)",
+                    cb = function() if State.openDiscord then State.openDiscord() end end})
+                table.insert(clean, 1, {k = "section", title = "Discord"})
+            end
+            if #clean > 0 then tabs[#tabs + 1] = {name = name, items = clean} end
+        end
+        return tabs
+    end
+
+    -- ───────── driver genérico: percorre os itens e chama o adaptador ─────────
+    local function drive(h, tabs)
+        local n = 0
+        for _, t in ipairs(tabs) do
+            local okT, tobj = pcall(h.tab, t.name)
+            if okT and tobj then
+                local ctx = (h.root and h.root(tobj)) or tobj
+                for _, it in ipairs(t.items) do
+                    local ok, e = pcall(function()
+                        if it.k == "section" then
+                            if h.section then ctx = h.section(tobj, it.title) or ctx end
+                        elseif it.k == "button" then h.button(ctx, it)
+                        elseif it.k == "toggle" then h.toggle(ctx, it)
+                        elseif it.k == "slider" then h.slider(ctx, it)
+                        elseif it.k == "input" then if h.input then h.input(ctx, it) end end
+                    end)
+                    if not ok then warn("[AKZ UI] " .. t.name .. " / " .. tostring(it.text or it.title) .. ": " .. tostring(e)) end
+                    n = n + 1
+                    if n % 15 == 0 then task.wait() end
+                end
+            else
+                warn("[AKZ UI] falha ao criar aba " .. tostring(t.name) .. ": " .. tostring(tobj))
+            end
+        end
+    end
+
+    local function get(url) return loadstring(game:HttpGet(url, true))() end
+    local uid = 0
+    local function nextId(p) uid = uid + 1; return (p or "akz") .. uid end
+
+    -- ───────── ADAPTADORES ─────────
+    local function kavo(theme)
+        return function(tabs)
+            local Kavo = get("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua")
+            local W = Kavo.CreateLib(BRAND .. " — " .. BY, theme)
+            drive({
+                tab = function(n) local t = W:NewTab(n); return {t = t, s = t:NewSection(n)} end,
+                root = function(o) return o.s end,
+                section = function(o, title) return o.t:NewSection(title) end,
+                button = function(c, it) c:NewButton(it.text, "", function() it.cb() end) end,
+                toggle = function(c, it) c:NewToggle(it.text, "", function(v) it.cb(v) end) end,
+                slider = function(c, it)
+                    local k = (stepOf(it) < 1) and 10 or 1
+                    c:NewSlider(it.text, "", math.floor(it.max * k), math.floor(it.min * k), function(v) it.cb(v / k) end)
+                end,
+                input = function(c, it) c:NewTextBox(it.text, "", function(v) it.cb(v) end) end,
+            }, tabs)
+        end
+    end
+
+    UIL = {
+        {name = NATIVE, tag = "padrão"},
+
+        {name = "Rayfield", tag = "Sirius", build = function(tabs)
+            local R = get("https://sirius.menu/rayfield")
+            local W = R:CreateWindow({Name = BRAND, LoadingTitle = BRAND, LoadingSubtitle = BY,
+                ConfigurationSaving = {Enabled = false}, KeySystem = false})
+            ext.destroyers[#ext.destroyers + 1] = function() R:Destroy() end
+            drive({
+                tab = function(n) return W:CreateTab(n, 4483362458) end,
+                section = function(t, title) t:CreateSection(title); return t end,
+                button = function(t, it) t:CreateButton({Name = it.text, Callback = function() it.cb() end}) end,
+                toggle = function(t, it) t:CreateToggle({Name = it.text, CurrentValue = it.state,
+                    Callback = function(v) it.cb(v) end}) end,
+                slider = function(t, it) t:CreateSlider({Name = it.text, Range = {it.min, it.max}, Increment = stepOf(it),
+                    Suffix = "", CurrentValue = it.val, Callback = function(v) it.cb(v) end}) end,
+                input = function(t, it) t:CreateInput({Name = it.text, PlaceholderText = it.text,
+                    RemoveTextAfterFocusLost = false, Callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+        end},
+
+        {name = "Luna", tag = "Nebula", build = function(tabs)
+            local Luna = get("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/main/source.lua")
+            local W = Luna:CreateWindow({Name = BRAND, Subtitle = BY, LoadingEnabled = false,
+                LoadingTitle = BRAND, LoadingSubtitle = BY,
+                ConfigSettings = {RootFolder = nil, ConfigFolder = "AKZHub"}, KeySystem = false})
+            ext.destroyers[#ext.destroyers + 1] = function() Luna:Destroy() end
+            drive({
+                tab = function(n) return W:CreateTab({Name = n, Icon = "build", ImageSource = "Material", ShowTitle = true}) end,
+                section = function(t, title) t:CreateSection(title); return t end,
+                button = function(t, it) t:CreateButton({Name = it.text, Callback = function() it.cb() end}) end,
+                toggle = function(t, it) t:CreateToggle({Name = it.text, CurrentValue = it.state,
+                    Callback = function(v) it.cb(v) end}) end,
+                slider = function(t, it) t:CreateSlider({Name = it.text, Range = {it.min, it.max}, Increment = stepOf(it),
+                    CurrentValue = it.val, Callback = function(v) it.cb(v) end}) end,
+                input = function(t, it) t:CreateInput({Name = it.text, PlaceholderText = it.text, CurrentValue = it.val or "",
+                    Numeric = false, Enter = true, Callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+        end},
+
+        {name = "Fluent", tag = "dawid-scripts", build = function(tabs)
+            local Fluent = get("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua")
+            local vp = getViewport()
+            local W = Fluent:CreateWindow({Title = BRAND, SubTitle = BY, TabWidth = 130,
+                Size = UDim2.fromOffset(math.clamp(vp.X - 60, 300, 520), math.clamp(vp.Y - 80, 220, 360)),
+                Acrylic = false, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl})
+            ext.destroyers[#ext.destroyers + 1] = function() Fluent:Destroy() end
+            drive({
+                tab = function(n) return W:AddTab({Title = n, Icon = ""}) end,
+                section = function(t, title) return t:AddSection(title) end,
+                button = function(c, it) c:AddButton({Title = it.text, Description = "", Callback = function() it.cb() end}) end,
+                toggle = function(c, it) c:AddToggle(nextId("t"), {Title = it.text, Default = it.state,
+                    Callback = function(v) it.cb(v) end}) end,
+                slider = function(c, it) c:AddSlider(nextId("s"), {Title = it.text, Description = "", Default = it.val,
+                    Min = it.min, Max = it.max, Rounding = (stepOf(it) < 1) and 1 or 0,
+                    Callback = function(v) it.cb(v) end}) end,
+                input = function(c, it) c:AddInput(nextId("i"), {Title = it.text, Default = it.val or "", Placeholder = it.text,
+                    Numeric = false, Finished = true, Callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+            pcall(function() W:SelectTab(1) end)
+        end},
+
+        {name = "Orion", tag = "Shlexware", build = function(tabs)
+            local Orion = get("https://raw.githubusercontent.com/shlexware/Orion/main/source")
+            local W = Orion:MakeWindow({Name = BRAND, HidePremium = false, SaveConfig = false, ConfigFolder = "AKZHub"})
+            ext.destroyers[#ext.destroyers + 1] = function() Orion:Destroy() end
+            drive({
+                tab = function(n) return W:MakeTab({Name = n, Icon = "rbxassetid://4483345998", PremiumOnly = false}) end,
+                section = function(t, title) return t:AddSection({Name = title}) end,
+                button = function(c, it) c:AddButton({Name = it.text, Callback = function() it.cb() end}) end,
+                toggle = function(c, it) c:AddToggle({Name = it.text, Default = it.state, Callback = function(v) it.cb(v) end}) end,
+                slider = function(c, it) c:AddSlider({Name = it.text, Min = it.min, Max = it.max, Default = it.val,
+                    Color = Color3.fromRGB(235, 236, 240), Increment = stepOf(it), ValueName = "",
+                    Callback = function(v) it.cb(v) end}) end,
+                input = function(c, it) c:AddTextbox({Name = it.text, Default = it.val or "", TextDisappear = false,
+                    Callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+            Orion:Init()
+        end},
+
+        {name = "Drip Client", tag = "Black / White", build = function(tabs)
+            local Drip = get("https://raw.githubusercontent.com/Young-Apfelmus/Drip-Library/main/drip-ui-library.lua")
+            pcall(function() Drip:AutoLoadLucide() end)
+            local win = Drip:CreateWindow({Title = BRAND, Subtitle = BY, ToggleBind = Enum.KeyCode.RightShift})
+            ext.destroyers[#ext.destroyers + 1] = function() win:Destroy() end
+            drive({
+                tab = function(n)
+                    local okI, ico = pcall(function() return Drip.icon("home") end)
+                    return win:Tab(n, okI and ico or nil)
+                end,
+                section = function(t, title) pcall(function() t:Section({Title = title}) end); return t end,
+                button = function(t, it) t:Button({Title = it.text, Callback = function() it.cb() end}) end,
+                toggle = function(t, it) t:Toggle({Title = it.text, Default = it.state, Callback = function(v) it.cb(v) end}) end,
+                slider = function(t, it)   -- Drip não tem slider: vira lista de valores
+                    local opts = {}
+                    for i = 0, 4 do
+                        opts[#opts + 1] = string.format("%g", math.floor((it.min + (it.max - it.min) * i / 4) * 100 + 0.5) / 100)
+                    end
+                    t:Dropdown({Title = it.text, Options = opts, Callback = function(v)
+                        local n = tonumber(v); if n then it.cb(n) end
+                    end})
+                end,
+            }, tabs)
+        end},
+
+        {name = "Kavo Dark", tag = "Kavo • DarkTheme", build = kavo("DarkTheme")},
+        {name = "Kavo Synapse", tag = "Kavo • Synapse", build = kavo("Synapse")},
+        {name = "Kavo Blood", tag = "Kavo • BloodTheme", build = kavo("BloodTheme")},
+
+        {name = "Venyx", tag = "GreenDeno", build = function(tabs)
+            local Venyx = get("https://raw.githubusercontent.com/GreenDeno/Venyx-UI-Library/main/source.lua")
+            local W = Venyx.new({title = BRAND .. " — " .. BY})
+            ext.destroyers[#ext.destroyers + 1] = function() W:toggle() end
+            drive({
+                tab = function(n) local p = W:addPage({title = n}); return {p = p, s = p:addSection({title = n})} end,
+                root = function(o) return o.s end,
+                section = function(o, title) return o.p:addSection({title = title}) end,
+                button = function(c, it) c:addButton({title = it.text, callback = function() it.cb() end}) end,
+                toggle = function(c, it) c:addToggle({title = it.text, default = it.state, callback = function(v) it.cb(v) end}) end,
+                slider = function(c, it) c:addSlider({title = it.text, default = it.val, min = it.min, max = it.max,
+                    callback = function(v) it.cb(v) end}) end,
+                input = function(c, it) c:addTextbox({title = it.text, default = it.val or "", callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+            pcall(function() W:SelectPage(W.pages[1], true) end)
+        end},
+
+        {name = "Linoria", tag = "violin-suzutsuki", build = function(tabs)
+            local Lib = get("https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/Library.lua")
+            local vp = getViewport()
+            local W = Lib:CreateWindow({Title = BRAND .. " — " .. BY, Center = true, AutoShow = true,
+                Size = UDim2.fromOffset(math.clamp(vp.X - 40, 300, 550), math.clamp(vp.Y - 60, 240, 600))})
+            ext.destroyers[#ext.destroyers + 1] = function() Lib:Unload() end
+            drive({
+                tab = function(n) local t = W:AddTab(n); return {t = t, g = t:AddLeftGroupbox(n), side = 1} end,
+                root = function(o) return o.g end,
+                section = function(o, title)
+                    o.side = 1 - o.side
+                    return (o.side == 1) and o.t:AddLeftGroupbox(title) or o.t:AddRightGroupbox(title)
+                end,
+                button = function(c, it) c:AddButton({Text = it.text, Func = function() it.cb() end}) end,
+                toggle = function(c, it) c:AddToggle(nextId("t"), {Text = it.text, Default = it.state,
+                    Callback = function(v) it.cb(v) end}) end,
+                slider = function(c, it) c:AddSlider(nextId("s"), {Text = it.text, Default = it.val, Min = it.min, Max = it.max,
+                    Rounding = (stepOf(it) < 1) and 1 or 0, Compact = false, Callback = function(v) it.cb(v) end}) end,
+                input = function(c, it) c:AddInput(nextId("i"), {Default = it.val or "", Numeric = false, Finished = true,
+                    Text = it.text, Placeholder = it.text, Callback = function(v) it.cb(v) end}) end,
+            }, tabs)
+        end},
+    }
+
+    State.uiNames, State.uiTags = {}, {}
+    for _, u in ipairs(UIL) do
+        State.uiNames[#State.uiNames + 1] = u.name
+        State.uiTags[u.name] = u.tag
+    end
+
+    -- ───────── troca de interface ─────────
+    local function snapshot()
+        local set = {}
+        for _, root in ipairs(guiRoots()) do
+            local ok, ch = pcall(function() return root:GetChildren() end)
+            if ok then for _, c in ipairs(ch) do set[c] = true end end
+        end
+        return set
+    end
+    local function newGuis(before)
+        local out = {}
+        for _, root in ipairs(guiRoots()) do
+            local ok, ch = pcall(function() return root:GetChildren() end)
+            if ok then
+                for _, c in ipairs(ch) do
+                    if not before[c] and c:IsA("ScreenGui") and c ~= ScreenGui and c ~= ToastGui then
+                        out[#out + 1] = c
+                    end
+                end
+            end
+        end
+        return out
+    end
+    local function destroyExt()
+        for _, d in ipairs(ext.destroyers) do pcall(d) end
+        for _, g in ipairs(ext.gui) do pcall(function() g:Destroy() end) end
+        ext.gui, ext.destroyers, ext.hidden = {}, {}, false
+    end
+    local function syncNative()   -- devolve ao menu original os estados mexidos na outra UI
+        for _, list in pairs(State.spec) do
+            for _, it in ipairs(list) do
+                if it.k == "toggle" and it.btn and State.toggleSet and State.toggleSet[it.btn] then
+                    pcall(State.toggleSet[it.btn], it.state)
+                elseif it.k == "slider" and it.frame and State.sliderSet and State.sliderSet[it.frame] then
+                    pcall(State.sliderSet[it.frame], it.val)
+                end
+            end
+        end
+    end
+
+    State.destroyExt = destroyExt
+    State.extToggle = function()
+        ext.hidden = not ext.hidden
+        for _, g in ipairs(ext.gui) do pcall(function() g.Enabled = not ext.hidden end) end
+    end
+
+    State.uiSwitch = function(name)
+        if busy or name == curUI then return end
+        local entry
+        for _, u in ipairs(UIL) do if u.name == name then entry = u end end
+        if not entry then return end
+        busy = true
+        task.spawn(function()
+            destroyExt()
+            if name == NATIVE then
+                syncNative()
+                Home.Visible = true
+                State.extActive = false
+                curUI = NATIVE
+                showToast("Interface: " .. NATIVE, "info")
+            else
+                showToast("Carregando " .. name .. "...", "info")
+                local before = snapshot()
+                local ok, err = pcall(entry.build, buildTabs(name))
+                task.wait(0.3)
+                ext.gui = newGuis(before)
+                if ok and #ext.gui > 0 then
+                    Home.Visible = false
+                    State.extActive = true
+                    curUI = name
+                    showToast("✓ " .. name .. " (use o botão flutuante para ocultar/mostrar)", "success")
+                else
+                    warn("[AKZ HUB] UI " .. name .. ": " .. tostring(ok and "janela não apareceu" or err))
+                    destroyExt()
+                    Home.Visible = true
+                    State.extActive = false
+                    curUI = NATIVE
+                    showToast("⚠ " .. name .. " falhou — voltando ao AKZ HUB", "error")
+                end
+            end
+            if State.uiLabel then State.uiLabel(curUI) end
+            busy = false
+        end)
+    end
+end
 
 print("[AKZ HUB V1] Carregado! 19 abas — by: Akira / Angel")
 showToast("✓ AKZ HUB carregado!", "success")
