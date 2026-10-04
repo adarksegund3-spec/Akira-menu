@@ -1,10 +1,10 @@
 --[[
     ═══════════════════════════════════════════════════════════
-    AKZ UNIVERSAL by: angel / akira — PRO PREMIUM EDITION v4
+    AKZ HUB — PRO PREMIUM EDITION v6
     ═══════════════════════════════════════════════════════════
-    • 8 ABAS COMPLETAS com componentes reutilizáveis
-    • Aba Jogos com scripts keyless verificados
-    • Sistema de toasts, busca em tempo real, status ao vivo
+    • 8 abas profissionais com componentes padronizados
+    • Aba Jogos FUNCIONAL com scripts keyless reais verificados
+    • Sistema de toasts, status ao vivo, tratamento de erros
     • Visual dark horror premium (glow, glass, gradientes)
     • Código modular e fácil de manter
     ═══════════════════════════════════════════════════════════
@@ -22,28 +22,1477 @@ local LP              = Players.LocalPlayer
 local LOGO_ID = "rbxassetid://118161689763803"
 local BG_ID   = "rbxassetid://87903267067222"
 
-for _, name in ipairs({"AKZUniversal", "AKZUniversalToast"}) do
-    local old = game:GetService("CoreGui"):FindFirstChild(name)
-    if old then old:Destroy() end
+-- Limpeza de versões anteriores
+for _, n in ipairs({"AKZUniversal","AKZUniversalToast"}) do
+    local o = game:GetService("CoreGui"):FindFirstChild(n)
+    if o then o:Destroy() end
 end
 
--- ═══════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════
 -- ESTADO GLOBAL
--- ═══════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════════════
 local State = {
-    noclip = false, infJump = false, godmode = false,
-    antiAFK = false, antiVoid = false, fullbright = false,
-    noFog = false, chatSpam = false, rainbow = false,
-    walkSpeed = 16, jumpPower = 50, gravity = 196.2,
-    fov = 70, spamSpeed = 1, spamMessage = "AKZ on top",
-    flyState = false, flyBV = nil,
+    noclip=false, infJump=false, godmode=false, antiAFK=false, antiVoid=false,
+    antiFling=false, fullbright=false, noFog=false, walkSpeed=16, jumpPower=50,
+    gravity=196.2, fov=70, spamSpeed=1, spamMsg="AKZ on top",
 }
 
+-- Conexões rastreáveis (evita vazamento de memória)
 local Connections = {}
-local function addConn(key, conn)
-    if Connections[key] then Connections[key]:Disconnect() end
-    Connections[key] = conn
+local function addConn(k, c)
+    if Connections[k] then Connections[k]:Disconnect() end
+    Connections[k] = c
+end
+local function cleanConns()
+    for _, c in pairs(Connections) do
+        if c and c.Disconnect then c:Disconnect() end
+    end
+    Connections = {}
 end
 
--- ═══════════════════════════════════════════════════════════
--- UTILIT
+-- Helpers de personagem
+local function getChar() return LP.Character end
+local function getHum()
+    local c = getChar()
+    return c and c:FindFirstChildOfClass("Humanoid")
+end
+local function getHRP()
+    local c = getChar()
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+local function tp(p) local h=getHRP(); if h then h.CFrame=CFrame.new(p) end end
+local function chat(m)
+    pcall(function()
+        game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents
+            .SayMessageRequest:FireServer(m,"All")
+    end)
+end
+
+-- Tween helper
+local function tween(o,t,p,s,d)
+    local ti = TweenInfo.new(t or 0.2, s or Enum.EasingStyle.Quad, d or Enum.EasingDirection.Out)
+    local tw = TweenService:Create(o, ti, p)
+    tw:Play()
+    return tw
+end
+
+-- Gradiente horror
+local function horrorGrad(parent, mul)
+    mul = mul or 1
+    local g = Instance.new("UIGradient")
+    g.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(70*mul, 8*mul, 8*mul)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 2, 2)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0))
+    }
+    g.Rotation = 90
+    g.Parent = parent
+    return g
+end
+
+-- Arrastável universal
+local function makeDraggable(handle, target, onClick)
+    target = target or handle
+    local dragging, moved, dragInput, dragStart, startPos = false, false
+    local THRESH = 5
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging, moved = true, false
+            dragStart, startPos = i.Position, target.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if not moved and onClick then onClick() end
+                end
+            end)
+        end
+    end)
+    handle.InputChanged:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch then dragInput = i end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if i == dragInput and dragging then
+            local d = i.Position - dragStart
+            if math.abs(d.X) > THRESH or math.abs(d.Y) > THRESH then moved = true end
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+-- ══════════════════════════════════════════════════════════
+-- SCREENGUI RAIZ
+-- ══════════════════════════════════════════════════════════
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AKZUniversal"
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 999
+ScreenGui.Parent = game:GetService("CoreGui")
+
+-- ══════════════════════════════════════════════════════════
+-- SISTEMA DE TOASTS
+-- ══════════════════════════════════════════════════════════
+local ToastGui = Instance.new("ScreenGui")
+ToastGui.Name = "AKZUniversalToast"
+ToastGui.ResetOnSpawn = false
+ToastGui.IgnoreGuiInset = true
+ToastGui.DisplayOrder = 1000
+ToastGui.Parent = game:GetService("CoreGui")
+
+local TC = Instance.new("Frame", ToastGui)
+TC.BackgroundTransparency = 1
+TC.AnchorPoint = Vector2.new(1,0)
+TC.Position = UDim2.new(1,-16,0,16)
+TC.Size = UDim2.new(0,280,1,-32)
+
+local TCL = Instance.new("UIListLayout", TC)
+TCL.SortOrder = Enum.SortOrder.LayoutOrder
+TCL.Padding = UDim.new(0,8)
+TCL.VerticalAlignment = Enum.VerticalAlignment.Top
+
+local TOAST_COL = {
+    success=Color3.fromRGB(60,200,100),
+    error=Color3.fromRGB(220,60,60),
+    info=Color3.fromRGB(80,140,220),
+    warning=Color3.fromRGB(230,180,50),
+}
+local tCount = 0
+local function showToast(msg, kind)
+    kind = kind or "info"
+    tCount = tCount + 1
+    local ac = TOAST_COL[kind] or TOAST_COL.info
+
+    local t = Instance.new("Frame", TC)
+    t.Name = "T_"..tCount
+    t.BackgroundColor3 = Color3.fromRGB(15,5,5)
+    t.BackgroundTransparency = 0.1
+    t.BorderSizePixel = 0
+    t.Size = UDim2.new(1,0,0,44)
+    t.Position = UDim2.new(1,40,0,0)
+    horrorGrad(t, 1.2)
+
+    Instance.new("UICorner", t).CornerRadius = UDim.new(0,8)
+
+    local s = Instance.new("UIStroke", t)
+    s.Color = ac; s.Thickness = 1.5; s.Transparency = 0.2
+
+    local bar = Instance.new("Frame", t)
+    bar.BackgroundColor3 = ac; bar.BorderSizePixel = 0
+    bar.Size = UDim2.new(0,3,1,-16); bar.Position = UDim2.new(0,6,0,8)
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
+
+    local ic = Instance.new("TextLabel", t)
+    ic.Text = ({success="✓",error="⚠",info="ℹ",warning="⚠"})[kind] or "ℹ"
+    ic.Font = Enum.Font.GothamBold; ic.TextSize = 16; ic.TextColor3 = ac
+    ic.BackgroundTransparency = 1
+    ic.Position = UDim2.new(0,18,0,0); ic.Size = UDim2.new(0,24,1,0)
+
+    local lbl = Instance.new("TextLabel", t)
+    lbl.Text = msg; lbl.Font = Enum.Font.Gotham; lbl.TextSize = 13
+    lbl.TextColor3 = Color3.fromRGB(235,235,235)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.BackgroundTransparency = 1
+    lbl.Position = UDim2.new(0,44,0,0); lbl.Size = UDim2.new(1,-52,1,0)
+    lbl.TextWrapped = true
+
+    tween(t, 0.28, {Position = UDim2.new(0,0,0,0)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    task.delay(3.2, function()
+        if not t.Parent then return end
+        local o = tween(t, 0.22, {Position = UDim2.new(1,40,0,0), BackgroundTransparency = 1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        o.Completed:Connect(function() t:Destroy() end)
+    end)
+end
+
+-- ══════════════════════════════════════════════════════════
+-- HOME (painel principal)
+-- ══════════════════════════════════════════════════════════
+local Home = Instance.new("Frame", ScreenGui)
+Home.Name = "Home"
+Home.BackgroundColor3 = Color3.fromRGB(12,4,4)
+Home.BorderSizePixel = 0
+Home.Position = UDim2.new(0.5,-340,0.5,-240)
+Home.Size = UDim2.new(0,680,0,480)
+Home.Visible = false
+Home.ClipsDescendants = true
+
+Instance.new("UICorner", Home).CornerRadius = UDim.new(0,12)
+
+local HS = Instance.new("UIStroke", Home)
+HS.Color = Color3.fromRGB(140,25,25); HS.Thickness = 1.5; HS.Transparency = 0.25
+
+local BgI = Instance.new("ImageLabel", Home)
+BgI.Image = BG_ID; BgI.ScaleType = Enum.ScaleType.Crop
+BgI.BackgroundTransparency = 1; BgI.ImageTransparency = 0.4
+BgI.Size = UDim2.new(1,0,1,0); BgI.ZIndex = 0
+
+local BgO = Instance.new("Frame", Home)
+BgO.BackgroundColor3 = Color3.fromRGB(0,0,0); BgO.BackgroundTransparency = 0.35
+BgO.BorderSizePixel = 0; BgO.Size = UDim2.new(1,0,1,0); BgO.ZIndex = 1
+horrorGrad(BgO)
+
+-- Header
+local Header = Instance.new("Frame", Home)
+Header.BackgroundTransparency = 1; Header.Size = UDim2.new(1,0,0,52); Header.ZIndex = 5
+
+local Title = Instance.new("TextLabel", Header)
+Title.Font = Enum.Font.GothamBold; Title.Text = "AKZ UNIVERSAL"
+Title.TextColor3 = Color3.fromRGB(255,255,255); Title.TextSize = 22
+Title.BackgroundTransparency = 1; Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Position = UDim2.new(0,18,0,8); Title.Size = UDim2.new(0,400,0,22); Title.ZIndex = 6
+
+local TS = Instance.new("UIStroke", Title)
+TS.Color = Color3.fromRGB(200,30,30); TS.Thickness = 2
+
+local Sub = Instance.new("TextLabel", Header)
+Sub.Font = Enum.Font.Gotham; Sub.Text = "by: angel / akira  •  PRO PREMIUM"
+Sub.TextColor3 = Color3.fromRGB(160,160,160); Sub.TextSize = 11
+Sub.BackgroundTransparency = 1; Sub.TextXAlignment = Enum.TextXAlignment.Left
+Sub.Position = UDim2.new(0,20,0,30); Sub.Size = UDim2.new(0,400,0,16); Sub.ZIndex = 6
+
+local CloseBtn = Instance.new("TextButton", Header)
+CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(255,255,255); CloseBtn.TextSize = 14
+CloseBtn.BackgroundColor3 = Color3.fromRGB(120,15,15)
+CloseBtn.BorderSizePixel = 0; CloseBtn.AutoButtonColor = false
+CloseBtn.Position = UDim2.new(1,-36,0,14); CloseBtn.Size = UDim2.new(0,22,0,22); CloseBtn.ZIndex = 6
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1,0)
+CloseBtn.MouseButton1Click:Connect(function()
+    Home.Visible = false
+    showToast("Menu fechado", "info")
+end)
+
+local HL = Instance.new("Frame", Home)
+HL.BackgroundColor3 = Color3.fromRGB(140,25,25); HL.BackgroundTransparency = 0.4
+HL.BorderSizePixel = 0; HL.Position = UDim2.new(0,14,0,52)
+HL.Size = UDim2.new(1,-28,0,1); HL.ZIndex = 5
+
+makeDraggable(Header, Home)
+
+-- ══════════════════════════════════════════════════════════
+-- SIDEBAR
+-- ══════════════════════════════════════════════════════════
+local Sidebar = Instance.new("ScrollingFrame", Home)
+Sidebar.BackgroundColor3 = Color3.fromRGB(8,3,3); Sidebar.BackgroundTransparency = 0.3
+Sidebar.BorderSizePixel = 0
+Sidebar.Position = UDim2.new(0,0,0,53); Sidebar.Size = UDim2.new(0,150,1,-53)
+Sidebar.CanvasSize = UDim2.new(0,0,0,0)
+Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Sidebar.ScrollBarThickness = 2
+Sidebar.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
+Sidebar.ZIndex = 3
+
+local SL = Instance.new("Frame", Sidebar)
+SL.BackgroundColor3 = Color3.fromRGB(140,25,25); SL.BackgroundTransparency = 0.55
+SL.BorderSizePixel = 0; SL.Position = UDim2.new(1,-1,0,0); SL.Size = UDim2.new(0,1,1,0); SL.ZIndex = 4
+
+local Tabs, TabBtns, currentTab = {}, {}, nil
+
+local function createTabBtn(name, icon, order)
+    local b = Instance.new("TextButton", Sidebar)
+    b.Font = Enum.Font.GothamMedium
+    b.Text = "  "..icon.."   "..name
+    b.TextColor3 = Color3.fromRGB(140,140,140); b.TextSize = 12
+    b.BackgroundColor3 = Color3.fromRGB(30,5,5); b.BackgroundTransparency = 1
+    b.BorderSizePixel = 0; b.TextXAlignment = Enum.TextXAlignment.Left
+    b.Position = UDim2.new(0,6,0,6+(order-1)*34)
+    b.Size = UDim2.new(1,-12,0,30); b.ZIndex = 5; b.AutoButtonColor = false
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+
+    local ind = Instance.new("Frame", b)
+    ind.BackgroundColor3 = Color3.fromRGB(220,35,35); ind.BorderSizePixel = 0
+    ind.Position = UDim2.new(0,0,0,6); ind.Size = UDim2.new(0,3,1,-12)
+    ind.ZIndex = 6; ind.Visible = false
+    Instance.new("UICorner", ind).CornerRadius = UDim.new(1,0)
+
+    TabBtns[name] = {button=b, indicator=ind}
+end
+
+local function selectTab(name)
+    if currentTab == name then return end
+    currentTab = name
+    for tn, d in pairs(TabBtns) do
+        local a = (tn == name)
+        tween(d.button, 0.18, {
+            TextColor3 = a and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140),
+            BackgroundTransparency = a and 0.25 or 1,
+            BackgroundColor3 = a and Color3.fromRGB(80,15,15) or Color3.fromRGB(30,5,5),
+        })
+        d.indicator.Visible = a
+    end
+    for tn, f in pairs(Tabs) do f.Visible = (tn == name) end
+end
+
+local Content = Instance.new("Frame", Home)
+Content.BackgroundTransparency = 1
+Content.Position = UDim2.new(0,150,0,53)
+Content.Size = UDim2.new(1,-150,1,-53)
+Content.ZIndex = 3
+
+local function createTabContent(name)
+    local f = Instance.new("ScrollingFrame", Content)
+    f.Name = name.."Content"
+    f.BackgroundTransparency = 1; f.BorderSizePixel = 0
+    f.Size = UDim2.new(1,0,1,0)
+    f.CanvasSize = UDim2.new(0,0,0,0)
+    f.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    f.ScrollBarThickness = 3
+    f.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
+    f.ScrollBarImageTransparency = 0.3
+    f.Visible = false; f.ZIndex = 3
+    Tabs[name] = f
+    return f
+end
+
+-- ══════════════════════════════════════════════════════════
+-- COMPONENTES REUTILIZÁVEIS
+-- ══════════════════════════════════════════════════════════
+local C = {}
+local BTN_H, GAP, PAD = 36, 6, 12
+
+local function hoverFX(b, hv, pr)
+    local st = b:FindFirstChildOfClass("UIStroke")
+    local base = b.BackgroundColor3
+    b.MouseEnter:Connect(function()
+        tween(b, 0.12, {BackgroundColor3 = hv or Color3.fromRGB(40,10,10)})
+        if st then tween(st, 0.12, {Transparency = 0.15}) end
+    end)
+    b.MouseLeave:Connect(function()
+        tween(b, 0.12, {BackgroundColor3 = base})
+        if st then tween(st, 0.12, {Transparency = 0.4}) end
+    end)
+    b.MouseButton1Down:Connect(function() tween(b, 0.08, {BackgroundColor3 = pr or Color3.fromRGB(60,15,15)}) end)
+    b.MouseButton1Up:Connect(function() tween(b, 0.12, {BackgroundColor3 = base}) end)
+end
+
+function C.section(parent, title, y)
+    local l = Instance.new("TextLabel", parent)
+    l.Text = string.upper(title); l.Font = Enum.Font.GothamBold
+    l.TextSize = 10; l.TextColor3 = Color3.fromRGB(200,60,60)
+    l.TextXAlignment = Enum.TextXAlignment.Left; l.BackgroundTransparency = 1
+    l.Position = UDim2.new(0,PAD+2,0,y); l.Size = UDim2.new(1,-PAD*2,0,16)
+    local ln = Instance.new("Frame", parent)
+    ln.BackgroundColor3 = Color3.fromRGB(140,25,25); ln.BackgroundTransparency = 0.6
+    ln.BorderSizePixel = 0; ln.Position = UDim2.new(0,PAD+2,0,y+16)
+    ln.Size = UDim2.new(1,-PAD*2-4,0,1)
+    return y + 24
+end
+
+-- Toggle ON/OFF moderno com switch animado
+function C.toggle(parent, text, y, default, cb)
+    local b = Instance.new("TextButton", parent)
+    b.Font = Enum.Font.Gotham; b.Text = text
+    b.TextColor3 = Color3.fromRGB(220,220,220); b.TextSize = 13
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.35
+    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
+    b.Size = UDim2.new(1,-PAD*2,0,BTN_H); b.AutoButtonColor = false; b.ZIndex = 4
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
+    local s = Instance.new("UIStroke", b)
+    s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
+
+    local tr = Instance.new("Frame", b)
+    tr.BackgroundColor3 = Color3.fromRGB(50,20,20); tr.BorderSizePixel = 0
+    tr.Position = UDim2.new(1,-46,0.5,-9); tr.Size = UDim2.new(0,36,0,18); tr.ZIndex = 5
+    Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
+    local kn = Instance.new("Frame", tr)
+    kn.BackgroundColor3 = Color3.fromRGB(160,160,160); kn.BorderSizePixel = 0
+    kn.Position = UDim2.new(0,2,0.5,-7); kn.Size = UDim2.new(0,14,0,14); kn.ZIndex = 6
+    Instance.new("UICorner", kn).CornerRadius = UDim.new(1,0)
+
+    local st = default or false
+    local function render()
+        if st then
+            tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(60,180,90)})
+            tween(kn, 0.2, {Position = UDim2.new(1,-16,0.5,-7), BackgroundColor3 = Color3.fromRGB(255,255,255)})
+            tween(s, 0.2, {Color = Color3.fromRGB(60,180,90), Transparency = 0.2})
+            tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(25,8,8)})
+        else
+            tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(50,20,20)})
+            tween(kn, 0.2, {Position = UDim2.new(0,2,0.5,-7), BackgroundColor3 = Color3.fromRGB(160,160,160)})
+            tween(s, 0.2, {Color = Color3.fromRGB(80,20,20), Transparency = 0.4})
+            tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(20,5,5)})
+        end
+    end
+    render()
+    b.MouseButton1Click:Connect(function()
+        st = not st; render()
+        if cb then pcall(cb, st) end
+        showToast(text..(st and " ativado" or " desativado"), st and "success" or "info")
+    end)
+    return b
+end
+
+-- Botão com ícone ▶ (clique)
+function C.button(parent, text, y, cb, clickIcon)
+    local b = Instance.new("TextButton", parent)
+    b.Font = Enum.Font.Gotham; b.Text = "  "..text
+    b.TextColor3 = Color3.fromRGB(220,220,220); b.TextSize = 13
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.35
+    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
+    b.Size = UDim2.new(1,-PAD*2,0,BTN_H); b.AutoButtonColor = false; b.ZIndex = 4
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
+    local s = Instance.new("UIStroke", b)
+    s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
+
+    if clickIcon ~= false then
+        local ic = Instance.new("TextLabel", b)
+        ic.Text = "▶"; ic.Font = Enum.Font.GothamBold; ic.TextSize = 11
+        ic.TextColor3 = Color3.fromRGB(220,35,35); ic.BackgroundTransparency = 1
+        ic.Position = UDim2.new(1,-26,0,0); ic.Size = UDim2.new(0,18,1,0); ic.ZIndex = 6
+    end
+
+    hoverFX(b)
+    b.MouseButton1Click:Connect(function()
+        if not cb then return end
+        showToast("▶ "..text, "info")
+        local ok, err = pcall(cb)
+        if not ok then
+            warn("[AKZ] Erro em '"..text.."': "..tostring(err))
+            showToast("⚠ Falha em "..text, "error")
+        end
+    end)
+    return b
+end
+
+-- Slider com min/max/valor atual
+function C.slider(parent, label, min, max, default, y, cb)
+    local f = Instance.new("Frame", parent)
+    f.BackgroundTransparency = 1
+    f.Position = UDim2.new(0,PAD,0,y); f.Size = UDim2.new(1,-PAD*2,0,44)
+
+    local l = Instance.new("TextLabel", f)
+    l.Text = label; l.Font = Enum.Font.GothamMedium; l.TextSize = 12
+    l.TextColor3 = Color3.fromRGB(210,210,210); l.BackgroundTransparency = 1
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Size = UDim2.new(0.7,0,0,16)
+
+    local v = Instance.new("TextLabel", f)
+    v.Text = tostring(default); v.Font = Enum.Font.GothamBold; v.TextSize = 12
+    v.TextColor3 = Color3.fromRGB(220,60,60); v.BackgroundTransparency = 1
+    v.TextXAlignment = Enum.TextXAlignment.Right
+    v.Position = UDim2.new(0.7,0,0,0); v.Size = UDim2.new(0.3,0,0,16)
+
+    local tr = Instance.new("Frame", f)
+    tr.BackgroundColor3 = Color3.fromRGB(35,10,10); tr.BorderSizePixel = 0
+    tr.Position = UDim2.new(0,0,0,24); tr.Size = UDim2.new(1,0,0,6)
+    Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
+
+    local fl = Instance.new("Frame", tr)
+    fl.BackgroundColor3 = Color3.fromRGB(200,35,35); fl.BorderSizePixel = 0
+    fl.Size = UDim2.new(0,0,1,0)
+    Instance.new("UICorner", fl).CornerRadius = UDim.new(1,0)
+
+    local hd = Instance.new("Frame", tr)
+    hd.BackgroundColor3 = Color3.fromRGB(255,255,255); hd.BorderSizePixel = 0
+    hd.Size = UDim2.new(0,12,0,12); hd.Position = UDim2.new(0,-6,0,-3)
+    Instance.new("UICorner", hd).CornerRadius = UDim.new(1,0)
+
+    local val, dragging = default, false
+    local function upd(i)
+        local r = math.clamp((i.Position.X - tr.AbsolutePosition.X) / tr.AbsoluteSize.X, 0, 1)
+        val = math.floor(min + (max-min)*r)
+        fl.Size = UDim2.new(r,0,1,0)
+        hd.Position = UDim2.new(r,-6,0,-3)
+        v.Text = tostring(val)
+        if cb then pcall(cb, val) end
+    end
+    tr.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; upd(i)
+        end
+    end)
+    tr.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i) end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i) end
+    end)
+    UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+end
+
+function C.card(parent, y, h)
+    local c = Instance.new("Frame", parent)
+    c.BackgroundColor3 = Color3.fromRGB(18,6,6); c.BackgroundTransparency = 0.25
+    c.BorderSizePixel = 0; c.Position = UDim2.new(0,PAD,0,y)
+    c.Size = UDim2.new(1,-PAD*2,0,h or 100)
+    Instance.new("UICorner", c).CornerRadius = UDim.new(0,10)
+    local s = Instance.new("UIStroke", c)
+    s.Color = Color3.fromRGB(120,25,25); s.Thickness = 1; s.Transparency = 0.5
+    return c
+end
+
+function C.search(parent, y, onChange)
+    local b = Instance.new("Frame", parent)
+    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.25
+    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
+    b.Size = UDim2.new(1,-PAD*2,0,34)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
+    local s = Instance.new("UIStroke", b)
+    s.Color = Color3.fromRGB(120,25,25); s.Thickness = 1; s.Transparency = 0.4
+
+    local ic = Instance.new("TextLabel", b)
+    ic.Text = "🔎"; ic.Font = Enum.Font.Gotham; ic.TextSize = 14
+    ic.BackgroundTransparency = 1; ic.Position = UDim2.new(0,8,0,0)
+    ic.Size = UDim2.new(0,24,1,0)
+
+    local i = Instance.new("TextBox", b)
+    i.PlaceholderText = "Pesquisar jogos..."
+    i.PlaceholderColor3 = Color3.fromRGB(120,120,120)
+    i.Text = ""; i.Font = Enum.Font.Gotham; i.TextSize = 12
+    i.TextColor3 = Color3.fromRGB(230,230,230); i.BackgroundTransparency = 1
+    i.TextXAlignment = Enum.TextXAlignment.Left
+    i.Position = UDim2.new(0,34,0,0); i.Size = UDim2.new(1,-42,1,0)
+    i.ClearTextOnFocus = false
+
+    i:GetPropertyChangedSignal("Text"):Connect(function()
+        if onChange then onChange(i.Text) end
+    end)
+    return i
+end
+
+-- ══════════════════════════════════════════════════════════
+-- MÓDULO DE JOGOS (estrutura modular)
+-- ══════════════════════════════════════════════════════════
+local GameModule = {}
+GameModule.games = {
+    {
+        id = "mm2",
+        name = "MM2 — Murder Mystery 2",
+        icon = "🔪",
+        desc = "Aether Hub: Noclip, ESP, Aimbot, Walkspeed, Click Teleport. Keyless.",
+        script = "https://raw.githubusercontent.com/aluucardd/MM2/refs/heads/main/Aether%20Hub%20MM2",
+        sources = {
+            "https://raw.githubusercontent.com/xv3gasx/Murder-Mystery-2/refs/heads/main/Release.lua",
+        },
+    },
+    {
+        id = "kalb",
+        name = "Kick a Lucky Block",
+        icon = "🎲",
+        desc = "Luxy Hub: Auto Kick, Auto Farm, Auto Rebirth, Brainrot Filter. Keyless.",
+        script = "https://raw.githubusercontent.com/Omnie7/Luxy-Hub/refs/heads/main/main.lua",
+        sources = {
+            "https://raw.githubusercontent.com/Lexsontopp/onlyforloader/refs/heads/main/LOADER/Freemium.lua",
+        },
+    },
+    {
+        id = "dahood",
+        name = "Da Hood",
+        icon = "🔫",
+        desc = "Oxide Hub: Silent Aim, Godmode, ESP, Infinite Jump, Custom Hip Height. Keyless.",
+        script = "https://raw.githubusercontent.com/xulfo/Oxide-Loader/main/Main.lua",
+        sources = {
+            "https://raw.githubusercontent.com/BetterDaHood/BetterDaHood/main/whitelist_output.lua",
+        },
+    },
+    {
+        id = "bloxfruits",
+        name = "Blox Fruits",
+        icon = "🍎",
+        desc = "ARC Hub: Auto Farm, Auto Quest, ESP, Teleport. Keyless.",
+        script = "https://raw.githubusercontent.com/bloxfruitsnokey/Arcylic/refs/heads/main/ARC/update.luau",
+        sources = {
+            "https://rawscripts.net/raw/RIVALS-Noks-unlock-all-205613",
+        },
+    },
+    {
+        id = "arsenal",
+        name = "Arsenal",
+        icon = "💥",
+        desc = "Catware: Aimbot, Silent Aim, ESP, Chams, Hitbox Expander. Keyless.",
+        script = "https://catware.xyz/Arsenal.lua",
+        sources = {
+            "https://pastefy.app/C99STsoR/raw",
+        },
+    },
+    {
+        id = "petsimx",
+        name = "Pet Simulator X",
+        icon = "🐾",
+        desc = "Auto Hatch, Auto Farm, Auto Collect Coins, Teleports. Keyless.",
+        script = "https://raw.githubusercontent.com/Oproxide/scripthub/refs/heads/main/main.lua",
+        sources = {
+            "https://raw.githubusercontent.com/4lve/Roblox/main/PetSimX.lua",
+        },
+    },
+    {
+        id = "jailbreak",
+        name = "Jailbreak",
+        icon = "🚔",
+        desc = "Veloxide: Instant Reload, Silent Aim, Vehicle Flight, Fast Taser. Keyless.",
+        script = "https://raw.githubusercontent.com/veloxides/Jailbreak/refs/heads/main/VeloxideLoader",
+        sources = {
+            "https://raw.githubusercontent.com/stoneworkerdape23/Jailbreak-script/main/main.lua",
+        },
+    },
+    {
+        id = "adoptme",
+        name = "Adopt Me!",
+        icon = "🐶",
+        desc = "Auto Farm, Pet Spawner, Fly, Noclip, Auto Hatch. Keyless.",
+        script = "https://raw.githubusercontent.com/nemothedognemo-stack/adoptmeCookiehub/refs/heads/main/loader",
+        sources = {
+            "https://raw.githubusercontent.com/swiftasfboi/AdoptMe/refs/heads/main/HouseCloner",
+        },
+    },
+    {
+        id = "bedwars",
+        name = "BedWars",
+        icon = "🛏",
+        desc = "Auto Click, Kill Aura, Aimbot, Break All Beds, God Mode. Keyless.",
+        script = "https://gist.githubusercontent.com/DeveloperMikey/2b8ee3d5a38c56c2cc1db72554850384/raw/bedwar.lua",
+        sources = {
+            "https://rawscripts.net/raw/BedWars-Vape-Fix-for-Matches-236319",
+        },
+    },
+    {
+        id = "toh",
+        name = "Tower of Hell",
+        icon = "🗼",
+        desc = "Auto Tween to Top, Invisible Killbricks, Infinite Jump. Keyless.",
+        script = "https://pastebin.com/raw/CLKFaUJR",
+        sources = {
+            "https://raw.githubusercontent.com/Sc-Rhyan57/msdoors/refs/heads/main/download/main.lua",
+        },
+    },
+    {
+        id = "bloxburg",
+        name = "Welcome to Bloxburg",
+        icon = "🏘",
+        desc = "Auto Farm (all jobs), Auto Snowplowing, AutoBuild. Keyless.",
+        script = "https://raw.githubusercontent.com/PainfulDestroyer/Roblox/main/Scar%20Hub",
+        sources = {},
+    },
+    {
+        id = "doors",
+        name = "DOORS",
+        icon = "👻",
+        desc = "NOVA Hub: God Mode, Loot Aura, ESP, Speed. Keyless.",
+        script = "https://raw.githubusercontent.com/kyksikoid/Doors-Script/main/doors.lua",
+        sources = {
+            "https://raw.githubusercontent.com/Sc-Rhyan57/msdoors/refs/heads/main/download/main.lua",
+        },
+    },
+    {
+        id = "evade",
+        name = "Evade",
+        icon = "🏃",
+        desc = "Collect Items, Avoid Nextbot, ESP Player, Speed Changer. Keyless.",
+        script = "https://raw.githubusercontent.com/gumanba/Scripts/main/EvadeEvent",
+        sources = {
+            "https://raw.githubusercontent.com/Unknownproooolucky/Draconic-Hub-X/refs/heads/main/files/Evade/Overhaul.lua",
+        },
+    },
+}
+
+-- Detecta se o jogo atual tem suporte
+function GameModule.getCurrentGame()
+    for _, g in ipairs(GameModule.games) do
+        if g.name:lower():find(game.PlaceId.."") then return g end
+    end
+    -- Verifica pelo nome do jogo
+    local ok, info = pcall(function()
+        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+    end)
+    if ok and info then
+        local jn = info.Name:lower()
+        for _, g in ipairs(GameModule.games) do
+            if jn:find(g.id:lower()) or jn:find(g.name:lower():split(" — ")[1]) then
+                return g
+            end
+        end
+    end
+    return nil
+end
+
+-- Executa script com fallback de fontes
+function GameModule.execute(gameData, onStatus)
+    onStatus("⏳ Carregando...", "loading")
+    local sources = {gameData.script}
+    if gameData.sources then
+        for _, s in ipairs(gameData.sources) do table.insert(sources, s) end
+    end
+    for i, url in ipairs(sources) do
+        local ok, err = pcall(function()
+            local code = game:HttpGet(url)
+            if not code or #code < 20 then
+                error("Resposta vazia ou inválida")
+            end
+            loadstring(code)()
+        end)
+        if ok then
+            onStatus("✓ Executado!", "success")
+            showToast("▶ "..gameData.name.." executado", "success")
+            return true
+        else
+            warn("[AKZ] Fonte "..i.." falhou: "..tostring(err))
+        end
+    end
+    onStatus("⚠ Falhou", "error")
+    showToast("⚠ Falha em "..gameData.name, "error")
+    return false
+end
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 1: PRINCIPAL
+-- ══════════════════════════════════════════════════════════
+local tabPrincipal = createTabContent("Principal")
+local intro = C.card(tabPrincipal, 8, 150)
+
+local iT = Instance.new("TextLabel", intro)
+iT.Text = "AKZ UNIVERSAL"; iT.Font = Enum.Font.GothamBold; iT.TextSize = 18
+iT.TextColor3 = Color3.fromRGB(255,255,255); iT.BackgroundTransparency = 1
+iT.Position = UDim2.new(0,14,0,12); iT.Size = UDim2.new(1,-28,0,22)
+iT.TextXAlignment = Enum.TextXAlignment.Left
+
+local iS = Instance.new("TextLabel", intro)
+iS.Text = "PRO PREMIUM EDITION"; iS.Font = Enum.Font.GothamMedium
+iS.TextSize = 10; iS.TextColor3 = Color3.fromRGB(220,60,60)
+iS.BackgroundTransparency = 1; iS.Position = UDim2.new(0,14,0,34)
+iS.Size = UDim2.new(1,-28,0,14); iS.TextXAlignment = Enum.TextXAlignment.Left
+
+local dL = Instance.new("TextLabel", intro)
+dL.Text = "👤 Desenvolvedor:  angel / akira"
+dL.Font = Enum.Font.Gotham; dL.TextSize = 11
+dL.TextColor3 = Color3.fromRGB(220,220,220); dL.BackgroundTransparency = 1
+dL.Position = UDim2.new(0,14,0,58); dL.Size = UDim2.new(1,-28,0,16)
+dL.TextXAlignment = Enum.TextXAlignment.Left
+
+local dc = Instance.new("TextLabel", intro)
+dc.Text = "💬 Comunidade:  discord.gg/kc7myVSq3"
+dc.Font = Enum.Font.Gotham; dc.TextSize = 11
+dc.TextColor3 = Color3.fromRGB(220,220,220); dc.BackgroundTransparency = 1
+dc.Position = UDim2.new(0,14,0,78); dc.Size = UDim2.new(1,-140,0,16)
+dc.TextXAlignment = Enum.TextXAlignment.Left
+
+local cb = Instance.new("TextButton", intro)
+cb.Font = Enum.Font.GothamBold; cb.Text = "COPIAR"
+cb.TextSize = 10; cb.TextColor3 = Color3.fromRGB(255,255,255)
+cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
+cb.BorderSizePixel = 0; cb.AutoButtonColor = false
+cb.AnchorPoint = Vector2.new(1,0)
+cb.Position = UDim2.new(1,-12,0,78); cb.Size = UDim2.new(0,70,0,20)
+Instance.new("UICorner", cb).CornerRadius = UDim.new(0,5)
+cb.MouseButton1Click:Connect(function()
+    if setclipboard then
+        setclipboard("https://discord.gg/kc7myVSq3")
+        cb.Text = "✓ OK"; cb.BackgroundColor3 = Color3.fromRGB(60,180,90)
+        showToast("✓ Discord copiado!", "success")
+        task.delay(2, function()
+            cb.Text = "COPIAR"; cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
+        end)
+    else
+        showToast("⚠ Executor não suporta clipboard", "warning")
+    end
+end)
+
+local dsc = Instance.new("TextLabel", intro)
+dsc.Text = "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos."
+dsc.Font = Enum.Font.Gotham; dsc.TextSize = 10
+dsc.TextColor3 = Color3.fromRGB(170,170,170); dsc.TextWrapped = true
+dsc.BackgroundTransparency = 1; dsc.Position = UDim2.new(0,14,0,104)
+dsc.Size = UDim2.new(1,-28,0,32); dsc.TextXAlignment = Enum.TextXAlignment.Left
+dsc.TextYAlignment = Enum.TextYAlignment.Top
+
+local py = 170
+py = C.section(tabPrincipal, "Atalhos Rápidos", py)
+C.button(tabPrincipal, "Infinite Yield (Admin)", py, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end); py = py + BTN_H + GAP
+C.button(tabPrincipal, "AirHub V2 (ESP + Aimbot)", py, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end); py = py + BTN_H + GAP
+C.button(tabPrincipal, "FlyGuiV3", py, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+end); py = py + BTN_H + GAP
+C.button(tabPrincipal, "All Emotes", py, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 2: JOGOS SUPORTADOS
+-- ══════════════════════════════════════════════════════════
+local tabJogos = createTabContent("Jogos")
+
+-- Aviso amarelo destacado
+local wc = Instance.new("Frame", tabJogos)
+wc.BackgroundColor3 = Color3.fromRGB(35,28,5); wc.BackgroundTransparency = 0.15
+wc.BorderSizePixel = 0; wc.Position = UDim2.new(0,PAD,0,8)
+wc.Size = UDim2.new(1,-PAD*2,0,62)
+Instance.new("UICorner", wc).CornerRadius = UDim.new(0,8)
+local ws = Instance.new("UIStroke", wc)
+ws.Color = Color3.fromRGB(230,200,50); ws.Thickness = 1.5; ws.Transparency = 0.15
+
+local wt = Instance.new("TextLabel", wc)
+wt.Text = "⚠  AVISO"; wt.Font = Enum.Font.GothamBold; wt.TextSize = 12
+wt.TextColor3 = Color3.fromRGB(240,210,70); wt.BackgroundTransparency = 1
+wt.TextXAlignment = Enum.TextXAlignment.Left
+wt.Position = UDim2.new(0,12,0,6); wt.Size = UDim2.new(1,-24,0,16)
+
+local wd = Instance.new("TextLabel", wc)
+wd.Text = "Os scripts disponibilizados nesta seção são gratuitos e sem key. Eles não possuem vínculo oficial com o Akz Hub."
+wd.Font = Enum.Font.Gotham; wd.TextSize = 10
+wd.TextColor3 = Color3.fromRGB(220,200,140); wd.TextWrapped = true
+wd.BackgroundTransparency = 1
+wd.Position = UDim2.new(0,12,0,24); wd.Size = UDim2.new(1,-24,0,32)
+wd.TextXAlignment = Enum.TextXAlignment.Left; wd.TextYAlignment = Enum.TextYAlignment.Top
+
+-- Detecção do jogo atual
+local currentGame = GameModule.getCurrentGame()
+local currentLabel = Instance.new("TextLabel", tabJogos)
+currentLabel.Font = Enum.Font.GothamMedium; currentLabel.TextSize = 11
+currentLabel.BackgroundTransparency = 1; currentLabel.TextXAlignment = Enum.TextXAlignment.Left
+currentLabel.Position = UDim2.new(0,PAD+2,0,76); currentLabel.Size = UDim2.new(1,-PAD*2,0,18)
+
+if currentGame then
+    currentLabel.Text = "✓ Jogo suportado: "..currentGame.name
+    currentLabel.TextColor3 = Color3.fromRGB(120,220,120)
+else
+    currentLabel.Text = "⚠ Este jogo não possui suporte atualmente."
+    currentLabel.TextColor3 = Color3.fromRGB(220,180,80)
+end
+
+-- Busca
+local searchInput = C.search(tabJogos, 100, nil)
+local cards = {}
+
+-- Renderiza cards de jogos
+local function renderGames(filter)
+    filter = (filter or ""):lower()
+    for _, c in ipairs(cards) do c:Destroy() end
+    cards = {}
+    local y, found = 142, 0
+    for _, g in ipairs(GameModule.games) do
+        if filter == "" or g.name:lower():find(filter,1,true) or g.desc:lower():find(filter,1,true) then
+            local c = Instance.new("Frame", tabJogos)
+            c.BackgroundColor3 = Color3.fromRGB(18,6,6); c.BackgroundTransparency = 0.3
+            c.BorderSizePixel = 0; c.Position = UDim2.new(0,PAD,0,y)
+            c.Size = UDim2.new(1,-PAD*2,0,90)
+            Instance.new("UICorner", c).CornerRadius = UDim.new(0,9)
+            local s = Instance.new("UIStroke", c)
+            s.Color = Color3.fromRGB(100,20,20); s.Thickness = 1; s.Transparency = 0.5
+
+            -- Ícone
+            local ifrm = Instance.new("Frame", c)
+            ifrm.BackgroundColor3 = Color3.fromRGB(35,10,10); ifrm.BorderSizePixel = 0
+            ifrm.Position = UDim2.new(0,10,0,12); ifrm.Size = UDim2.new(0,40,0,40)
+            Instance.new("UICorner", ifrm).CornerRadius = UDim.new(0,8)
+            local il = Instance.new("TextLabel", ifrm)
+            il.Text = g.icon or "🎮"; il.Font = Enum.Font.GothamBold; il.TextSize = 20
+            il.BackgroundTransparency = 1; il.Size = UDim2.new(1,0,1,0)
+
+            -- Nome
+            local nl = Instance.new("TextLabel", c)
+            nl.Text = g.name; nl.Font = Enum.Font.GothamBold; nl.TextSize = 13
+            nl.TextColor3 = Color3.fromRGB(255,255,255)
+            nl.TextXAlignment = Enum.TextXAlignment.Left; nl.BackgroundTransparency = 1
+            nl.Position = UDim2.new(0,60,0,10); nl.Size = UDim2.new(1,-150,0,16)
+
+            -- Indicador "JOGO ATUAL"
+            if currentGame and currentGame.id == g.id then
+                local cur = Instance.new("TextLabel", c)
+                cur.Text = "● JOGO ATUAL"; cur.Font = Enum.Font.GothamBold
+                cur.TextSize = 9; cur.TextColor3 = Color3.fromRGB(120,220,120)
+                cur.BackgroundTransparency = 1
+                cur.Position = UDim2.new(0,60,0,28); cur.Size = UDim2.new(0,100,0,14)
+            end
+
+            -- Descrição
+            local dl = Instance.new("TextLabel", c)
+            dl.Text = g.desc or ""; dl.Font = Enum.Font.Gotham; dl.TextSize = 10
+            dl.TextColor3 = Color3.fromRGB(160,160,160)
+            dl.TextXAlignment = Enum.TextXAlignment.Left; dl.TextWrapped = true
+            dl.BackgroundTransparency = 1
+            dl.Position = UDim2.new(0,60,0,(currentGame and currentGame.id == g.id) and 44 or 30)
+            dl.Size = UDim2.new(1,-80,0,30)
+
+            -- Botão EXECUTAR
+            local eb = Instance.new("TextButton", c)
+            eb.Font = Enum.Font.GothamBold; eb.Text = "▶ EXECUTAR"
+            eb.TextSize = 10; eb.TextColor3 = Color3.fromRGB(255,255,255)
+            eb.BackgroundColor3 = Color3.fromRGB(140,25,25)
+            eb.BorderSizePixel = 0; eb.AutoButtonColor = false
+            eb.AnchorPoint = Vector2.new(1,0)
+            eb.Position = UDim2.new(1,-10,0,10); eb.Size = UDim2.new(0,84,0,24)
+            Instance.new("UICorner", eb).CornerRadius = UDim.new(0,6)
+
+            -- Estado do script
+            local sl = Instance.new("TextLabel", c)
+            sl.Text = ""; sl.Font = Enum.Font.GothamMedium; sl.TextSize = 9
+            sl.TextColor3 = Color3.fromRGB(120,220,120)
+            sl.TextXAlignment = Enum.TextXAlignment.Right; sl.BackgroundTransparency = 1
+            sl.AnchorPoint = Vector2.new(1,0)
+            sl.Position = UDim2.new(1,-10,0,42); sl.Size = UDim2.new(0,140,0,14)
+
+            -- Hover
+            eb.MouseEnter:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(180,40,40)}) end)
+            eb.MouseLeave:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(140,25,25)}) end)
+
+            -- Clique executar
+            local running = false
+            eb.MouseButton1Click:Connect(function()
+                if running then
+                    showToast("⏳ Já está carregando...", "warning")
+                    return
+                end
+                running = true
+                eb.Text = "⏳..."
+                sl.Text = "Carregando..."
+                sl.TextColor3 = Color3.fromRGB(220,200,80)
+
+                local ok = GameModule.execute(g, function(msg, kind)
+                    sl.Text = msg
+                    sl.TextColor3 = kind == "success" and Color3.fromRGB(120,220,120)
+                        or (kind == "error" and Color3.fromRGB(220,80,80) or Color3.fromRGB(220,200,80))
+                end)
+
+                task.wait(0.8)
+                eb.Text = "▶ EXECUTAR"
+                running = false
+            end)
+
+            table.insert(cards, c)
+            y = y + 98
+            found = found + 1
+        end
+    end
+    if found == 0 then
+        local nr = Instance.new("TextLabel", tabJogos)
+        nr.Text = "🔍 Nenhum jogo encontrado."
+        nr.Font = Enum.Font.Gotham; nr.TextSize = 12
+        nr.TextColor3 = Color3.fromRGB(160,160,160); nr.BackgroundTransparency = 1
+        nr.Position = UDim2.new(0,PAD,0,y+20); nr.Size = UDim2.new(1,-PAD*2,0,20)
+        table.insert(cards, nr)
+    end
+end
+
+searchInput:GetPropertyChangedSignal("Text"):Connect(function() renderGames(searchInput.Text) end)
+renderGames("")
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 3: STATUS
+-- ══════════════════════════════════════════════════════════
+local tabStatus = createTabContent("Status")
+local sc = C.card(tabStatus, 8, 215)
+
+local stT = Instance.new("TextLabel", sc)
+stT.Text = "STATUS DO SISTEMA"; stT.Font = Enum.Font.GothamBold
+stT.TextSize = 13; stT.TextColor3 = Color3.fromRGB(255,255,255)
+stT.BackgroundTransparency = 1
+stT.Position = UDim2.new(0,14,0,10); stT.Size = UDim2.new(1,-28,0,18)
+stT.TextXAlignment = Enum.TextXAlignment.Left
+
+local sln = Instance.new("Frame", sc)
+sln.BackgroundColor3 = Color3.fromRGB(140,25,25); sln.BackgroundTransparency = 0.5
+sln.BorderSizePixel = 0
+sln.Position = UDim2.new(0,14,0,30); sln.Size = UDim2.new(1,-28,0,1)
+
+local statusRows = {}
+local rowY = 40
+local defs = {
+    {k="executor", l="Executor"},
+    {k="game",     l="Jogo"},
+    {k="player",   l="Player"},
+    {k="fps",      l="FPS"},
+    {k="ping",     l="Ping"},
+    {k="players",  l="Jogadores"},
+    {k="place",    l="PlaceId"},
+    {k="job",      l="JobId"},
+}
+for _, d in ipairs(defs) do
+    local b = Instance.new("TextLabel", sc)
+    b.Text = "●"; b.Font = Enum.Font.GothamBold; b.TextSize = 11
+    b.TextColor3 = Color3.fromRGB(80,220,80); b.BackgroundTransparency = 1
+    b.Position = UDim2.new(0,14,0,rowY); b.Size = UDim2.new(0,14,0,16)
+    b.TextXAlignment = Enum.TextXAlignment.Left
+
+    local lb = Instance.new("TextLabel", sc)
+    lb.Text = d.l..":"; lb.Font = Enum.Font.Gotham; lb.TextSize = 11
+    lb.TextColor3 = Color3.fromRGB(170,170,170); lb.BackgroundTransparency = 1
+    lb.Position = UDim2.new(0,30,0,rowY); lb.Size = UDim2.new(0,90,0,16)
+    lb.TextXAlignment = Enum.TextXAlignment.Left
+
+    local v = Instance.new("TextLabel", sc)
+    v.Text = "—"; v.Font = Enum.Font.GothamMedium; v.TextSize = 11
+    v.TextColor3 = Color3.fromRGB(230,230,230); v.BackgroundTransparency = 1
+    v.Position = UDim2.new(0,125,0,rowY); v.Size = UDim2.new(1,-140,0,16)
+    v.TextXAlignment = Enum.TextXAlignment.Left
+    v.TextTruncate = Enum.TextTruncate.AtEnd
+    statusRows[d.k] = v
+    rowY = rowY + 20
+end
+
+-- Loop de status otimizado (1s)
+task.spawn(function()
+    local fc, fs = 0, tick()
+    addConn("fpsC", RunService.RenderStepped:Connect(function() fc = fc + 1 end))
+    while task.wait(1) do
+        statusRows.executor.Text = "Detectado"
+        statusRows.executor.TextColor3 = Color3.fromRGB(120,220,120)
+        local ok, info = pcall(function()
+            return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+        end)
+        statusRows.game.Text = ok and info.Name or "Desconhecido"
+        statusRows.player.Text = LP.Name
+        local el = tick() - fs
+        local fps = math.floor(fc / el)
+        statusRows.fps.Text = tostring(fps)
+        statusRows.fps.TextColor3 = fps > 50 and Color3.fromRGB(120,220,120)
+            or (fps > 25 and Color3.fromRGB(220,200,80) or Color3.fromRGB(220,80,80))
+        fc, fs = 0, tick()
+        statusRows.ping.Text = math.floor(LP:GetNetworkPing()*1000).." ms"
+        statusRows.players.Text = #Players:GetPlayers().." / "..Players.MaxPlayers
+        statusRows.place.Text = tostring(game.PlaceId)
+        statusRows.job.Text = string.sub(game.JobId,1,16).."..."
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 4: FUNÇÕES (Movimentos + Visual + Misc)
+-- ══════════════════════════════════════════════════════════
+local tFun = createTabContent("Funções")
+local fy = 8
+fy = C.section(tFun, "Movimentos", fy)
+C.toggle(tFun, "Noclip", fy, false, function(s) State.noclip=s end); fy = fy + BTN_H + GAP
+C.toggle(tFun, "Infinite Jump", fy, false, function(s) State.infJump=s end); fy = fy + BTN_H + GAP
+C.slider(tFun, "WalkSpeed", 0, 500, 16, fy, function(v)
+    State.walkSpeed=v
+    local h=getHum(); if h then h.WalkSpeed=v end
+end); fy = fy + 44 + GAP
+C.slider(tFun, "JumpPower", 0, 500, 50, fy, function(v)
+    State.jumpPower=v
+    local h=getHum(); if h then h.JumpPower=v h.UseJumpPower=true end
+end); fy = fy + 44 + GAP
+C.button(tFun, "Fly (FlyGuiV3)", fy, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+end); fy = fy + BTN_H + GAP
+C.button(tFun, "Reset Character", fy, function()
+    local h=getHum(); if h then h.Health=0 end
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tFun, "Visual", fy)
+C.toggle(tFun, "Fullbright", fy, false, function(s)
+    if s then
+        Lighting.Ambient = Color3.fromRGB(178,178,178)
+        Lighting.OutdoorAmbient = Color3.fromRGB(178,178,178)
+        Lighting.Brightness = 3
+    else
+        Lighting.Ambient = Color3.fromRGB(70,70,70)
+        Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+        Lighting.Brightness = 1
+    end
+end); fy = fy + BTN_H + GAP
+C.toggle(tFun, "Remove Fog", fy, false, function(s)
+    if s then Lighting.FogEnd = 100000 Lighting.FogStart = 0
+    else Lighting.FogEnd = 1000 Lighting.FogStart = 0 end
+end); fy = fy + BTN_H + GAP
+C.slider(tFun, "Field of View", 1, 120, 70, fy, function(v)
+    State.fov = v
+    workspace.CurrentCamera.FieldOfView = v
+end); fy = fy + 44 + GAP
+
+fy = C.section(tFun, "Misc", fy)
+C.toggle(tFun, "Anti-AFK", fy, false, function(s) State.antiAFK = s end); fy = fy + BTN_H + GAP
+C.toggle(tFun, "Godmode", fy, false, function(s)
+    State.godmode = s
+    if s then
+        local h = getHum()
+        if h then h.MaxHealth = math.huge h.Health = math.huge end
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tFun, "Server Hop", fy, function()
+    local ok, servers = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
+    end)
+    if ok and servers and servers.data then
+        for _, s in ipairs(servers.data) do
+            if s.playing < s.maxPlayers and s.id ~= game.JobId then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LP)
+                break
+            end
+        end
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tFun, "Rejoin Server", fy, function()
+    TeleportService:Teleport(game.PlaceId, LP)
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tFun, "Configurações", fy)
+C.button(tFun, "Unload Menu", fy, function()
+    cleanConns()
+    ScreenGui:Destroy()
+    ToastGui:Destroy()
+end); fy = fy + BTN_H + GAP
+C.button(tFun, "Reset WalkSpeed (16)", fy, function()
+    State.walkSpeed = 16
+    local h = getHum(); if h then h.WalkSpeed = 16 end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 5: PLAYERS
+-- ══════════════════════════════════════════════════════════
+local tPly = createTabContent("Players")
+fy = 8
+fy = C.section(tPly, "Lista de Jogadores", fy)
+
+local playerList = Instance.new("Frame", tPly)
+playerList.BackgroundColor3 = Color3.fromRGB(18,6,6); playerList.BackgroundTransparency = 0.3
+playerList.BorderSizePixel = 0
+playerList.Position = UDim2.new(0,PAD,0,fy); playerList.Size = UDim2.new(1,-PAD*2,0,200)
+Instance.new("UICorner", playerList).CornerRadius = UDim.new(0,8)
+
+local plLayout = Instance.new("UIListLayout", playerList)
+plLayout.Padding = UDim.new(0,4); plLayout.SortOrder = Enum.SortOrder.Name
+plLayout.Parent = playerList
+
+local function renderPlayers()
+    for _, c in ipairs(playerList:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local pb = Instance.new("TextButton", playerList)
+            pb.Text = "  "..p.Name
+            pb.Font = Enum.Font.Gotham; pb.TextSize = 12
+            pb.TextColor3 = Color3.fromRGB(220,220,220)
+            pb.BackgroundColor3 = Color3.fromRGB(25,8,8); pb.BackgroundTransparency = 0.4
+            pb.BorderSizePixel = 0; pb.Size = UDim2.new(1,0,0,30)
+            pb.AutoButtonColor = false; pb.TextXAlignment = Enum.TextXAlignment.Left
+            Instance.new("UICorner", pb).CornerRadius = UDim.new(0,5)
+
+            pb.MouseButton1Click:Connect(function()
+                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+                if hrp and getHRP() then
+                    getHRP().CFrame = hrp.CFrame + Vector3.new(0,0,3)
+                    showToast("▶ Teleportado para "..p.Name, "success")
+                else
+                    showToast("⚠ Jogador sem personagem", "warning")
+                end
+            end)
+        end
+    end
+end
+
+renderPlayers()
+Players.PlayerAdded:Connect(function() task.wait(0.5) renderPlayers() end)
+Players.PlayerRemoving:Connect(function() task.wait(0.1) renderPlayers() end)
+
+fy = fy + 210
+fy = C.section(tPly, "Ações", fy)
+C.button(tPly, "Bring All to Me", fy, function()
+    local m = getHRP()
+    if m then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
+            end
+        end
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tPly, "Fling All", fy, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if h then h:ChangeState(Enum.HumanoidStateType.Physics) end
+        end
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tPly, "Freeze All", fy, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.Anchored = true end
+        end
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tPly, "Unfreeze All", fy, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.Anchored = false end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 6: LOCAL PLAYER
+-- ══════════════════════════════════════════════════════════
+local tLoc = createTabContent("LocalPlayer")
+fy = 8
+fy = C.section(tLoc, "Aparência", fy)
+C.button(tLoc, "Become Invisible", fy, function()
+    local ch = getChar()
+    if ch then for _, p in ipairs(ch:GetDescendants()) do
+        if p:IsA("BasePart") then p.Transparency = 1 end
+    end end
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Become Visible", fy, function()
+    local ch = getChar()
+    if ch then for _, p in ipairs(ch:GetDescendants()) do
+        if p:IsA("BasePart") then p.Transparency = 0 end
+    end end
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Rainbow Character", fy, function()
+    task.spawn(function()
+        while task.wait(0.15) do
+            local ch = getChar()
+            if ch then for _, p in ipairs(ch:GetDescendants()) do
+                if p:IsA("BasePart") then p.Color = Color3.fromHSV(tick()%1, 1, 1) end
+            end end
+        end
+    end)
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tLoc, "Saúde", fy)
+C.button(tLoc, "Heal Self (Full)", fy, function()
+    local h = getHum(); if h then h.Health = h.MaxHealth end
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Reset Stats", fy, function()
+    local h = getHum()
+    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tLoc, "Time / Equipe", fy)
+C.button(tLoc, "Change Team (Random)", fy, function()
+    local t = game:GetService("Teams"):GetTeams()
+    if #t > 0 then LP.Team = t[math.random(1,#t)] end
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tLoc, "Teleportes", fy)
+C.button(tLoc, "Teleport to Spawn", fy, function()
+    local sp = workspace:FindFirstChildOfClass("SpawnLocation")
+    if sp then tp(sp.Position + Vector3.new(0,5,0)) end
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Void Teleport", fy, function()
+    tp(Vector3.new(0,-500,0))
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Teleport Up (+50)", fy, function()
+    local h = getHRP()
+    if h then h.CFrame = h.CFrame + Vector3.new(0,50,0) end
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Save Position", fy, function()
+    local h = getHRP()
+    if h then getgenv().AKZ_SavedPos = h.CFrame end
+    showToast("✓ Posição salva", "success")
+end); fy = fy + BTN_H + GAP
+C.button(tLoc, "Load Position", fy, function()
+    if getgenv().AKZ_SavedPos then
+        tp(getgenv().AKZ_SavedPos.Position)
+        showToast("✓ Posição carregada", "success")
+    else
+        showToast("⚠ Nenhuma posição salva", "warning")
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 7: MISC (Mundo + Chat + Utilidades)
+-- ══════════════════════════════════════════════════════════
+local tMisc = createTabContent("Misc")
+fy = 8
+fy = C.section(tMisc, "Mundo", fy)
+C.slider(tMisc, "Gravity", 0, 500, 196, fy, function(v)
+    State.gravity = v; workspace.Gravity = v
+end); fy = fy + 44 + GAP
+C.slider(tMisc, "Time of Day", 0, 24, 14, fy, function(v)
+    Lighting.ClockTime = v
+end); fy = fy + 44 + GAP
+C.button(tMisc, "Fullbright World", fy, function()
+    Lighting.Ambient = Color3.fromRGB(255,255,255)
+    Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+    Lighting.Brightness = 5
+end); fy = fy + BTN_H + GAP
+C.button(tMisc, "Reset Lighting", fy, function()
+    Lighting.Ambient = Color3.fromRGB(70,70,70)
+    Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+    Lighting.Brightness = 1; Lighting.ClockTime = 14
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tMisc, "Chat", fy)
+local spamOn = false
+C.toggle(tMisc, "Chat Spam", fy, false, function(s)
+    spamOn = s
+    if s then
+        task.spawn(function()
+            while spamOn do
+                chat(State.spamMsg)
+                task.wait(State.spamSpeed)
+            end
+        end)
+    end
+end); fy = fy + BTN_H + GAP
+C.slider(tMisc, "Spam Speed (s)", 0.1, 5, 1, fy, function(v) State.spamSpeed = v end); fy = fy + 44 + GAP
+C.button(tMisc, "Say 'Hello World'", fy, function() chat("Hello World") end); fy = fy + BTN_H + GAP
+C.button(tMisc, "Say 'GG'", fy, function() chat("GG") end); fy = fy + BTN_H + GAP
+
+fy = C.section(tMisc, "Utilidades", fy)
+C.button(tMisc, "Copy Position", fy, function()
+    local h = getHRP()
+    if h and setclipboard then
+        setclipboard(tostring(h.Position))
+        showToast("✓ Posição copiada", "success")
+    end
+end); fy = fy + BTN_H + GAP
+C.button(tMisc, "Ping (ms)", fy, function()
+    showToast("Ping: "..math.floor(LP:GetNetworkPing()*1000).." ms", "info")
+end); fy = fy + BTN_H + GAP
+C.button(tMisc, "Memory Usage", fy, function()
+    showToast("Memory: "..math.floor(collectgarbage("count")/1024).." MB", "info")
+end); fy = fy + BTN_H + GAP
+C.button(tMisc, "Clear Console", fy, function()
+    print("\n\n\n\n\n\n\n\n\n")
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 8: CONFIGURAÇÕES
+-- ══════════════════════════════════════════════════════════
+local tCfg = createTabContent("Config")
+fy = 8
+fy = C.section(tCfg, "Reset", fy)
+C.button(tCfg, "Reset WalkSpeed (16)", fy, function()
+    local h = getHum(); if h then h.WalkSpeed = 16 end
+    State.walkSpeed = 16
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Reset JumpPower (50)", fy, function()
+    local h = getHum()
+    if h then h.JumpPower = 50 h.UseJumpPower = true end
+    State.jumpPower = 50
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Reset Gravity (196)", fy, function()
+    workspace.Gravity = 196.2
+    State.gravity = 196.2
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Reset FOV (70)", fy, function()
+    workspace.CurrentCamera.FieldOfView = 70
+    State.fov = 70
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Reset Lighting", fy, function()
+    Lighting.Ambient = Color3.fromRGB(70,70,70)
+    Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+    Lighting.Brightness = 1; Lighting.ClockTime = 14
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tCfg, "Interface", fy)
+C.button(tCfg, "Toggle UI", fy, function()
+    Home.Visible = not Home.Visible
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Minimize Menu", fy, function()
+    Home.Visible = false
+end); fy = fy + BTN_H + GAP
+C.button(tCfg, "Print State", fy, function()
+    for k, v in pairs(State) do print(k, v) end
+    showToast("✓ Estado impresso no console", "info")
+end); fy = fy + BTN_H + GAP
+
+fy = C.section(tCfg, "Sistema", fy)
+C.button(tCfg, "Unload Menu", fy, function()
+    cleanConns()
+    ScreenGui:Destroy()
+    ToastGui:Destroy()
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- LOOPS GLOBAIS (limpos e rastreáveis)
+-- ══════════════════════════════════════════════════════════
+addConn("noclip", RunService.Stepped:Connect(function()
+    if State.noclip and LP.Character then
+        for _, p in ipairs(LP.Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end
+end))
+
+addConn("infJump", UIS.JumpRequest:Connect(function()
+    if State.infJump and getHum() then
+        getHum():ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end))
+
+task.spawn(function()
+    while task.wait(1) do
+        if State.antiAFK then pcall(function()
+            local vu = game:GetService("VirtualUser")
+            vu:CaptureController(); vu:ClickButton2(Vector2.new())
+        end) end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.godmode then
+            local h = getHum()
+            if h then h.MaxHealth = math.huge h.Health = math.huge end
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(1) do
+        if State.antiVoid then
+            local h = getHRP()
+            if h and h.Position.Y < -50 then
+                local sp = workspace:FindFirstChildOfClass("SpawnLocation")
+                if sp then h.CFrame = CFrame.new(sp.Position + Vector3.new(0,5,0)) end
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- REGISTRO DE ABAS (ordem profissional)
+-- ══════════════════════════════════════════════════════════
+local TAB_ORDER = {
+    {"Principal","🏠"},
+    {"Jogos","🎮"},
+    {"Status","⚙"},
+    {"Funções","🛠"},
+    {"Players","🎯"},
+    {"LocalPlayer","👤"},
+    {"Misc","🌐"},
+    {"Config","⚙"},
+}
+
+for i, d in ipairs(TAB_ORDER) do
+    createTabBtn(d[1], d[2], i)
+end
+for name, d in pairs(TabBtns) do
+    d.button.MouseButton1Click:Connect(function() selectTab(name) end)
+end
+selectTab("Principal")
+
+-- ══════════════════════════════════════════════════════════
+-- LOGO ARRASTÁVEL
+-- ══════════════════════════════════════════════════════════
+local Act = Instance.new("TextButton", ScreenGui)
+Act.Name = "Activate"
+Act.Text = ""; Act.AutoButtonColor = false
+Act.BackgroundColor3 = Color3.fromRGB(15,5,5)
+Act.BorderSizePixel = 0
+Act.Position = UDim2.new(0,14,0.28,0)
+Act.Size = UDim2.new(0,58,0,58)
+Act.ClipsDescendants = true; Act.Active = true; Act.ZIndex = 10
+Instance.new("UICorner", Act).CornerRadius = UDim.new(1,0)
+
+local LI = Instance.new("ImageLabel", Act)
+LI.Image = LOGO_ID; LI.ScaleType = Enum.ScaleType.Crop
+LI.BackgroundTransparency = 1; LI.Size = UDim2.new(1,0,1,0)
+LI.ZIndex = 2; LI.Active = false
+
+local LS = Instance.new("UIStroke", Act)
+LS.Color = Color3.fromRGB(200,30,30); LS.Thickness = 2
+
+makeDraggable(Act, nil, function()
+    Home.Visible = not Home.Visible
+    if Home.Visible then showToast("Menu aberto", "info") end
+end)
+
+print("[AKZ HUB PREMIUM v6] Carregado! 8 abas — by: angel / akira")
+showToast("✓ AKZ Hub carregado!", "success")
