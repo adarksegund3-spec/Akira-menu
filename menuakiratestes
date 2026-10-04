@@ -1,14 +1,28 @@
 --[[
     ═══════════════════════════════════════════════════════════
-    AKZ HUB — V1 (Upgrade Premium Compacto)
+    AKZ HUB V1 — redzlib Edition
     ═══════════════════════════════════════════════════════════
-    • 19 abas • 250+ funções • Componentes reutilizáveis
-    • Jogos keyless funcionais com fallback
-    • UI compacta e responsiva (adapta ao viewport)
-    • Toasts • Detecção de jogo • Tratamento de erros
+    • UI: redzlib (remake)
+    • 19 abas • 250+ funções
+    • Catálogo dinâmico RScripts
+    • by: Akira / Angel
     ═══════════════════════════════════════════════════════════
 ]]
 
+-- ══════════════════════════════════════════════════════════
+-- CONFIGURAÇÃO
+-- ══════════════════════════════════════════════════════════
+local Config = {
+    RScriptsAPIKey  = "COLOQUE_SUA_API_KEY_AQUI",
+    RScriptsBaseURL = "https://api.rscripts.net/v1/scripts",
+    ResultsPerPage  = 10,
+    CacheDuration   = 60,
+    SearchDebounce  = 0.4,
+}
+
+-- ══════════════════════════════════════════════════════════
+-- SERVIÇOS
+-- ══════════════════════════════════════════════════════════
 local Players         = game:GetService("Players")
 local UIS             = game:GetService("UserInputService")
 local RunService      = game:GetService("RunService")
@@ -18,2000 +32,469 @@ local TeleportService = game:GetService("TeleportService")
 local HttpService     = game:GetService("HttpService")
 local LP              = Players.LocalPlayer
 
-local LOGO_ID = "rbxassetid://118161689763803"
-local BG_ID   = "rbxassetid://87903267067222"
+-- ══════════════════════════════════════════════════════════
+-- CARREGA A LIBRARY REDZLIB
+-- ══════════════════════════════════════════════════════════
+local redzlibContent = game:HttpGet("https://raw.githubusercontent.com/realgengar/Library/refs/heads/main/remake.lua", true)
+local redzlib = loadstring(redzlibContent)()
+if not redzlib then error("[AKZ] Falha ao carregar redzlib") end
 
 -- ══════════════════════════════════════════════════════════
--- CONFIGURAÇÃO DO CATÁLOGO (RoScripts API) — edite só aqui
--- Docs: https://docs.sirius.menu/scripts-api
+-- JANELA PRINCIPAL
 -- ══════════════════════════════════════════════════════════
-local CatalogConfig = {
-    -- ▼▼▼ API KEY (OPCIONAL) — COLOQUE AQUI ▼▼▼
-    -- A API é aberta: sem key funciona (limite 20 por página, 120 req/min).
-    -- Chave de TESTE. Deixe "" ou "COLOQUE_SUA_API_KEY_AQUI" para usar anônimo.
-    RScriptsAPIKey = "rsc_live_ptG1hM5ur2ykBFr7slsAPHyPb6fOnwku",
-    -- ▲▲▲ ----------------------------------------------- ▲▲▲
-    BaseURL            = "https://api.roscripts.io/v1",
-    ResultsPerPage     = 10,
-    SearchDebounce     = 0.4,   -- segundos de espera após digitar
-    CacheEnabled       = true,
-    CacheDuration      = 60,    -- segundos
-    CacheMaxEntries    = 40,
-    MinRequestInterval = 0.6,   -- intervalo mínimo entre requests
-    HidePatchedDefault = true,  -- oculta scripts marcados como patched
-    ConfirmPatched     = true,  -- 2 toques só p/ script marcado como patched
-}
+local Window = redzlib:MakeWindow({
+    Title = "AKZ HUB | by: Akira / Angel",
+    SaveFolder = "AKZ_HUB_V1"
+})
 
--- Onde a GUI pode morar (executores diferentes aceitam lugares diferentes)
-local function guiRoots()
-    local r = {}
-    local ok, h = pcall(function() return gethui and gethui() end)
-    if ok and h then r[#r+1] = h end
-    r[#r+1] = game:GetService("CoreGui")
-    local pg = LP:FindFirstChildOfClass("PlayerGui")
-    if pg then r[#r+1] = pg end
-    return r
-end
-for _, root in ipairs(guiRoots()) do
-    for _, n in ipairs({"AKZUniversal","AKZUniversalToast"}) do
-        local ok, o = pcall(function() return root:FindFirstChild(n) end)
-        if ok and o then pcall(function() o:Destroy() end) end
-    end
-end
-local function mountGui(g)
-    for _, root in ipairs(guiRoots()) do
-        if pcall(function() g.Parent = root end) and g.Parent == root then return end
-    end
-    g.Parent = LP:WaitForChild("PlayerGui")
-end
+Window:AddMinimizeButton({
+    Button = { Image = "rbxassetid://72495850369898" },
+    Corner = { CornerRadius = UDim.new(0, 2) },
+    Stroke = { Color = Color3.new(0, 0, 0), Transparency = 1, Thickness = 1 }
+})
+
+-- Aviso inicial
+Window:Dialog({
+    Title = "AKZ HUB",
+    Text = "Olá! Você acaba de abrir o AKZ HUB. Desenvolvido por Akira / Angel com muita dedicação. Akira e Angel são 2 nicks do mesmo criador. Bom uso!",
+    Options = {
+        {"Discord", function()
+            if setclipboard then
+                setclipboard("https://discord.gg/kc7myVSq3")
+                redzlib:Notify({Title = "Discord", Description = "✓ Copiado!", Type = "Success", Duration = 3})
+            end
+        end},
+        {"Fechar", function() end}
+    }
+})
 
 -- ══════════════════════════════════════════════════════════
--- RESPONSIVIDADE — tamanho adaptativo
--- ══════════════════════════════════════════════════════════
-local function getViewport()
-    local cam = workspace.CurrentCamera
-    if cam then
-        local v = cam.ViewportSize
-        if v.X > 0 and v.Y > 0 then return v end
-    end
-    return Vector2.new(1280, 720)
-end
-local vp = getViewport()
--- Dimensões compactas com máximo responsivo
-local HOME_W = math.clamp(math.floor(vp.X * 0.62), 480, 660)
-local HOME_H = math.clamp(math.floor(vp.Y * 0.68), 360, 460)
-HOME_W = math.min(HOME_W, math.max(260, vp.X - 12))  -- celular: nunca maior que a tela
-HOME_H = math.min(HOME_H, math.max(240, vp.Y - 12))
-
--- ══════════════════════════════════════════════════════════
--- ESTADO
+-- ESTADO GLOBAL
 -- ══════════════════════════════════════════════════════════
 local State = {
     noclip=false, infJump=false, godmode=false, antiAFK=false, antiVoid=false,
     antiFling=false, fullbright=false, noFog=false, walkSpeed=16, jumpPower=50,
     gravity=196.2, fov=70, spamSpeed=1, spamMsg="AKZ on top",
-    antiKick=false, antiTeleport=false, antiInvisible=false, autoHeal=false,
-    mimic=false, flinging=false, lastTp=0, lastSafe=nil, saved=nil,
-}
-local Alive = true          -- vira false no Unload: encerra todos os loops
-local ToggleReg = {}        -- desligadores de todos os toggles (Reset/Unload)
-local SliderReg = {}        -- resets visuais dos sliders
-local OrigGravity = workspace.Gravity
-local OrigLight = {
-    Ambient = Lighting.Ambient, OutdoorAmbient = Lighting.OutdoorAmbient,
-    Brightness = Lighting.Brightness, FogEnd = Lighting.FogEnd,
-    FogStart = Lighting.FogStart, ClockTime = Lighting.ClockTime,
-}
-local function restoreLighting()
-    for k, v in pairs(OrigLight) do pcall(function() Lighting[k] = v end) end
-end
-
-local Connections = {}
-local function addConn(k, c)
-    if Connections[k] then Connections[k]:Disconnect() end
-    Connections[k] = c
-end
-local function cleanConns()
-    for _, c in pairs(Connections) do if c and c.Disconnect then c:Disconnect() end end
-    Connections = {}
-end
-
-local function getChar() return LP.Character end
-local function getHum()
-    local c = getChar(); return c and c:FindFirstChildOfClass("Humanoid")
-end
-local function getHRP()
-    local c = getChar(); return c and c:FindFirstChild("HumanoidRootPart")
-end
-local function setCF(cf)
-    local h = getHRP()
-    if h then State.lastTp = os.clock(); h.CFrame = cf end
-end
-local function tp(p) setCF(CFrame.new(p)) end
-local function chat(m)
-    if type(m) ~= "string" or m == "" then return false end
-    local TCS = game:GetService("TextChatService")
-    if TCS.ChatVersion == Enum.ChatVersion.TextChatService then
-        local ok = pcall(function()
-            local ch = TCS.TextChannels:FindFirstChild("RBXGeneral")
-            assert(ch, "sem canal")
-            ch:SendAsync(m)
-        end)
-        if ok then return true end
-    end
-    return (pcall(function()
-        game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents
-            .SayMessageRequest:FireServer(m, "All")
-    end))
-end
-
-local function tween(o,t,p,s,d)
-    if State.themeMap then p = State.themeMap(o, p) end
-    local ti = TweenInfo.new(t or 0.2, s or Enum.EasingStyle.Quad, d or Enum.EasingDirection.Out)
-    local tw = TweenService:Create(o, ti, p); tw:Play(); return tw
-end
-
-local function horrorGrad(parent, mul)
-    mul = mul or 1
-    local g = Instance.new("UIGradient")
-    g.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(70*mul, 8*mul, 8*mul)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 2, 2)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0))
-    }
-    g.Rotation = 90; g.Parent = parent; return g
-end
-
--- ══════════════════════════════════════════════════════════
--- ÍCONES — helper reutilizável (CreateIcon)
--- Ícones pequenos (14–28 px), imagem normal, sem chip/fundo.
--- chip=true só em ícones que ainda têm fundo preto (hoje: delta).
--- ══════════════════════════════════════════════════════════
-local ICON_BG   = Color3.fromRGB(9, 9, 11)
-local ICONS = {
-    discord = {id = "99300355597480"},
-    mask    = {id = "131593450648046"},
-    keys    = {id = "72660940735884"},
-    delta   = {id = "99769499679235", chip = true},
-    link    = {id = "132464250084813"},
-    ok      = {id = "82785730682526"},
-    click   = {id = "110025416672748"},
-    crown   = {id = "119833773196800"},
-    hacker  = {id = "96862415635956"},
-    hood    = {id = "86970269949929"},
-    -- ▼ SLOTS: cole o ID entre aspas e o ícone aparece sozinho nas abas/linhas que o usam.
-    --   Enquanto estiver vazio, a aba continua com o emoji (ou usa o ícone "fb").
-    gift    = {id = "43510808", decal = true},
-    cod     = {fb = "hood"},
-    games   = {id = "16736723178", decal = true},
-    gamer   = {},
-    dev     = {id = "10885640695", decal = true},   -- se não carregar, troque por {fb = "crown"}
-    -- lista nova (Creator Store). Algum em branco/escuro? Troque por {fb = "outro_icone"}
-    crown2  = {id = "1092787192", decal = true},
-    creator = {id = "10885652202", decal = true},
-    owner   = {id = "10885637368", decal = true},
-    star    = {id = "17882171697", decal = true},
-    gamehub = {id = "4943108454", decal = true},
-    gamepass= {id = "130675933568490", decal = true},
-    gamelogo= {id = "16908349663", decal = true},
-    home    = {id = "42773042", decal = true},
-    code    = {id = "10400885466", decal = true},
-    devlogo = {id = "3300971588", decal = true},
-    settings= {id = "87347743901802", decal = true},
-    search  = {id = "5107220223", decal = true},
-    arrow   = {id = "72178835386540", decal = true},
-    close   = {id = "5107150321", decal = true},
-    check   = {id = "8541911223", decal = true},
-    warn    = {id = "2328131581", decal = true},
 }
 
-local function iconDef(key)
-    local d = ICONS[key]
-    if d and d.id then return d end
-    if d and d.fb then return iconDef(d.fb) end
-    return nil
-end
+local function getHum() local c=LP.Character; return c and c:FindFirstChildOfClass("Humanoid") end
+local function getHRP() local c=LP.Character; return c and c:FindFirstChild("HumanoidRootPart") end
+local function tp(p) local h=getHRP(); if h then h.CFrame=CFrame.new(p) end end
+local function chat(m) pcall(function()
+    game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents.SayMessageRequest:FireServer(m,"All")
+end) end
 
--- Onde cada ícone é usado (edite aqui para trocar de lugar)
-local IconMap = {
-    autoBtn = "click",   -- ícone padrão no canto dos botões de ação (nil = desliga)
-    sections = {
-        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Tema"] = "settings",
-        ["Atalhos Rápidos"] = "click", ["Info"] = "hacker", ["Créditos Open Source"] = "link",
-        ["Hubs Universais"] = "code", ["Hubs"] = "code", ["Utilitários"] = "devlogo",
-        ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "settings",
-        ["Anti"] = "ok", ["ESP / Chams"] = "hood", ["Aim"] = "cod", ["Ataques"] = "cod",
-        ["Estado"] = "check", ["Emotes"] = "gift", ["Interações"] = "star", ["Efeitos"] = "star",
-        ["Spam"] = "discord", ["Mensagens"] = "discord", ["Reset"] = "settings", ["Interface"] = "hood",
-        ["Básicos"] = "arrow", ["Fly / Extras"] = "star", ["Ações"] = "click", ["Iluminação"] = "star",
-        ["Aparência"] = "creator", ["Saúde"] = "ok", ["Time / Equipe"] = "gamepass", ["Posição"] = "arrow",
-        ["Ambiente"] = "gamehub", ["Gravidade"] = "arrow", ["Limpeza"] = "close", ["Locais"] = "home",
-        ["Players"] = "gamepass", ["Memória"] = "star", ["Sair"] = "close", ["FOV"] = "search",
-        ["Modo"] = "settings", ["Informações"] = "hacker",
-    },
+-- ══════════════════════════════════════════════════════════
+-- MÓDULO RSCRIPTS API
+-- ══════════════════════════════════════════════════════════
+local RScripts = {}
+RScripts.Cache = {}
+RScripts.State = {
+    query="", page=1, totalPages=1, total=0, hasNext=false, hasPrev=false,
+    filters = { noKey=true, mobile=false, free=false },
+    sort = "recommended", loading=false, debounceId=0,
 }
 
-local function CreateIcon(parent, key, size, pos, opts)
-    opts = opts or {}
-    local def = iconDef(key)
-    if not def then return nil end
-    size = math.clamp(size or 18, 14, 28)
-    local img = Instance.new("ImageLabel")
-    img.Name = "Icon_" .. key
-    img.Image = "rbxassetid://" .. def.id
-    img.ScaleType = Enum.ScaleType.Fit
-    img.BorderSizePixel = 0
-    img.Active = false
-    img.AnchorPoint = opts.anchor or Vector2.new(0, 0)
-    img.Position = pos or UDim2.new(0, 0, 0, 0)
-    img.Size = UDim2.new(0, size, 0, size)
-    img.ZIndex = opts.z or 5
-    if def.chip then
-        img.BackgroundColor3 = def.bg or ICON_BG
-        img.BackgroundTransparency = 0
-        local cr = Instance.new("UICorner", img)
-        cr.CornerRadius = UDim.new(0.28, 0)
-        local st = Instance.new("UIStroke", img)
-        st.Color = Color3.fromRGB(120, 25, 25); st.Thickness = 1; st.Transparency = 0.6
-    else
-        img.BackgroundTransparency = 1
+function RScripts.buildURL(q, f, p)
+    local params = {}
+    if q and q ~= "" then table.insert(params, "q=" .. HttpService:UrlEncode(q)) end
+    table.insert(params, "page=" .. tostring(p or 1))
+    table.insert(params, "limit=" .. tostring(Config.ResultsPerPage))
+    table.insert(params, "includeScript=true")
+    if f.noKey then table.insert(params, "noKeySystem=true") end
+    if f.mobile then table.insert(params, "mobileOnly=true") end
+    if f.free then table.insert(params, "freeOnly=true") end
+    local sortMap = { recommended="recommended", newest="newest", most_likes="most-likes",
+                      most_views="most-views", trending="trending" }
+    table.insert(params, "sort=" .. (sortMap[RScripts.State.sort] or "recommended"))
+    return Config.RScriptsBaseURL .. "?" .. table.concat(params, "&")
+end
+
+function RScripts.cacheKey(q, f, p)
+    return string.format("%s|nk=%s|mob=%s|free=%s|sort=%s|pg=%d",
+        q or "", tostring(f.noKey), tostring(f.mobile), tostring(f.free),
+        RScripts.State.sort, p or 1)
+end
+
+function RScripts.fetch(q, f, p, cb)
+    local key = RScripts.cacheKey(q, f, p)
+    local now = tick()
+    for k, v in pairs(RScripts.Cache) do
+        if now - v.time > Config.CacheDuration then RScripts.Cache[k] = nil end
     end
-    img.Parent = parent
-    if def.decal then   -- ID de Decal: converte para o ID da imagem (se o executor suportar GetObjects)
-        task.spawn(function()
-            if def.resolved == nil then
-                local ok, tex = pcall(function()
-                    local o = game:GetObjects("rbxassetid://" .. def.id)[1]
-                    local d = o and (o:IsA("Decal") and o or o:FindFirstChildWhichIsA("Decal", true))
-                    return d and d.Texture
-                end)
-                def.resolved = (ok and type(tex) == "string" and tex ~= "") and tex or false
-            end
-            if def.resolved and img.Parent then img.Image = def.resolved end
-        end)
+    if RScripts.Cache[key] then cb(RScripts.Cache[key].data, nil) return end
+
+    local url = RScripts.buildURL(q, f, p)
+    local headers = { ["Authorization"] = "Bearer " .. Config.RScriptsAPIKey, ["Accept"] = "application/json" }
+    local ok, response = pcall(function() return game:HttpGet(url, true, headers) end)
+    if not ok then
+        cb(nil, {code="CONNECTION", message="⚠ Não foi possível conectar à API."})
+        return
     end
-    if opts.fade ~= false then
-        img.ImageTransparency = 1
-        tween(img, 0.35, {ImageTransparency = 0})
+    local decoded
+    local dok, d = pcall(function() return HttpService:JSONDecode(response) end)
+    if not dok or not d then
+        cb(nil, {code="PARSE", message="⚠ Resposta inválida da API."})
+        return
     end
-    return img
-end
-
-local function makeDraggable(handle, target, onClick)
-    target = target or handle
-    local dragging, moved, dragInput, dragStart, startPos = false, false
-    local THRESH = 5
-    handle.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch then
-            dragging, moved = true, false
-            dragStart, startPos = i.Position, target.Position
-            i.Changed:Connect(function()
-                if i.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if not moved and onClick then onClick() end
-                end
-            end)
-        end
-    end)
-    handle.InputChanged:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseMovement
-        or i.UserInputType == Enum.UserInputType.Touch then dragInput = i end
-    end)
-    UIS.InputChanged:Connect(function(i)
-        if i == dragInput and dragging then
-            local d = i.Position - dragStart
-            if math.abs(d.X) > THRESH or math.abs(d.Y) > THRESH then moved = true end
-            target.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset + d.X,
-                startPos.Y.Scale, startPos.Y.Offset + d.Y)
-        end
-    end)
-end
-
--- ══════════════════════════════════════════════════════════
--- SCREENGUI
--- ══════════════════════════════════════════════════════════
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AKZUniversal"
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.DisplayOrder = 999
-mountGui(ScreenGui)
-
--- TOASTS
-local ToastGui = Instance.new("ScreenGui")
-ToastGui.Name = "AKZUniversalToast"
-ToastGui.ResetOnSpawn = false
-ToastGui.IgnoreGuiInset = true
-ToastGui.DisplayOrder = 1000
-mountGui(ToastGui)
-
-local TC = Instance.new("Frame", ToastGui)
-TC.BackgroundTransparency = 1
-TC.AnchorPoint = Vector2.new(1,0)
-TC.Position = UDim2.new(1,-12,0,12)
-TC.Size = UDim2.new(0,240,1,-24)
-local TCL = Instance.new("UIListLayout", TC)
-TCL.SortOrder = Enum.SortOrder.LayoutOrder
-TCL.Padding = UDim.new(0,6)
-TCL.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local TOAST_COL = {
-    success=Color3.fromRGB(60,200,100), error=Color3.fromRGB(220,60,60),
-    info=Color3.fromRGB(80,140,220), warning=Color3.fromRGB(230,180,50),
-}
-local tCount = 0
-local function showToast(msg, kind)
-    kind = kind or "info"
-    tCount = tCount + 1
-    local ac = TOAST_COL[kind] or TOAST_COL.info
-    local t = Instance.new("Frame", TC)
-    t.BackgroundColor3 = Color3.fromRGB(15,5,5)
-    t.BackgroundTransparency = 0.1
-    t.BorderSizePixel = 0
-    t.Size = UDim2.new(1,0,0,36)
-    t.Position = UDim2.new(1,40,0,0)
-    horrorGrad(t, 1.2)
-    Instance.new("UICorner", t).CornerRadius = UDim.new(0,7)
-    local s = Instance.new("UIStroke", t)
-    s.Color = ac; s.Thickness = 1.5; s.Transparency = 0.2
-    local bar = Instance.new("Frame", t)
-    bar.BackgroundColor3 = ac; bar.BorderSizePixel = 0
-    bar.Size = UDim2.new(0,3,1,-12); bar.Position = UDim2.new(0,5,0,6)
-    Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
-    local ic = Instance.new("TextLabel", t)
-    ic.Text = ({success="✓",error="⚠",info="ℹ",warning="⚠"})[kind] or "ℹ"
-    ic.Font = Enum.Font.GothamBold; ic.TextSize = 13; ic.TextColor3 = ac
-    ic.BackgroundTransparency = 1
-    ic.Position = UDim2.new(0,14,0,0); ic.Size = UDim2.new(0,20,1,0)
-    local tk = (kind == "success" and "ok") or ((kind == "warning" or kind == "error") and "warn") or nil
-    if tk and iconDef(tk) then
-        ic.Text = ""
-        CreateIcon(t, tk, 16, UDim2.new(0,14,0.5,-8), {fade = false})
-    end
-    local lbl = Instance.new("TextLabel", t)
-    lbl.Text = msg; lbl.Font = Enum.Font.Gotham; lbl.TextSize = 11
-    lbl.TextColor3 = Color3.fromRGB(235,235,235)
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.BackgroundTransparency = 1
-    lbl.Position = UDim2.new(0,36,0,0); lbl.Size = UDim2.new(1,-42,1,0)
-    lbl.TextWrapped = true
-    tween(t, 0.25, {Position = UDim2.new(0,0,0,0)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    task.delay(2.8, function()
-        if not t.Parent then return end
-        local o = tween(t, 0.2, {Position = UDim2.new(1,40,0,0), BackgroundTransparency = 1}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-        o.Completed:Connect(function() t:Destroy() end)
-    end)
-end
-
--- HOME compacta
-local Home = Instance.new("Frame", ScreenGui)
-Home.Name = "Home"
-Home.BackgroundColor3 = Color3.fromRGB(12,4,4)
-Home.BorderSizePixel = 0
-Home.AnchorPoint = Vector2.new(0.5, 0.5)
-Home.Position = UDim2.new(0.5, 0, 0.5, 0)
-Home.Size = UDim2.new(0, HOME_W, 0, HOME_H)
-Home.Visible = false
-Home.ClipsDescendants = true
-Instance.new("UICorner", Home).CornerRadius = UDim.new(0,10)
-local HS = Instance.new("UIStroke", Home)
-HS.Color = Color3.fromRGB(140,25,25); HS.Thickness = 1.5; HS.Transparency = 0.25
-local BgI = Instance.new("ImageLabel", Home)
-BgI.Image = BG_ID; BgI.ScaleType = Enum.ScaleType.Crop
-BgI.BackgroundTransparency = 1; BgI.ImageTransparency = 0.4
-BgI.Size = UDim2.new(1,0,1,0); BgI.ZIndex = 0
-local BgO = Instance.new("Frame", Home)
-BgO.BackgroundColor3 = Color3.fromRGB(0,0,0); BgO.BackgroundTransparency = 0.35
-BgO.BorderSizePixel = 0; BgO.Size = UDim2.new(1,0,1,0); BgO.ZIndex = 1
-horrorGrad(BgO)
-
--- Header compacto
-local Header = Instance.new("Frame", Home)
-Header.BackgroundTransparency = 1; Header.Size = UDim2.new(1,0,0,42); Header.ZIndex = 5
-
--- TÍTULO centralizado — "AKZ HUB"
-local Title = Instance.new("TextLabel", Header)
-Title.Font = Enum.Font.GothamBold
-Title.Text = "AKZ HUB"
-Title.TextColor3 = Color3.fromRGB(255,255,255)
-Title.TextSize = 18
-Title.BackgroundTransparency = 1
-Title.AnchorPoint = Vector2.new(0.5, 0)
-Title.Position = UDim2.new(0.5, 0, 0, 6)
-Title.Size = UDim2.new(0.5, 0, 0, 20)
-Title.ZIndex = 6
-local TS = Instance.new("UIStroke", Title)
-TS.Color = Color3.fromRGB(200,30,30); TS.Thickness = 2
-
--- Sub (dev) pequenininha
-local Sub = Instance.new("TextLabel", Header)
-Sub.Font = Enum.Font.Gotham
-Sub.Text = "by: Akira / Angel  •  V1"
-Sub.TextColor3 = Color3.fromRGB(150,150,150)
-Sub.TextSize = 9
-Sub.BackgroundTransparency = 1
-Sub.AnchorPoint = Vector2.new(0.5, 0)
-Sub.Position = UDim2.new(0.5, 0, 0, 26)
-Sub.Size = UDim2.new(0.6, 0, 0, 14)
-Sub.ZIndex = 6
-
-local CloseBtn = Instance.new("TextButton", Header)
-CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255,255,255); CloseBtn.TextSize = 12
-CloseBtn.BackgroundColor3 = Color3.fromRGB(120,15,15)
-CloseBtn.BorderSizePixel = 0; CloseBtn.AutoButtonColor = false
-CloseBtn.Position = UDim2.new(1,-28,0,11); CloseBtn.Size = UDim2.new(0,20,0,20); CloseBtn.ZIndex = 6
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1,0)
-CloseBtn.MouseButton1Click:Connect(function()
-    Home.Visible = false
-    showToast("Menu fechado", "info")
-end)
-
-local HL = Instance.new("Frame", Home)
-HL.BackgroundColor3 = Color3.fromRGB(140,25,25); HL.BackgroundTransparency = 0.4
-HL.BorderSizePixel = 0; HL.Position = UDim2.new(0,10,0,42)
-HL.Size = UDim2.new(1,-20,0,1); HL.ZIndex = 5
-
-makeDraggable(Header, Home)
-
--- SIDEBAR compacta
-local Sidebar = Instance.new("ScrollingFrame", Home)
-Sidebar.BackgroundColor3 = Color3.fromRGB(8,3,3); Sidebar.BackgroundTransparency = 0.3
-Sidebar.BorderSizePixel = 0
-Sidebar.Position = UDim2.new(0,0,0,43); Sidebar.Size = UDim2.new(0,132,1,-43)
-Sidebar.CanvasSize = UDim2.new(0,0,0,0)
-Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Sidebar.ScrollBarThickness = 2
-Sidebar.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
-Sidebar.ZIndex = 3
-local SL = Instance.new("Frame", Sidebar)
-SL.BackgroundColor3 = Color3.fromRGB(140,25,25); SL.BackgroundTransparency = 0.55
-SL.BorderSizePixel = 0; SL.Position = UDim2.new(1,-1,0,0); SL.Size = UDim2.new(0,1,1,0); SL.ZIndex = 4
-
-local Tabs, TabBtns, currentTab = {}, {}, nil
-
-local TAB_ICONS = {
-    Principal = "crown", Jogos = "games", Status = "hacker", Movimentos = "arrow",
-    Combate = "cod", Visual = "star", Jogador = "gamepass", Mundo = "gamehub",
-    ["Diversão"] = "gift", Admin = "mask", Teleportes = "home", Servidor = "link",
-    Chat = "discord", ["Câmera"] = "search", ["Proteção"] = "ok", Utilidades = "keys",
-    Scripts = "code", Config = "settings", Sobre = "dev",
-}
-local TAB_ICON_PAD = 30
-
-local function createTabBtn(name, icon, order)
-    local b = Instance.new("TextButton", Sidebar)
-    b.Font = Enum.Font.GothamMedium
-    local tabIcon = TAB_ICONS[name]
-    if tabIcon and not iconDef(tabIcon) then tabIcon = nil end
-    b.Text = tabIcon and name or ("  "..icon.."  "..name)
-    b.TextColor3 = Color3.fromRGB(140,140,140); b.TextSize = 10
-    b.BackgroundColor3 = Color3.fromRGB(30,5,5); b.BackgroundTransparency = 1
-    b.BorderSizePixel = 0; b.TextXAlignment = Enum.TextXAlignment.Left
-    b.Position = UDim2.new(0,5,0,5+(order-1)*26)
-    b.Size = UDim2.new(1,-10,0,24); b.ZIndex = 5; b.AutoButtonColor = false
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,5)
-    local ind = Instance.new("Frame", b)
-    ind.BackgroundColor3 = Color3.fromRGB(220,35,35); ind.BorderSizePixel = 0
-    ind.Position = UDim2.new(0,0,0,5); ind.Size = UDim2.new(0,2,1,-10)
-    ind.ZIndex = 6; ind.Visible = false
-    Instance.new("UICorner", ind).CornerRadius = UDim.new(1,0)
-    local iconImg
-    if tabIcon then
-        local pad = Instance.new("UIPadding", b)
-        pad.PaddingLeft = UDim.new(0, TAB_ICON_PAD)
-        ind.Position = UDim2.new(0, -TAB_ICON_PAD, 0, 5)
-        iconImg = CreateIcon(b, tabIcon, 16, UDim2.new(0, 8 - TAB_ICON_PAD, 0.5, 0),
-            {anchor = Vector2.new(0, 0.5), fade = false, z = 6})
-        if iconImg then iconImg.ImageTransparency = 0.4 end
-    end
-    TabBtns[name] = {button=b, indicator=ind, icon=iconImg}
-end
-
-local function selectTab(name)
-    if currentTab == name then return end
-    currentTab = name
-    for tn, d in pairs(TabBtns) do
-        local a = (tn == name)
-        tween(d.button, 0.16, {
-            TextColor3 = a and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140),
-            BackgroundTransparency = a and 0.25 or 1,
-            BackgroundColor3 = a and Color3.fromRGB(80,15,15) or Color3.fromRGB(30,5,5),
-        })
-        d.indicator.Visible = a
-        if d.icon then tween(d.icon, 0.16, {ImageTransparency = a and 0 or 0.4}) end
-    end
-    for tn, f in pairs(Tabs) do f.Visible = (tn == name) end
-end
-
-local Content = Instance.new("Frame", Home)
-Content.BackgroundTransparency = 1
-Content.Position = UDim2.new(0,132,0,43)
-Content.Size = UDim2.new(1,-132,1,-43)
-Content.ZIndex = 3
-
-local function createTabContent(name)
-    local f = Instance.new("ScrollingFrame", Content)
-    f.Name = name.."Content"
-    f.BackgroundTransparency = 1; f.BorderSizePixel = 0
-    f.Size = UDim2.new(1,0,1,0)
-    f.CanvasSize = UDim2.new(0,0,0,0)
-    f.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    f.ScrollBarThickness = 2
-    f.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
-    f.ScrollBarImageTransparency = 0.3
-    f.Visible = false; f.ZIndex = 3
-    Tabs[name] = f
-    return f
-end
-
--- ══════════════════════════════════════════════════════════
--- COMPONENTES compactos
--- ══════════════════════════════════════════════════════════
-local C = {}
-local BTN_H, GAP, PAD = 28, 4, 8
-
-local function hoverFX(b, hv, pr)
-    local st = b:FindFirstChildOfClass("UIStroke")
-    local base = b.BackgroundColor3
-    b.MouseEnter:Connect(function()
-        tween(b, 0.12, {BackgroundColor3 = hv or Color3.fromRGB(40,10,10)})
-        if st then tween(st, 0.12, {Transparency = 0.15}) end
-    end)
-    b.MouseLeave:Connect(function()
-        tween(b, 0.12, {BackgroundColor3 = base})
-        if st then tween(st, 0.12, {Transparency = 0.4}) end
-    end)
-    b.MouseButton1Down:Connect(function() tween(b, 0.08, {BackgroundColor3 = pr or Color3.fromRGB(60,15,15)}) end)
-    b.MouseButton1Up:Connect(function() tween(b, 0.12, {BackgroundColor3 = base}) end)
-end
-
-function C.section(parent, title, y)
-    local l = Instance.new("TextLabel", parent)
-    l.Text = string.upper(title); l.Font = Enum.Font.GothamBold
-    l.TextSize = 9; l.TextColor3 = Color3.fromRGB(200,60,60)
-    l.TextXAlignment = Enum.TextXAlignment.Left; l.BackgroundTransparency = 1
-    local sk, off = IconMap.sections[title], 0
-    if sk and iconDef(sk) then
-        CreateIcon(parent, sk, 14, UDim2.new(0,PAD+2,0,y), {z = 5, fade = false})
-        off = 18
-    end
-    l.Position = UDim2.new(0,PAD+2+off,0,y); l.Size = UDim2.new(1,-PAD*2-off,0,14)
-    local ln = Instance.new("Frame", parent)
-    ln.BackgroundColor3 = Color3.fromRGB(140,25,25); ln.BackgroundTransparency = 0.6
-    ln.BorderSizePixel = 0; ln.Position = UDim2.new(0,PAD+2,0,y+14)
-    ln.Size = UDim2.new(1,-PAD*2-4,0,1)
-    return y + 20
-end
-
-function C.toggle(parent, text, y, default, cb)
-    local b = Instance.new("TextButton", parent)
-    b.Font = Enum.Font.Gotham; b.Text = text
-    b.TextColor3 = Color3.fromRGB(220,220,220); b.TextSize = 11
-    b.TextXAlignment = Enum.TextXAlignment.Left
-    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.35
-    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
-    b.Size = UDim2.new(1,-PAD*2,0,BTN_H); b.AutoButtonColor = false; b.ZIndex = 4
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-    local s = Instance.new("UIStroke", b)
-    s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
-    local tr = Instance.new("Frame", b)
-    tr.BackgroundColor3 = Color3.fromRGB(50,20,20); tr.BorderSizePixel = 0
-    tr.Position = UDim2.new(1,-38,0.5,-7); tr.Size = UDim2.new(0,30,0,14); tr.ZIndex = 5
-    Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
-    local kn = Instance.new("Frame", tr)
-    kn.BackgroundColor3 = Color3.fromRGB(160,160,160); kn.BorderSizePixel = 0
-    kn.Position = UDim2.new(0,2,0.5,-5); kn.Size = UDim2.new(0,10,0,10); kn.ZIndex = 6
-    Instance.new("UICorner", kn).CornerRadius = UDim.new(1,0)
-    local st = default or false
-    local function render()
-        if st then
-            tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(60,180,90)})
-            tween(kn, 0.2, {Position = UDim2.new(1,-12,0.5,-5), BackgroundColor3 = Color3.fromRGB(255,255,255)})
-            tween(s, 0.2, {Color = Color3.fromRGB(60,180,90), Transparency = 0.2})
-            tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(25,8,8)})
-        else
-            tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(50,20,20)})
-            tween(kn, 0.2, {Position = UDim2.new(0,2,0.5,-5), BackgroundColor3 = Color3.fromRGB(160,160,160)})
-            tween(s, 0.2, {Color = Color3.fromRGB(80,20,20), Transparency = 0.4})
-            tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(20,5,5)})
-        end
-    end
-    render()
-    table.insert(ToggleReg, function()
-        if st then st = false; render(); if cb then pcall(cb, false) end end
-    end)
-    b.MouseButton1Click:Connect(function()
-        st = not st; render()
-        if cb then pcall(cb, st) end
-        showToast(text..(st and " ativado" or " desativado"), st and "success" or "info")
-    end)
-    return b
-end
-
-function C.button(parent, text, y, cb, opt)
-    local b = Instance.new("TextButton", parent)
-    b.Font = Enum.Font.Gotham; b.Text = "  "..text
-    b.TextColor3 = Color3.fromRGB(220,220,220); b.TextSize = 11
-    b.TextXAlignment = Enum.TextXAlignment.Left
-    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.35
-    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
-    b.Size = UDim2.new(1,-PAD*2,0,BTN_H); b.AutoButtonColor = false; b.ZIndex = 4
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-    local s = Instance.new("UIStroke", b)
-    s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
-    local ic = Instance.new("TextLabel", b)
-    ic.Text = "▶"; ic.Font = Enum.Font.GothamBold; ic.TextSize = 9
-    ic.TextColor3 = Color3.fromRGB(220,35,35); ic.BackgroundTransparency = 1
-    ic.Position = UDim2.new(1,-20,0,0); ic.Size = UDim2.new(0,14,1,0); ic.ZIndex = 6
-    opt = opt or {}
-    if opt.left then
-        local pad = Instance.new("UIPadding", b)
-        pad.PaddingLeft = UDim.new(0, 26)
-        CreateIcon(b, opt.left, 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6})
-    end
-    local rk = opt.right
-    if rk == nil and not opt.none then rk = IconMap.autoBtn end
-    if rk then
-        local ri = CreateIcon(b, rk, 16, UDim2.new(1, -8, 0.5, 0),
-            {anchor = Vector2.new(1, 0.5), z = 6, fade = (opt.right ~= nil)})
-        if ri then
-            ic.Visible = false
-            b.MouseEnter:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -11, 0.5, 0)}) end)
-            b.MouseLeave:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -8, 0.5, 0)}) end)
-        end
-    end
-    hoverFX(b)
-    b.MouseButton1Click:Connect(function()
-        if not cb then return end
-        showToast("▶ "..text, "info")
-        local ok, err = pcall(cb)
-        if not ok then
-            warn("[AKZ] Erro em '"..text.."': "..tostring(err))
-            showToast("⚠ Falha em "..text, "error")
-        end
-    end)
-    return b
-end
-
-function C.slider(parent, label, min, max, default, y, cb)
-    local f = Instance.new("Frame", parent)
-    f.BackgroundTransparency = 1
-    f.Position = UDim2.new(0,PAD,0,y); f.Size = UDim2.new(1,-PAD*2,0,36)
-    local l = Instance.new("TextLabel", f)
-    l.Text = label; l.Font = Enum.Font.GothamMedium; l.TextSize = 10
-    l.TextColor3 = Color3.fromRGB(210,210,210); l.BackgroundTransparency = 1
-    l.TextXAlignment = Enum.TextXAlignment.Left
-    l.Size = UDim2.new(0.7,0,0,14)
-    local v = Instance.new("TextLabel", f)
-    v.Text = tostring(default); v.Font = Enum.Font.GothamBold; v.TextSize = 10
-    v.TextColor3 = Color3.fromRGB(220,60,60); v.BackgroundTransparency = 1
-    v.TextXAlignment = Enum.TextXAlignment.Right
-    v.Position = UDim2.new(0.7,0,0,0); v.Size = UDim2.new(0.3,0,0,14)
-    local tr = Instance.new("Frame", f)
-    tr.BackgroundColor3 = Color3.fromRGB(35,10,10); tr.BorderSizePixel = 0
-    tr.Position = UDim2.new(0,0,0,20); tr.Size = UDim2.new(1,0,0,5)
-    Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
-    local fl = Instance.new("Frame", tr)
-    fl.BackgroundColor3 = Color3.fromRGB(200,35,35); fl.BorderSizePixel = 0
-    fl.Size = UDim2.new(0,0,1,0)
-    Instance.new("UICorner", fl).CornerRadius = UDim.new(1,0)
-    local hd = Instance.new("Frame", tr)
-    hd.BackgroundColor3 = Color3.fromRGB(255,255,255); hd.BorderSizePixel = 0
-    hd.Size = UDim2.new(0,10,0,10); hd.Position = UDim2.new(0,-5,0,-2.5)
-    Instance.new("UICorner", hd).CornerRadius = UDim.new(1,0)
-    local step = ((max - min) <= 10) and 0.1 or 1
-    local val, dragging = default, false
-    local function setVisual(x)
-        local r0 = math.clamp((x - min) / (max - min), 0, 1)
-        fl.Size = UDim2.new(r0,0,1,0)
-        hd.Position = UDim2.new(r0,-5,0,-2.5)
-        v.Text = string.format("%g", x)
-    end
-    setVisual(default)
-    table.insert(SliderReg, function() val = default; setVisual(default) end)
-    local function lockScroll(lock)
-        if parent:IsA("ScrollingFrame") then parent.ScrollingEnabled = not lock end
-    end
-    local function upd(i)
-        local r = math.clamp((i.Position.X - tr.AbsolutePosition.X) / tr.AbsoluteSize.X, 0, 1)
-        val = math.floor((min + (max-min)*r) / step + 0.5) * step
-        val = math.clamp(math.floor(val*100 + 0.5)/100, min, max)
-        setVisual(val)
-        if cb then pcall(cb, val) end
-    end
-    tr.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; lockScroll(true); upd(i)
-        end
-    end)
-    tr.InputChanged:Connect(function(i)
-        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i) end
-    end)
-    UIS.InputChanged:Connect(function(i)
-        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i) end
-    end)
-    UIS.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragging = false; lockScroll(false)
-        end
-    end)
-end
-
-function C.card(parent, y, h)
-    local c = Instance.new("Frame", parent)
-    c.BackgroundColor3 = Color3.fromRGB(18,6,6); c.BackgroundTransparency = 0.25
-    c.BorderSizePixel = 0; c.Position = UDim2.new(0,PAD,0,y)
-    c.Size = UDim2.new(1,-PAD*2,0,h or 100)
-    Instance.new("UICorner", c).CornerRadius = UDim.new(0,8)
-    local s = Instance.new("UIStroke", c)
-    s.Color = Color3.fromRGB(120,25,25); s.Thickness = 1; s.Transparency = 0.5
-    return c
-end
-
-function C.search(parent, y, onChange)
-    local b = Instance.new("Frame", parent)
-    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.25
-    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
-    b.Size = UDim2.new(1,-PAD*2,0,28)
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-    local s = Instance.new("UIStroke", b)
-    s.Color = Color3.fromRGB(120,25,25); s.Thickness = 1; s.Transparency = 0.4
-    local ic = Instance.new("TextLabel", b)
-    ic.Text = "🔎"; ic.Font = Enum.Font.Gotham; ic.TextSize = 12
-    ic.BackgroundTransparency = 1; ic.Position = UDim2.new(0,6,0,0)
-    ic.Size = UDim2.new(0,20,1,0)
-    local si = CreateIcon(b, "search", 16, UDim2.new(0,8,0.5,-8), {fade = false})
-    if si then ic.Visible = false end
-    local i = Instance.new("TextBox", b)
-    i.PlaceholderText = "Pesquisar..."
-    i.PlaceholderColor3 = Color3.fromRGB(120,120,120)
-    i.Text = ""; i.Font = Enum.Font.Gotham; i.TextSize = 11
-    i.TextColor3 = Color3.fromRGB(230,230,230); i.BackgroundTransparency = 1
-    i.TextXAlignment = Enum.TextXAlignment.Left
-    i.Position = UDim2.new(0,28,0,0); i.Size = UDim2.new(1,-34,1,0)
-    i.ClearTextOnFocus = false
-    i:GetPropertyChangedSignal("Text"):Connect(function()
-        if onChange then onChange(i.Text) end
-    end)
-    return i
-end
-
--- ══════════════════════════════════════════════════════════
--- HELPERS EXTRAS (carregar 1x, fling real, log de chat, input)
--- ══════════════════════════════════════════════════════════
-local AIRHUB_URL = "https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"
-local Loaded = {}
-local function loadOnce(key, url)
-    if Loaded[key] then showToast("ℹ Já carregado nesta sessão", "info"); return end
-    local code = game:HttpGet(url)
-    local fn = assert(loadstring(code))
-    Loaded[key] = true
-    fn()
-end
-
-function C.input(parent, placeholder, y, default, cb)
-    local b = Instance.new("Frame", parent)
-    b.BackgroundColor3 = Color3.fromRGB(20,5,5); b.BackgroundTransparency = 0.25
-    b.BorderSizePixel = 0; b.Position = UDim2.new(0,PAD,0,y)
-    b.Size = UDim2.new(1,-PAD*2,0,BTN_H)
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-    local st = Instance.new("UIStroke", b)
-    st.Color = Color3.fromRGB(120,25,25); st.Thickness = 1; st.Transparency = 0.4
-    local i = Instance.new("TextBox", b)
-    i.PlaceholderText = placeholder; i.PlaceholderColor3 = Color3.fromRGB(120,120,120)
-    i.Text = default or ""; i.Font = Enum.Font.Gotham; i.TextSize = 11
-    i.TextColor3 = Color3.fromRGB(230,230,230); i.BackgroundTransparency = 1
-    i.TextXAlignment = Enum.TextXAlignment.Left; i.ClearTextOnFocus = false
-    i.Position = UDim2.new(0,8,0,0); i.Size = UDim2.new(1,-16,1,0)
-    i.FocusLost:Connect(function() if cb then pcall(cb, i.Text) end end)
-    return i
-end
-
--- Fling real: gruda no alvo girando rápido por 0.5s e volta para a posição original.
-local function flingPlayer(plr)
-    local my = getHRP()
-    local th = plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-    if not (my and th) then return false end
-    local origin = my.CFrame
-    State.flinging = true
-    local t0 = os.clock()
-    while Alive and os.clock() - t0 < 0.5 and my.Parent and th.Parent do
-        State.lastTp = os.clock()
-        my.CFrame = th.CFrame
-        my.AssemblyAngularVelocity = Vector3.new(0, 20000, 0)
-        my.AssemblyLinearVelocity = Vector3.new(20000, 20000, 20000)
-        RunService.Heartbeat:Wait()
-    end
-    if my.Parent then
-        my.AssemblyAngularVelocity = Vector3.zero
-        my.AssemblyLinearVelocity = Vector3.zero
-        State.lastTp = os.clock()
-        my.CFrame = origin
-    end
-    State.flinging = false
-    return true
-end
-
-local function nearestPlayer()
-    local my, best, bd = getHRP(), nil, math.huge
-    if not my then return nil end
-    for _, p in ipairs(Players:GetPlayers()) do
-        local hrp = p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local d = (hrp.Position - my.Position).Magnitude
-            if d < bd then best, bd = p, d end
-        end
-    end
-    return best
-end
-
--- Log de chat (últimas 50 mensagens) + Chat Mimic
-local ChatLog = {}
-local function pushChat(name, text)
-    if type(text) ~= "string" or text == "" then return end
-    local last = ChatLog[#ChatLog]
-    if last and last.name == name and last.text == text and os.clock() - last.t < 1 then return end
-    table.insert(ChatLog, {name = name, text = text, t = os.clock()})
-    if #ChatLog > 50 then table.remove(ChatLog, 1) end
-    if State.mimic and name ~= LP.Name then
-        local p = Players:FindFirstChild(name)
-        if p and p == nearestPlayer() then chat(text) end
-    end
-end
-local function hookChatter(p)
-    addConn("chat_" .. p.UserId, p.Chatted:Connect(function(m) pushChat(p.Name, m) end))
-end
-for _, p in ipairs(Players:GetPlayers()) do hookChatter(p) end
-addConn("chatAdded", Players.PlayerAdded:Connect(hookChatter))
-pcall(function()
-    addConn("tcsMsg", game:GetService("TextChatService").MessageReceived:Connect(function(m)
-        local src = m.TextSource
-        local pl = src and Players:GetPlayerByUserId(src.UserId)
-        pushChat(pl and pl.Name or "?", m.Text)
-    end))
-end)
-
--- ══════════════════════════════════════════════════════════
--- MÓDULO DE JOGOS
--- ══════════════════════════════════════════════════════════
-local GameModule = { games = {
-    {id="mm2", name="MM2 — Murder Mystery 2", icon="🔪",
-     desc="Aether Hub: Noclip, ESP, Aimbot, Walkspeed. Keyless.",
-     script="https://raw.githubusercontent.com/aluucardd/MM2/refs/heads/main/Aether%20Hub%20MM2",
-     sources={"https://raw.githubusercontent.com/xv3gasx/Murder-Mystery-2/refs/heads/main/Release.lua"}},
-    {id="kalb", name="Kick a Lucky Block", icon="🎲",
-     desc="Luxy Hub: Auto Kick, Auto Farm, Auto Rebirth. Keyless.",
-     script="https://raw.githubusercontent.com/Omnie7/Luxy-Hub/refs/heads/main/main.lua", sources={}},
-    {id="dahood", name="Da Hood", icon="🔫",
-     desc="Oxide Hub: Silent Aim, Godmode, ESP. Keyless.",
-     script="https://raw.githubusercontent.com/xulfo/Oxide-Loader/main/Main.lua", sources={}},
-    {id="bloxfruits", name="Blox Fruits", icon="🍎",
-     desc="ARC Hub: Auto Farm, Auto Quest, ESP. Keyless.",
-     script="https://raw.githubusercontent.com/bloxfruitsnokey/Arcylic/refs/heads/main/ARC/update.luau", sources={}},
-    {id="arsenal", name="Arsenal", icon="💥",
-     desc="Catware: Aimbot, Silent Aim, ESP, Chams. Keyless.",
-     script="https://catware.xyz/Arsenal.lua", sources={}},
-    {id="petsimx", name="Pet Simulator X", icon="🐾",
-     desc="Auto Hatch, Auto Farm, Auto Collect. Keyless.",
-     script="https://raw.githubusercontent.com/Oproxide/scripthub/refs/heads/main/main.lua", sources={}},
-    {id="jailbreak", name="Jailbreak", icon="🚔",
-     desc="Veloxide: Instant Reload, Silent Aim, Vehicle Flight. Keyless.",
-     script="https://raw.githubusercontent.com/veloxides/Jailbreak/refs/heads/main/VeloxideLoader", sources={}},
-    {id="adoptme", name="Adopt Me!", icon="🐶",
-     desc="CookieHub: Auto Farm, Pet Spawner, Fly. Keyless.",
-     script="https://raw.githubusercontent.com/nemothedognemo-stack/adoptmeCookiehub/refs/heads/main/loader", sources={}},
-    {id="bedwars", name="BedWars", icon="🛏",
-     desc="Auto Click, Kill Aura, God Mode. Keyless.",
-     script="https://gist.githubusercontent.com/DeveloperMikey/2b8ee3d5a38c56c2cc1db72554850384/raw/bedwar.lua", sources={}},
-    {id="toh", name="Tower of Hell", icon="🗼",
-     desc="Koala: Auto Tween to Top. Keyless.",
-     script="https://pastebin.com/raw/CLKFaUJR", sources={}},
-    {id="bloxburg", name="Welcome to Bloxburg", icon="🏘",
-     desc="Scar Hub: Auto Farm, Auto Snowplowing. Keyless.",
-     script="https://raw.githubusercontent.com/PainfulDestroyer/Roblox/main/Scar%20Hub", sources={}},
-    {id="doors", name="DOORS", icon="👻",
-     desc="NOVA Hub: God Mode, Loot Aura, ESP. Keyless.",
-     script="https://raw.githubusercontent.com/kyksikoid/Doors-Script/main/doors.lua", sources={}},
-    {id="evade", name="Evade", icon="🏃",
-     desc="Tora Isme: Collect Items, ESP. Keyless.",
-     script="https://raw.githubusercontent.com/gumanba/Scripts/main/EvadeEvent", sources={}},
-}}
-
-function GameModule.getCurrent()
-    local ok, info = pcall(function()
-        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
-    end)
-    if not ok or not info then return nil end
-    local jn = info.Name:lower()
-    for _, g in ipairs(GameModule.games) do
-        local shortName = g.name:split(" — ")[1]:lower()
-        if jn:find(shortName, 1, true) then return g end
-    end
-    return nil
-end
-
-function GameModule.execute(g, onStatus)
-    onStatus("⏳ Carregando...", "loading")
-    local sources = {g.script}
-    if g.sources then for _, s in ipairs(g.sources) do table.insert(sources, s) end end
-    for i, url in ipairs(sources) do
-        local ok, err = pcall(function()
-            local code = game:HttpGet(url)
-            if not code or #code < 20 then error("Resposta vazia") end
-            loadstring(code)()
-        end)
-        if ok then
-            onStatus("✓ Executado!", "success")
-            showToast("▶ "..g.name.." executado", "success")
-            return true
-        else
-            warn("[AKZ] Fonte "..i.." falhou: "..tostring(err))
-        end
-    end
-    onStatus("⚠ Falhou", "error")
-    showToast("⚠ Script temporariamente indisponível", "error")
-    return false
-end
-
--- ══════════════════════════════════════════════════════════
--- ABA 1: PRINCIPAL
--- ══════════════════════════════════════════════════════════
-local tPrin = createTabContent("Principal")
-do
-    local function lbl(parent, text, size, color, font, x, y, w, h)
-        local l = Instance.new("TextLabel", parent)
-        l.Text = text; l.Font = font; l.TextSize = size; l.TextColor3 = color
-        l.BackgroundTransparency = 1
-        l.Position = UDim2.new(0, x, 0, y); l.Size = UDim2.new(1, -w, 0, h)
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.TextTruncate = Enum.TextTruncate.AtEnd
-        return l
-    end
-    local WHITE = Color3.fromRGB(255,255,255)
-    local LIGHT = Color3.fromRGB(220,220,220)
-    local GREY  = Color3.fromRGB(150,150,150)
-    local y = 6
-
-    -- ── BLOCO 1: CRÉDITOS ──
-    y = C.section(tPrin, "Créditos", y)
-    local cr = C.card(tPrin, y, 120)
-    lbl(cr, "AKZ HUB", 16, WHITE, Enum.Font.GothamBold, 12, 10, 24, 20)
-    lbl(cr, "V1 — Premium Edition", 9, Color3.fromRGB(220,60,60), Enum.Font.GothamMedium, 12, 30, 24, 12)
-    CreateIcon(cr, "dev", 16, UDim2.new(0, 12, 0, 47))
-    lbl(cr, "Desenvolvedor:  Akira / Angel", 10, LIGHT, Enum.Font.Gotham, 34, 48, 46, 14)
-    lbl(cr, "\"Akira e Angel são 2 nicks do mesmo Criador.\"", 9, Color3.fromRGB(220,160,160), Enum.Font.GothamMedium, 12, 63, 24, 12)
-    local dsc = lbl(cr, "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos.", 9, Color3.fromRGB(170,170,170), Enum.Font.Gotham, 12, 80, 24, 36)
-    dsc.TextWrapped = true; dsc.TextTruncate = Enum.TextTruncate.None
-    dsc.TextYAlignment = Enum.TextYAlignment.Top
-    y = y + 120 + 8
-
-    -- ── BLOCO 2: COMUNIDADE ──
-    y = C.section(tPrin, "Comunidade", y)
-    local cm = C.card(tPrin, y, 54)
-    CreateIcon(cm, "discord", 22, UDim2.new(0, 10, 0, 14))
-    lbl(cm, "Discord oficial", 10, LIGHT, Enum.Font.GothamMedium, 40, 9, 118, 14)
-    CreateIcon(cm, "link", 16, UDim2.new(0, 40, 0, 26))
-    lbl(cm, "discord.gg/kc7myVSq3", 10, GREY, Enum.Font.Gotham, 60, 27, 138, 14)
-    local cb = Instance.new("TextButton", cm)
-    cb.Font = Enum.Font.GothamBold; cb.Text = "COPIAR"
-    cb.TextSize = 9; cb.TextColor3 = WHITE
-    cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
-    cb.BorderSizePixel = 0; cb.AutoButtonColor = false
-    cb.AnchorPoint = Vector2.new(1, 0.5)
-    cb.Position = UDim2.new(1, -10, 0.5, 0); cb.Size = UDim2.new(0, 64, 0, 22)
-    Instance.new("UICorner", cb).CornerRadius = UDim.new(0, 5)
-    cb.MouseButton1Click:Connect(function()
-        if setclipboard then
-            setclipboard("https://discord.gg/kc7myVSq3")
-            cb.Text = "✓ OK"; cb.BackgroundColor3 = Color3.fromRGB(60,180,90)
-            showToast("✓ Discord copiado!", "success")
-            task.delay(2, function()
-                cb.Text = "COPIAR"; cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
-            end)
-        else
-            showToast("⚠ Executor sem clipboard", "warning")
-        end
-    end)
-    y = y + 54 + 8
-
-    -- ── BLOCO 3: TEMA (o botão é montado no fim do script) ──
-    y = C.section(tPrin, "Tema", y)
-    local tm = C.card(tPrin, y, 44)
-    tm.ClipsDescendants = true
-    local holder = Instance.new("Frame", tPrin)   -- atalhos descem junto quando a lista de temas abre
-    holder.Name = "AtalhosHolder"
-    holder.BackgroundTransparency = 1; holder.BorderSizePixel = 0
-    holder.Position = UDim2.new(0, 0, 0, y + 44 + 8)
-    holder.Size = UDim2.new(1, 0, 0, 158)
-    State.themeCard, State.themeHolder, State.themeCardY = tm, holder, y
-
-    -- ── ATALHOS RÁPIDOS ──
-    local hy = C.section(holder, "Atalhos Rápidos", 0)
-    C.button(holder, "Infinite Yield (Admin)", hy, function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-    end, {right = "click"}); hy = hy + BTN_H + GAP
-    C.button(holder, "AirHub V2 (ESP + Aimbot)", hy, function()
-        loadOnce("airhub", AIRHUB_URL)
-    end, {right = "click"}); hy = hy + BTN_H + GAP
-    C.button(holder, "FlyGuiV3", hy, function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-    end, {right = "click"}); hy = hy + BTN_H + GAP
-    C.button(holder, "All Emotes", hy, function()
-        loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-    end, {right = "click"})
-end
-
--- ══════════════════════════════════════════════════════════
--- ABA 2: JOGOS — CATÁLOGO DINÂMICO (RoScripts API)
--- Configuração em CatalogConfig (topo do arquivo).
--- ══════════════════════════════════════════════════════════
-local tJogos = createTabContent("Jogos")
-
-local CAT_BG   = Color3.fromRGB(18,6,6)
-local CAT_STK  = Color3.fromRGB(100,20,20)
-local COL_OK   = Color3.fromRGB(120,220,120)
-local COL_WARN = Color3.fromRGB(220,200,80)
-local COL_ERR  = Color3.fromRGB(220,80,80)
-local COL_DIM  = Color3.fromRGB(160,160,160)
-local COL_RED  = Color3.fromRGB(140,25,25)
-local COL_REDH = Color3.fromRGB(180,40,40)
-
-local function mk(cls, props, parent)
-    local o = Instance.new(cls)
-    for k, v in pairs(props) do o[k] = v end
-    o.Parent = parent
-    return o
-end
-local function corner(o, r) return mk("UICorner", {CornerRadius = UDim.new(0, r or 6)}, o) end
-local function stroke(o, col, tr)
-    return mk("UIStroke", {Color = col or CAT_STK, Thickness = 1, Transparency = tr or 0.45}, o)
-end
-local function label(parent, text, size, color, font, pos, sz, align)
-    return mk("TextLabel", {
-        Text = text, TextSize = size, TextColor3 = color,
-        Font = font or Enum.Font.Gotham, BackgroundTransparency = 1,
-        TextXAlignment = align or Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        Position = pos, Size = sz,
-    }, parent)
-end
-
-local function fmtNum(n)
-    n = tonumber(n)
-    if not n then return nil end
-    if n >= 1000000 then return string.format("%.1fM", n / 1000000) end
-    if n >= 1000 then return string.format("%.1fk", n / 1000) end
-    return tostring(math.floor(n))
-end
-local function fmtDate(iso)
-    if type(iso) ~= "string" then return nil end
-    local y, m, d = iso:match("^(%d+)-(%d+)-(%d+)")
-    if not y then return nil end
-    return d .. "/" .. m .. "/" .. y
-end
-local function hasMobileTag(s)
-    if type(s.tags) ~= "table" then return false end
-    for _, t in ipairs(s.tags) do
-        if type(t) == "string" and t:lower():find("mobile", 1, true) then return true end
-    end
-    return false
-end
-
--- ── Estado e cache ─────────────────────────────────────────
-local Catalog = {
-    state = {
-        query = "", page = 1, totalPages = 1, total = 0, hasNext = false, busy = false,
-        noKey = true, free = true, mobile = false,
-        hidePatched = CatalogConfig.HidePatchedDefault,
-        useCurrentGame = true, builtin = false, sortIdx = 1,
-    },
-    cache = {}, cacheKeys = {},
-    reqId = 0, dbToken = 0,
-    lastReq = 0, lastClick = 0, blockedUntil = 0,
-    gameHasScripts = false,
-}
-
--- Ordenação: somente valores aceitos pela API (sortBy).
--- "Recomendados": busca = relevância (padrão da API); lista = score.
-local SORTS = {
-    {label = "Relevância", by = nil},
-    {label = "Mais novos", by = "createdAt"},
-    {label = "Mais likes", by = "likeCount"},
-    {label = "Mais vistos", by = "views"},
-}
-
-local function cacheGet(key)
-    if not CatalogConfig.CacheEnabled then return nil end
-    local c = Catalog.cache[key]
-    if c and (os.clock() - c.t) < CatalogConfig.CacheDuration then return c.data end
-    if c then Catalog.cache[key] = nil end
-    return nil
-end
-local function cacheSet(key, data)
-    if not CatalogConfig.CacheEnabled then return end
-    if not Catalog.cache[key] then
-        table.insert(Catalog.cacheKeys, key)
-        if #Catalog.cacheKeys > CatalogConfig.CacheMaxEntries then
-            local old = table.remove(Catalog.cacheKeys, 1)
-            Catalog.cache[old] = nil
-        end
-    end
-    Catalog.cache[key] = {t = os.clock(), data = data}
-end
-local function cacheClearSig(sig)
-    for k in pairs(Catalog.cache) do
-        if k:sub(1, #sig + 1) == sig .. "|" then Catalog.cache[k] = nil end
-    end
-end
-
--- ── HTTP ───────────────────────────────────────────────────
-local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
-    or (fluxus and fluxus.request)
-
-local function hasApiKey()
-    local k = CatalogConfig.RScriptsAPIKey
-    return type(k) == "string" and k ~= "" and k ~= "COLOQUE_SUA_API_KEY_AQUI"
-end
-
--- Retorna status, body, retryAfter. status 0 = falha de conexão.
-local function httpGet(url)
-    if httpRequest then
-        local headers = {Accept = "application/json"}
-        if hasApiKey() then headers.Authorization = "Bearer " .. CatalogConfig.RScriptsAPIKey end
-        local ok, res = pcall(httpRequest, {Url = url, Method = "GET", Headers = headers})
-        if not ok or type(res) ~= "table" then return 0, tostring(res) end
-        local ra
-        if type(res.Headers) == "table" then
-            for k, v in pairs(res.Headers) do
-                if tostring(k):lower() == "retry-after" then ra = tonumber(v) end
-            end
-        end
-        return tonumber(res.StatusCode) or 0, res.Body or "", ra
-    end
-    -- Fallback sem request(): HttpGet anônimo (a API é aberta, a key é opcional).
-    local ok, body = pcall(function() return game:HttpGet(url) end)
-    if ok then return 200, body end
-    local s = tostring(body)
-    local code = tonumber(s:match("[Hh][Tt][Tt][Pp]%s*(%d%d%d)")) or tonumber(s:match("%f[%d](%d%d%d)%f[%D]")) or 0
-    return code, s
-end
-
-local function errMsg(code, retry)
-    if code == 0 then return "⚠ Não foi possível conectar à API.\nVerifique sua conexão ou tente novamente." end
-    if code == 400 then return "⚠ Requisição inválida." end
-    if code == 401 then return "⚠ API Key inválida." end
-    if code == 403 then return "⚠ Acesso negado." end
-    if code == 404 then return "⚠ Recurso não encontrado." end
-    if code == 429 then
-        return "⚠ Muitas requisições. Aguarde " .. tostring(math.ceil(retry or 8)) .. "s."
-    end
-    if code >= 500 then return "⚠ Servidor temporariamente indisponível." end
-    if code == -1 then return "⚠ Resposta inválida da API." end
-    return "⚠ Erro inesperado (" .. tostring(code) .. ")."
-end
-
--- Respeita intervalo mínimo entre requests; devolve JSON decodificado ou nil, {code, retry}.
-function Catalog.apiGet(url)
-    local wait = Catalog.lastReq + CatalogConfig.MinRequestInterval - os.clock()
-    if wait > 0 then task.wait(wait) end
-    Catalog.lastReq = os.clock()
-    local status, body, retry = httpGet(url)
-    if status < 200 or status >= 300 then
-        if status == 429 then Catalog.blockedUntil = os.clock() + (retry or 8) end
-        return nil, {code = status, retry = retry}
-    end
-    local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
-    if not ok or type(data) ~= "table" then return nil, {code = -1} end
-    return data
-end
-
--- Monta a URL conforme a documentação (docs.sirius.menu/scripts-api).
--- Retorna url, sig (sig = consulta sem o número da página, usada no cache).
-function Catalog.buildRequest(st, page)
-    local q = (st.query:gsub("^%s+", ""):gsub("%s+$", ""))
-    local path
-    if q ~= "" then
-        path = "/scripts/search"
-    elseif st.useCurrentGame and Catalog.gameHasScripts then
-        path = "/games/" .. tostring(game.PlaceId) .. "/scripts"
-    else
-        path = "/scripts"
-    end
-    local p = {}
-    if q ~= "" then p[#p + 1] = "q=" .. HttpService:UrlEncode(q) end
-    p[#p + 1] = "max=" .. tostring(CatalogConfig.ResultsPerPage)
-    local by = SORTS[st.sortIdx].by
-    if not by and q == "" then by = "score" end
-    if by then p[#p + 1] = "sortBy=" .. by; p[#p + 1] = "order=desc" end
-    if st.noKey then p[#p + 1] = "key=0" end
-    if st.free then p[#p + 1] = "mode=free" end
-    if st.mobile then p[#p + 1] = "tag=mobile" end
-    if st.hidePatched then p[#p + 1] = "patched=0" end
-    local sig = path .. "?" .. table.concat(p, "&")
-    return CatalogConfig.BaseURL .. sig .. "&page=" .. tostring(page), sig
-end
-
-local function normalize(data, page)
-    local r = data.result or {}
-    local m = data.meta or r
-    local scripts = r.scripts or {}
-    local pg = tonumber(m.page or r.page) or page
-    local tp = math.max(1, tonumber(m.totalPages or r.totalPages) or 1)
-    return {
-        scripts = scripts, page = pg, totalPages = tp,
-        total = tonumber(m.total or r.total) or #scripts,
-        hasNext = (m.nextPage ~= nil) or (pg < tp),
-    }
-end
-
--- ── Execução ───────────────────────────────────────────────
--- Usa a URL "loadstring" oficial da API (fallback: rawUrl, só presente em free + keyless).
--- Retorna true  OU  false, "motivo curto" (download / compilação / erro dentro do script).
-function Catalog.execute(s)
-    if s._builtin then
-        if GameModule.execute(s._builtin, function() end) then return true end
-        return false, "fontes indisponíveis"
-    end
-    local urls = {}
-    if type(s.loadstring) == "string" and s.loadstring ~= "" then urls[#urls + 1] = s.loadstring end
-    if type(s.rawUrl) == "string" and s.rawUrl ~= "" then urls[#urls + 1] = s.rawUrl end
-    if #urls == 0 then return false, "sem conteúdo executável" end
-
-    local code, lastErr
-    for _, u in ipairs(urls) do
-        for attempt = 1, 2 do
-            local ok, res = pcall(function() return game:HttpGet(u) end)
-            if ok and type(res) == "string" and #res >= 10 then code = res; break end
-            lastErr = ok and "resposta vazia" or tostring(res)
-            if attempt == 1 then task.wait(1) end
-        end
-        if code then break end
-    end
-    if not code then
-        warn("[AKZ] Catálogo download: " .. tostring(lastErr))
-        if tostring(lastErr):find("429", 1, true) then return false, "limite de downloads, aguarde" end
-        return false, "download falhou: " .. tostring(lastErr):sub(1, 45)
-    end
-    if code:sub(1, 1) == "<" then return false, "resposta não é Lua (bloqueio/HTML)" end
-
-    local fn, perr = loadstring(code)
-    if not fn then
-        warn("[AKZ] Catálogo compilação: " .. tostring(perr))
-        return false, "não compilou: " .. tostring(perr):sub(1, 45)
-    end
-
-    -- Roda em outra thread: scripts que ficam em loop/yield não travam o catálogo.
-    local done, rok, rerr = false, true, nil
-    task.spawn(function() rok, rerr = pcall(fn); done = true end)
-    local t0 = os.clock()
-    while not done and (os.clock() - t0) < 2 do task.wait(0.1) end
-    if done and not rok then
-        warn("[AKZ] Catálogo script: " .. tostring(rerr))
-        return false, "erro no script: " .. tostring(rerr):sub(1, 55)
-    end
-    return true -- terminou sem erro, ou continua rodando (hub aberto)
-end
-
--- ══════════════════════════════════════════════════════════
--- UI (tudo dentro de Root; só a lista é reconstruída)
--- ══════════════════════════════════════════════════════════
-local Root = mk("Frame", {
-    BackgroundTransparency = 1, Position = UDim2.new(0, PAD, 0, 6),
-    Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-}, tJogos)
-mk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5)}, Root)
-local ord = 0
-local function nextOrd() ord = ord + 1; return ord end
-
--- Aviso
-local wc = mk("Frame", {
-    BackgroundColor3 = Color3.fromRGB(35,28,5), BackgroundTransparency = 0.15, BorderSizePixel = 0,
-    Size = UDim2.new(1, 0, 0, 56), LayoutOrder = nextOrd(),
-}, Root)
-corner(wc, 7)
-local ws = stroke(wc, Color3.fromRGB(230,200,50), 0.15); ws.Thickness = 1.5
-label(wc, "⚠  AVISO", 10, Color3.fromRGB(240,210,70), Enum.Font.GothamBold,
-    UDim2.new(0, 10, 0, 4), UDim2.new(1, -20, 0, 14))
-local wd = label(wc, "Scripts de terceiros via RoScripts, sem vínculo com o AKZ Hub. Execute por sua conta e risco.",
-    9, Color3.fromRGB(220,200,140), Enum.Font.Gotham, UDim2.new(0, 10, 0, 20), UDim2.new(1, -20, 0, 32))
-wd.TextWrapped = true; wd.TextYAlignment = Enum.TextYAlignment.Top; wd.TextTruncate = Enum.TextTruncate.None
-
--- Título + jogo atual
-label(Root, "🎮 JOGOS SUPORTADOS", 11, Color3.fromRGB(255,255,255), Enum.Font.GothamBold,
-    UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 16)).LayoutOrder = nextOrd()
-local curLbl = label(Root, "🎮 Jogo atual: detectando...", 9, COL_DIM, Enum.Font.GothamMedium,
-    UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 26))
-curLbl.TextWrapped = true; curLbl.TextYAlignment = Enum.TextYAlignment.Top
-curLbl.TextTruncate = Enum.TextTruncate.None; curLbl.LayoutOrder = nextOrd()
-
--- Busca + limpar + atualizar
-local searchRow = mk("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), LayoutOrder = nextOrd()}, Root)
-local sbox = mk("Frame", {
-    BackgroundColor3 = Color3.fromRGB(20,5,5), BackgroundTransparency = 0.25, BorderSizePixel = 0,
-    Size = UDim2.new(1, -62, 1, 0),
-}, searchRow)
-corner(sbox, 6); stroke(sbox, Color3.fromRGB(120,25,25), 0.4)
-label(sbox, "🔎", 12, Color3.fromRGB(230,230,230), Enum.Font.Gotham, UDim2.new(0, 6, 0, 0), UDim2.new(0, 20, 1, 0))
-local searchInput = mk("TextBox", {
-    PlaceholderText = "Pesquisar jogo...", PlaceholderColor3 = Color3.fromRGB(120,120,120),
-    Text = "", Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = Color3.fromRGB(230,230,230),
-    BackgroundTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false,
-    Position = UDim2.new(0, 28, 0, 0), Size = UDim2.new(1, -34, 1, 0),
-}, sbox)
-
-local function smallBtn(text, pos)
-    local b = mk("TextButton", {
-        Text = text, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = Color3.fromRGB(255,255,255),
-        BackgroundColor3 = COL_RED, BorderSizePixel = 0, AutoButtonColor = false,
-        Position = pos, Size = UDim2.new(0, 28, 1, 0),
-    }, searchRow)
-    corner(b, 6)
-    b.MouseEnter:Connect(function() tween(b, 0.12, {BackgroundColor3 = COL_REDH}) end)
-    b.MouseLeave:Connect(function() tween(b, 0.12, {BackgroundColor3 = COL_RED}) end)
-    return b
-end
-local clearBtn   = smallBtn("✕", UDim2.new(1, -58, 0, 0))
-local refreshBtn = smallBtn("↻", UDim2.new(1, -28, 0, 0))
-
--- Cabeçalho de filtros + ordenação
-local filterRow = mk("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 28), LayoutOrder = nextOrd()}, Root)
-local filterBtn = mk("TextButton", {
-    Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = Color3.fromRGB(230,230,230),
-    BackgroundColor3 = Color3.fromRGB(20,5,5), BackgroundTransparency = 0.25, BorderSizePixel = 0,
-    AutoButtonColor = false, TextXAlignment = Enum.TextXAlignment.Left,
-    Size = UDim2.new(1, -104, 1, 0), Text = "",
-}, filterRow)
-corner(filterBtn, 6); stroke(filterBtn, Color3.fromRGB(120,25,25), 0.4)
-mk("UIPadding", {PaddingLeft = UDim.new(0, 8)}, filterBtn)
-local sortBtn = mk("TextButton", {
-    Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = Color3.fromRGB(255,255,255),
-    BackgroundColor3 = COL_RED, BorderSizePixel = 0, AutoButtonColor = false,
-    AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Size = UDim2.new(0, 100, 1, 0),
-    Text = "", TextTruncate = Enum.TextTruncate.AtEnd,
-}, filterRow)
-corner(sortBtn, 6)
-
--- Painel de filtros (colapsável)
-local panel = mk("Frame", {
-    BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-    Visible = false, LayoutOrder = nextOrd(),
-}, Root)
-mk("UIGridLayout", {
-    CellSize = UDim2.new(0.5, -2, 0, 28), CellPadding = UDim2.new(0, 4, 0, 4),
-    SortOrder = Enum.SortOrder.LayoutOrder,
-}, panel)
-
-local chipRenders = {}
-local function activeCount()
-    local st, n = Catalog.state, 0
-    for _, k in ipairs({"noKey", "mobile", "free", "hidePatched", "useCurrentGame", "builtin"}) do
-        if st[k] then n = n + 1 end
-    end
-    return n
-end
-local function updateHeader()
-    filterBtn.Text = "⚙ FILTROS (" .. activeCount() .. " ativos) " .. (panel.Visible and "▴" or "▾")
-    sortBtn.Text = "↕ " .. SORTS[Catalog.state.sortIdx].label
-end
-
-local schedule -- declarado adiante
-
-local chipDefs = {
-    {"noKey", "🔑 Sem Key"}, {"mobile", "📱 Mobile"}, {"free", "🆓 Grátis"},
-    {"hidePatched", "🩹 Sem patched"}, {"useCurrentGame", "🎯 Jogo atual"}, {"builtin", "⭐ Integrados"},
-}
-for i, def in ipairs(chipDefs) do
-    local key, text = def[1], def[2]
-    local b = mk("TextButton", {
-        Font = Enum.Font.GothamMedium, TextSize = 10, TextColor3 = Color3.fromRGB(220,220,220),
-        BackgroundColor3 = Color3.fromRGB(20,5,5), BackgroundTransparency = 0.3, BorderSizePixel = 0,
-        AutoButtonColor = false, LayoutOrder = i, TextTruncate = Enum.TextTruncate.AtEnd, Text = "",
-    }, panel)
-    corner(b, 6)
-    local s = stroke(b, Color3.fromRGB(80,20,20), 0.4)
-    local function render()
-        local on = Catalog.state[key]
-        b.Text = text .. "  " .. (on and "ON" or "OFF")
-        s.Color = on and Color3.fromRGB(60,180,90) or Color3.fromRGB(80,20,20)
-        s.Transparency = on and 0.15 or 0.4
-        b.TextColor3 = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(170,170,170)
-    end
-    render()
-    b.MouseButton1Click:Connect(function()
-        Catalog.state[key] = not Catalog.state[key]
-        render(); updateHeader()
-        Catalog.state.page = 1
-        schedule(0.2)
-    end)
-end
-updateHeader()
-filterBtn.MouseButton1Click:Connect(function() panel.Visible = not panel.Visible; updateHeader() end)
-sortBtn.MouseButton1Click:Connect(function()
-    local st = Catalog.state
-    st.sortIdx = (st.sortIdx % #SORTS) + 1
-    updateHeader(); st.page = 1
-    schedule(0.2)
-end)
-
--- Divisor + cabeçalho de resultados
-mk("Frame", {BackgroundColor3 = Color3.fromRGB(140,25,25), BackgroundTransparency = 0.6, BorderSizePixel = 0,
-    Size = UDim2.new(1, 0, 0, 1), LayoutOrder = nextOrd()}, Root)
-local infoLbl = label(Root, "RESULTADOS", 9, Color3.fromRGB(200,60,60), Enum.Font.GothamBold,
-    UDim2.new(0, 0, 0, 0), UDim2.new(1, 0, 0, 14))
-infoLbl.LayoutOrder = nextOrd()
-
--- Lista de resultados (única parte reconstruída ao paginar)
-local results = mk("Frame", {
-    BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-    LayoutOrder = nextOrd(),
-}, Root)
-mk("UIListLayout", {SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5)}, results)
-
--- Paginação
-local pagRow = mk("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 32), LayoutOrder = nextOrd()}, Root)
-local function pagBtn(text, anchorRight)
-    local b = mk("TextButton", {
-        Text = text, Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = Color3.fromRGB(255,255,255),
-        BackgroundColor3 = COL_RED, BorderSizePixel = 0, AutoButtonColor = false,
-        AnchorPoint = Vector2.new(anchorRight and 1 or 0, 0),
-        Position = UDim2.new(anchorRight and 1 or 0, 0, 0, 0), Size = UDim2.new(0, 60, 1, 0),
-    }, pagRow)
-    corner(b, 6)
-    return b
-end
-local prevBtn, nextBtn = pagBtn("◀", false), pagBtn("▶", true)
-local pageLbl = label(pagRow, "Página 1 de 1", 10, Color3.fromRGB(230,230,230), Enum.Font.GothamMedium,
-    UDim2.new(0, 64, 0, 0), UDim2.new(1, -128, 1, 0), Enum.TextXAlignment.Center)
-mk("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 6), LayoutOrder = nextOrd()}, Root)
-
-local function setPager()
-    local st = Catalog.state
-    pageLbl.Text = "Página " .. st.page .. " de " .. st.totalPages
-    local canPrev, canNext = st.page > 1, st.hasNext
-    prevBtn.BackgroundTransparency = canPrev and 0 or 0.65; prevBtn.TextTransparency = canPrev and 0 or 0.6
-    nextBtn.BackgroundTransparency = canNext and 0 or 0.65; nextBtn.TextTransparency = canNext and 0 or 0.6
-end
-
--- ── Renderização ───────────────────────────────────────────
-local function clearResults()
-    for _, ch in ipairs(results:GetChildren()) do
-        if ch:IsA("GuiObject") then ch:Destroy() end
-    end
-end
-
-local function notice(text, color, o)
-    local l = label(results, text, 10, color or COL_DIM, Enum.Font.Gotham, UDim2.new(0, 0, 0, 0),
-        UDim2.new(1, 0, 0, 0))
-    l.TextWrapped = true; l.TextTruncate = Enum.TextTruncate.None; l.TextYAlignment = Enum.TextYAlignment.Top
-    l.AutomaticSize = Enum.AutomaticSize.Y; l.LayoutOrder = o or 1
-    return l
-end
-
-local loadPage -- declarado adiante
-
-local function showLoading()
-    clearResults()
-    notice("⏳ Pesquisando scripts...", COL_WARN, 1)
-    for i = 1, 2 do
-        local sk = mk("Frame", {BackgroundColor3 = CAT_BG, BackgroundTransparency = 0.4, BorderSizePixel = 0,
-            Size = UDim2.new(1, 0, 0, 44), LayoutOrder = 1 + i}, results)
-        corner(sk, 7); stroke(sk)
-    end
-    infoLbl.Text = "RESULTADOS"
-end
-
-local function showError(msg)
-    local st = Catalog.state
-    st.busy = false; st.hasNext = false
-    clearResults()
-    notice(msg, COL_ERR, 1)
-    local rb = mk("TextButton", {
-        Text = "↻ TENTAR NOVAMENTE", Font = Enum.Font.GothamBold, TextSize = 10,
-        TextColor3 = Color3.fromRGB(255,255,255), BackgroundColor3 = COL_RED, BorderSizePixel = 0,
-        AutoButtonColor = false, Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 2,
-    }, results)
-    corner(rb, 6)
-    rb.MouseButton1Click:Connect(function() loadPage(st.page) end)
-    infoLbl.Text = "RESULTADOS"
-    setPager()
-end
-
-local function showEmpty()
-    clearResults()
-    notice("🔍 Nenhum script encontrado.\n\nTente:\n• outro nome\n• remover algum filtro\n• desativar Mobile\n• desativar Sem Key", COL_DIM, 1)
-end
-
--- Card compacto de um script
-local function createCard(s, idx)
-    local c = mk("Frame", {BackgroundColor3 = CAT_BG, BackgroundTransparency = 0.3, BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, 116), LayoutOrder = idx}, results)
-    corner(c, 7); stroke(c)
-
-    local title = tostring(s.title or "Sem título")
-    local bi = s._builtin
-    local gameName = (type(s.game) == "table" and s.game.name) or (bi and bi.name) or (s.universal and "Universal") or nil
-    local owner = type(s.owner) == "table" and s.owner.username or nil
-
-    label(c, "🎮 " .. title, 11, Color3.fromRGB(255,255,255), Enum.Font.GothamBold,
-        UDim2.new(0, 8, 0, 6), UDim2.new(1, -98, 0, 14))
-    local status = label(c, "● DISPONÍVEL", 8, COL_OK, Enum.Font.GothamBold,
-        UDim2.new(1, -92, 0, 7), UDim2.new(0, 84, 0, 12), Enum.TextXAlignment.Right)
-
-    local l2 = {}
-    if gameName then l2[#l2 + 1] = gameName end
-    if owner then l2[#l2 + 1] = "por " .. owner end
-    label(c, table.concat(l2, " • "), 9, COL_DIM, Enum.Font.Gotham, UDim2.new(0, 8, 0, 22), UDim2.new(1, -16, 0, 12))
-
-    -- Badges: só o que a API confirma (nada é marcado manualmente).
-    local b = {}
-    if hasMobileTag(s) then b[#b + 1] = "📱 Mobile" end
-    if s.key == false then b[#b + 1] = "🔑 No Key" elseif s.key == true then b[#b + 1] = "🔑 Key" end
-    if s.scriptType == "free" then b[#b + 1] = "🆓 Free" elseif s.scriptType == "paid" then b[#b + 1] = "💰 Paid" end
-    if s.verified == true then b[#b + 1] = "✓ Verificado" end
-    if s.patched == true then b[#b + 1] = "⚠ Patched" end
-    local otherGame = type(s.game) == "table" and tonumber(s.game.placeId) ~= nil
-        and tonumber(s.game.placeId) ~= game.PlaceId
-    if otherGame then b[#b + 1] = "↪ Outro jogo" end
-    label(c, table.concat(b, " • "), 9, Color3.fromRGB(215,175,175), Enum.Font.Gotham,
-        UDim2.new(0, 8, 0, 35), UDim2.new(1, -16, 0, 12))
-
-    local sp = {}
-    local lk, vw, dt = fmtNum(s.likeCount), fmtNum(s.views), fmtDate(s.updatedAt)
-    if lk then sp[#sp + 1] = "👍 " .. lk end
-    if vw then sp[#sp + 1] = "👁 " .. vw end
-    if dt then sp[#sp + 1] = "🕒 " .. dt end
-    label(c, table.concat(sp, "  "), 8, Color3.fromRGB(140,140,140), Enum.Font.Gotham,
-        UDim2.new(0, 8, 0, 48), UDim2.new(1, -16, 0, 12))
-
-    local dsc = label(c, tostring(s.description or ""), 8, Color3.fromRGB(150,150,150), Enum.Font.Gotham,
-        UDim2.new(0, 8, 0, 61), UDim2.new(1, -16, 0, 22))
-    dsc.TextWrapped = true; dsc.TextYAlignment = Enum.TextYAlignment.Top
-
-    local paid = s.scriptType == "paid"
-    local eb = mk("TextButton", {
-        Text = paid and "🛒 PAGO" or "▶ EXECUTAR", Font = Enum.Font.GothamBold, TextSize = 11,
-        TextColor3 = Color3.fromRGB(255,255,255), BackgroundColor3 = COL_RED, BorderSizePixel = 0,
-        AutoButtonColor = false, Position = UDim2.new(0, 8, 1, -30), Size = UDim2.new(1, -16, 0, 24),
-    }, c)
-    corner(eb, 5)
-    eb.MouseEnter:Connect(function() tween(eb, 0.12, {BackgroundColor3 = COL_REDH}) end)
-    eb.MouseLeave:Connect(function() tween(eb, 0.12, {BackgroundColor3 = COL_RED}) end)
-
-    local function setStatus(txt, col) status.Text = txt; status.TextColor3 = col end
-    local running, confirmTok = false, 0
-    local label0 = eb.Text
-
-    eb.MouseButton1Click:Connect(function()
-        if running then showToast("⏳ Já está carregando...", "warning"); return end
-
-        if paid then -- scripts pagos não são executados; copia o link de compra, se existir
-            local url = s.marketplaceUrl
-            if type(url) == "string" and url ~= "" and setclipboard then
-                pcall(setclipboard, url); showToast("🛒 Link de compra copiado", "success")
-            else
-                showToast("🛒 Script pago — sem execução pelo catálogo", "warning")
-            end
-            return
-        end
-
-        -- Confirmação em 2 toques SÓ para script marcado como patched (não verificado executa direto).
-        local risky = CatalogConfig.ConfirmPatched and not bi and s.patched == true
-        if risky and confirmTok == 0 then
-            confirmTok = os.clock()
-            local my = confirmTok
-            eb.Text = "⚠ CONFIRMAR"
-            setStatus("⚠ PATCHED?", COL_WARN)
-            showToast("Marcado como patched. Toque de novo para executar.", "warning")
-            task.delay(3, function()
-                if confirmTok == my and not running then
-                    confirmTok = 0; eb.Text = label0; setStatus("● DISPONÍVEL", COL_OK)
-                end
-            end)
-            return
-        end
-        confirmTok = 0
-
-        running = true
-        eb.Text = "⏳"; setStatus("⏳ CARREGANDO...", COL_WARN)
-        task.spawn(function()
-            local ok, why = Catalog.execute(s)
-            if ok then
-                setStatus("✓ EXECUTADO", COL_OK)
-                showToast("▶ " .. title .. " executado", "success")
-            else
-                setStatus("⚠ ERRO", COL_ERR)
-                showToast("⚠ " .. tostring(why or "falha") .. (otherGame and " • feito p/ outro jogo" or ""), "error")
-            end
-            task.wait(0.8)
-            eb.Text = label0; running = false
-        end)
-    end)
-end
-
-local function renderResults(list)
-    clearResults()
-    local st = Catalog.state
-    local shown = 0
-    for _, s in ipairs(list) do
-        -- Guarda extra: só mostra o que é compatível com os filtros ativos.
-        local skip = (st.noKey and s.key == true)
-            or (st.free and s.scriptType == "paid")
-            or (st.hidePatched and s.patched == true)
-            or (st.mobile and not s._builtin and not hasMobileTag(s))
-        if not skip then
-            shown = shown + 1
-            createCard(s, shown)
-        end
-    end
-    if shown == 0 then showEmpty() end
-    return shown
-end
-
--- ── Modo "Integrados" (lista original do hub, agora paginada) ──
-local function renderBuiltin(page)
-    local st = Catalog.state
-    local q = st.query:lower():gsub("^%s+", ""):gsub("%s+$", "")
-    local all = {}
-    for _, g in ipairs(GameModule.games) do
-        if q == "" or g.name:lower():find(q, 1, true) or (g.desc or ""):lower():find(q, 1, true) then
-            all[#all + 1] = {
-                title = g.name, description = g.desc, key = false, scriptType = "free",
-                game = {name = g.name}, _builtin = g,
-            }
-        end
-    end
-    local rpp = CatalogConfig.ResultsPerPage
-    local tp = math.max(1, math.ceil(#all / rpp))
-    page = math.clamp(page, 1, tp)
-    local slice = {}
-    for i = (page - 1) * rpp + 1, math.min(#all, page * rpp) do slice[#slice + 1] = all[i] end
-    st.page, st.totalPages, st.total, st.hasNext, st.busy = page, tp, #all, page < tp, false
-    infoLbl.Text = #slice .. " SCRIPTS INTEGRADOS • PÁGINA " .. page .. "/" .. tp
-    -- Integrados ignoram filtros da API (são curados pelo hub): renderiza direto.
-    clearResults()
-    if #slice == 0 then showEmpty() else for i, s in ipairs(slice) do createCard(s, i) end end
-    setPager()
-end
-
-local function applyResult(res, page)
-    local st = Catalog.state
-    st.busy = false
-    st.page, st.totalPages, st.total, st.hasNext = res.page, res.totalPages, res.total, res.hasNext
-    local n = renderResults(res.scripts)
-    infoLbl.Text = n .. " SCRIPTS • PÁGINA " .. st.page .. "/" .. st.totalPages .. " • " .. st.total .. " NO TOTAL"
-    setPager()
-end
-
-loadPage = function(page)
-    local st = Catalog.state
-    if st.builtin then renderBuiltin(page); return end
-    Catalog.reqId = Catalog.reqId + 1
-    local my = Catalog.reqId
-    local url, sig = Catalog.buildRequest(st, page)
-    local key = sig .. "|" .. page
-
-    local cached = cacheGet(key)
-    if cached then applyResult(cached, page); return end
-
-    if os.clock() < Catalog.blockedUntil then
-        showError(errMsg(429, Catalog.blockedUntil - os.clock()))
+    decoded = d
+
+    if decoded.success == false then
+        local err = decoded.error or {}
+        local code = err.code or "UNKNOWN"
+        local msgs = {
+            UNAUTHORIZED = "⚠ API Key inválida.",
+            RATE_LIMITED = "⚠ Muitas requisições. Aguarde.",
+            NOT_FOUND    = "⚠ Recurso não encontrado.",
+            FORBIDDEN    = "⚠ Acesso negado.",
+            BAD_REQUEST  = "⚠ Requisição inválida.",
+            SERVER_ERROR = "⚠ Servidor indisponível.",
+        }
+        cb(nil, {code=code, message=msgs[code] or ("⚠ Erro: " .. (err.message or "?"))})
         return
     end
 
-    st.busy = true
-    showLoading()
-    task.spawn(function()
-        local data, err = Catalog.apiGet(url)
-        if my ~= Catalog.reqId then return end -- resposta antiga: descartada
-        if not data then
-            if err.code == 404 and url:find("/games/", 1, true) then
-                data = {result = {scripts = {}, total = 0, totalPages = 1}}
+    RScripts.Cache[key] = {data=decoded, time=tick()}
+    local meta = decoded.meta or {}
+    local pag = meta.pagination or {}
+    RScripts.State.page       = pag.page or p or 1
+    RScripts.State.totalPages = pag.totalPages or 1
+    RScripts.State.total      = pag.total or 0
+    RScripts.State.hasNext    = pag.hasNextPage or false
+    RScripts.State.hasPrev    = pag.hasPrevPage or false
+    cb(decoded, nil)
+end
+
+function RScripts.execute(s)
+    local code = s.script
+    if not code and s.rawScript then
+        local ok, f = pcall(function() return game:HttpGet(s.rawScript) end)
+        if ok and f and #f > 10 then code = f end
+    end
+    if not code or code == "" then return false, "⚠ Sem código disponível." end
+    local ok, err = pcall(function() loadstring(code)() end)
+    if ok then return true, "✓ Executado!" end
+    return false, "⚠ Erro: " .. tostring(err)
+end
+
+-- ══════════════════════════════════════════════════════════
+-- CRIAÇÃO DE TODAS AS ABAS
+-- ══════════════════════════════════════════════════════════
+local Tabs = {
+    Principal  = Window:MakeTab({"Principal",   "home"}),
+    Jogos      = Window:MakeTab({"Jogos",       "gamepad-2"}),
+    Status     = Window:MakeTab({"Status",      "activity"}),
+    Movimentos = Window:MakeTab({"Movimentos",  "footprints"}),
+    Combate    = Window:MakeTab({"Combate",     "sword"}),
+    Visual     = Window:MakeTab({"Visual",      "eye"}),
+    Jogador    = Window:MakeTab({"Jogador",     "user"}),
+    Mundo      = Window:MakeTab({"Mundo",       "globe"}),
+    Diversao   = Window:MakeTab({"Diversão",    "party-popper"}),
+    Admin      = Window:MakeTab({"Admin",       "shield"}),
+    Teleportes = Window:MakeTab({"Teleportes",  "map-pin"}),
+    Servidor   = Window:MakeTab({"Servidor",    "server"}),
+    Chat       = Window:MakeTab({"Chat",        "message-circle"}),
+    Camera     = Window:MakeTab({"Câmera",      "video"}),
+    Protecao   = Window:MakeTab({"Proteção",    "lock"}),
+    Utilidades = Window:MakeTab({"Utilidades",  "wrench"}),
+    Scripts    = Window:MakeTab({"Scripts",     "package"}),
+    ConfigTab  = Window:MakeTab({"Config",      "settings"}),
+    Sobre      = Window:MakeTab({"Sobre",       "info"}),
+}
+
+-- ══════════════════════════════════════════════════════════
+-- ABA PRINCIPAL
+-- ══════════════════════════════════════════════════════════
+Tabs.Principal:AddSection({"Informações do Hub"})
+Tabs.Principal:AddParagraph({Title = "AKZ HUB", Content = "by: Akira / Angel — V1"})
+Tabs.Principal:AddParagraph({Title = "Desenvolvedor", Content = "Akira / Angel\n\"Akira e Angel são 2 nicks do mesmo Criador.\""})
+Tabs.Principal:AddParagraph({Title = "Comunidade", Content = "discord.gg/kc7myVSq3"})
+Tabs.Principal:AddButton({"📋 Copiar Discord", function()
+    if setclipboard then
+        setclipboard("https://discord.gg/kc7myVSq3")
+        redzlib:Notify({Title = "Discord", Description = "✓ Discord copiado!", Type = "Success", Duration = 3})
+    else
+        redzlib:Notify({Title = "Erro", Description = "Executor sem clipboard", Type = "Error", Duration = 3})
+    end
+end})
+Tabs.Principal:AddParagraph({Title = "Sobre", Content = "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos."})
+
+Tabs.Principal:AddSection({"Atalhos Rápidos"})
+Tabs.Principal:AddButton({"Infinite Yield (Admin)", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end})
+Tabs.Principal:AddButton({"AirHub V2 (ESP + Aimbot)", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end})
+Tabs.Principal:AddButton({"FlyGuiV3", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+end})
+Tabs.Principal:AddButton({"All Emotes", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+end})
+
+Tabs.Principal:AddDiscordInvite({
+    Name = "AKZ Hub Community",
+    Description = "Junte-se à nossa comunidade!",
+    Logo = "rbxassetid://118161689763803",
+    Invite = "https://discord.gg/kc7myVSq3"
+})
+
+-- ══════════════════════════════════════════════════════════
+-- ABA JOGOS (RScripts API)
+-- ══════════════════════════════════════════════════════════
+Tabs.Jogos:AddSection({"⚠ AVISO"})
+Tabs.Jogos:AddParagraph({Title = "Importante", Content = "Os scripts desta seção são gratuitos e sem key. Não possuem vínculo oficial com o AKZ Hub."})
+
+-- Busca
+local searchBox = Tabs.Jogos:AddTextBox({
+    Name = "🔎 Pesquisar Jogo",
+    Description = "Digite o nome do jogo (ex: MM2)",
+    PlaceholderText = "MM2, Blox Fruits...",
+    ClearText = false,
+    Callback = function(txt)
+        RScripts.State.query = txt
+        RScripts.State.page = 1
+        if RScripts.State._refresh then RScripts.State._refresh() end
+    end
+})
+
+-- Filtros
+Tabs.Jogos:AddSection({"Filtros"})
+Tabs.Jogos:AddToggle({
+    Name = "🔑 Sem Key",
+    Description = "Somente scripts sem sistema de key",
+    Default = true,
+    Callback = function(v) RScripts.State.filters.noKey = v
+        RScripts.State.page = 1
+        if RScripts.State._refresh then RScripts.State._refresh() end
+    end
+})
+Tabs.Jogos:AddToggle({
+    Name = "📱 Mobile",
+    Description = "Somente compatíveis com mobile",
+    Default = false,
+    Callback = function(v) RScripts.State.filters.mobile = v
+        RScripts.State.page = 1
+        if RScripts.State._refresh then RScripts.State._refresh() end
+    end
+})
+Tabs.Jogos:AddToggle({
+    Name = "🆓 Grátis",
+    Description = "Somente scripts gratuitos",
+    Default = false,
+    Callback = function(v) RScripts.State.filters.free = v
+        RScripts.State.page = 1
+        if RScripts.State._refresh then RScripts.State._refresh() end
+    end
+})
+
+-- Ordenação
+Tabs.Jogos:AddDropdown({
+    Name = "↕ Ordenar por",
+    Options = {"Recomendado", "Mais novos", "Mais likes", "Mais vistos", "Trending"},
+    Default = "Recomendado",
+    Callback = function(v)
+        local map = { Recomendado="recommended", ["Mais novos"]="newest",
+                      ["Mais likes"]="most_likes", ["Mais vistos"]="most_views",
+                      Trending="trending" }
+        RScripts.State.sort = map[v] or "recommended"
+        RScripts.State.page = 1
+        if RScripts.State._refresh then RScripts.State._refresh() end
+    end
+})
+
+-- Resultados (atualizados via refresh)
+Tabs.Jogos:AddSection({"Resultados"})
+local resultsParagraph = Tabs.Jogos:AddParagraph({Title = "Aguardando...", Content = "Use a busca acima ou aguarde carregamento automático."})
+
+-- Paginação
+local pageInfo = Tabs.Jogos:AddParagraph({Title = "Página", Content = "1 / 1"})
+
+Tabs.Jogos:AddButton({"◀ Página Anterior", function()
+    if not RScripts.State.hasPrev then
+        redzlib:Notify({Title = "Paginação", Description = "Já está na primeira página.", Type = "Warning", Duration = 2})
+        return
+    end
+    RScripts.State.page = math.max(1, RScripts.State.page - 1)
+    if RScripts.State._refresh then RScripts.State._refresh() end
+end})
+Tabs.Jogos:AddButton({"Próxima Página ▶", function()
+    if not RScripts.State.hasNext then
+        redzlib:Notify({Title = "Paginação", Description = "Já está na última página.", Type = "Warning", Duration = 2})
+        return
+    end
+    RScripts.State.page = RScripts.State.page + 1
+    if RScripts.State._refresh then RScripts.State._refresh() end
+end})
+Tabs.Jogos:AddButton({"↻ Atualizar Resultados", function()
+    if RScripts.State._refresh then RScripts.State._refresh() end
+end})
+
+-- Renderiza os scripts
+local currentResults = {}
+local debounceToken = 0
+
+local function clearResults()
+    for _, obj in ipairs(currentResults) do
+        pcall(function() if obj and obj.Parent then obj:Destroy() end end)
+    end
+    currentResults = {}
+end
+
+local function renderScripts(scripts)
+    clearResults()
+    if not scripts or #scripts == 0 then
+        resultsParagraph:Set("🔍 Nenhum script encontrado.", "Tente outro nome ou desative filtros.")
+        return
+    end
+    resultsParagraph:Set(string.format("%d scripts encontrados", RScripts.State.total),
+        "Página " .. RScripts.State.page .. " de " .. RScripts.State.totalPages)
+
+    for _, s in ipairs(scripts) do
+        local title = s.title or s.name or "Sem título"
+        local desc  = (s.game and s.game.title) or "—"
+        local tags = {}
+        if s.isMobileReady then table.insert(tags, "📱") end
+        if not s.isKeySystem then table.insert(tags, "🔑") end
+        if not s.isPaid then table.insert(tags, "🆓") end
+        local tagStr = table.concat(tags, " ")
+        local views = s.views or 0
+        local likes = s.likes or 0
+
+        Tabs.Jogos:AddSection({title})
+        Tabs.Jogos:AddParagraph({
+            Title = tagStr ~= "" and tagStr or "—",
+            Content = "Jogo: " .. desc .. "\n👁 " .. views .. "  ❤ " .. likes
+        })
+        Tabs.Jogos:AddButton({"▶ EXECUTAR — " .. title, function()
+            redzlib:Notify({Title = title, Description = "⏳ Carregando script...", Type = "Info", Duration = 2})
+            local ok, msg = RScripts.execute(s)
+            if ok then
+                redzlib:Notify({Title = title, Description = msg, Type = "Success", Duration = 3})
             else
-                showError(errMsg(err.code, err.retry)); return
+                redzlib:Notify({Title = title, Description = msg, Type = "Error", Duration = 4})
             end
-        end
-        local res = normalize(data, page)
-        cacheSet(key, res)
-        applyResult(res, page)
-    end)
-end
-
--- ── Debounce, paginação, limpar, atualizar ─────────────────
-schedule = function(delay)
-    Catalog.dbToken = Catalog.dbToken + 1
-    local tok = Catalog.dbToken
-    task.delay(delay, function()
-        if tok ~= Catalog.dbToken then return end
-        Catalog.state.page = 1
-        loadPage(1)
-    end)
-end
-
-searchInput:GetPropertyChangedSignal("Text"):Connect(function()
-    local t = (searchInput.Text:gsub("^%s+", ""):gsub("%s+$", ""))
-    if t == Catalog.state.query then return end
-    Catalog.state.query = t
-    Catalog.state.page = 1
-    schedule(CatalogConfig.SearchDebounce)
-end)
-searchInput.FocusLost:Connect(function(enter)
-    if enter then
-        Catalog.dbToken = Catalog.dbToken + 1 -- cancela o debounce pendente
-        Catalog.state.page = 1
-        loadPage(1)
+        end})
     end
-end)
-
-local function goPage(delta)
-    local st = Catalog.state
-    if st.busy or (os.clock() - Catalog.lastClick) < 0.25 then return end
-    local np = st.page + delta
-    if np < 1 or (delta > 0 and not st.hasNext) then return end
-    Catalog.lastClick = os.clock()
-    st.page = np
-    loadPage(np)
-end
-prevBtn.MouseButton1Click:Connect(function() goPage(-1) end)
-nextBtn.MouseButton1Click:Connect(function() goPage(1) end)
-
-clearBtn.MouseButton1Click:Connect(function()
-    Catalog.dbToken = Catalog.dbToken + 1
-    Catalog.state.query = ""; Catalog.state.page = 1
-    searchInput.Text = "" -- o handler vê query igual e não dispara outra busca
-    loadPage(1)
-end)
-
-refreshBtn.MouseButton1Click:Connect(function()
-    if (os.clock() - Catalog.lastClick) < 1 then return end
-    Catalog.lastClick = os.clock()
-    local st = Catalog.state
-    if not st.builtin then
-        local _, sig = Catalog.buildRequest(st, st.page)
-        cacheClearSig(sig)
-    end
-    loadPage(st.page)
-end)
-
--- ── Inicialização (1ª vez que a aba é aberta) ──────────────
-local function curName()
-    local cur = GameModule.getCurrent()
-    return cur and cur.name:split(" — ")[1] or nil
 end
 
-local started = false
-local function startCatalog()
-    task.spawn(function()
-        local fallback = curName() or ("PlaceId " .. tostring(game.PlaceId))
-        local data, err = Catalog.apiGet(CatalogConfig.BaseURL .. "/games/" .. tostring(game.PlaceId))
-        local g = data and data.result and data.result.game
-        if g then
-            local n = tonumber(g.scriptCount) or 0
-            Catalog.gameHasScripts = n > 0
-            curLbl.Text = "🎮 Jogo atual: " .. tostring(g.name or fallback) .. "\n✓ " .. n .. " scripts encontrados"
-            curLbl.TextColor3 = COL_OK
-        elseif err and err.code == 404 then
-            curLbl.Text = "🎮 Jogo atual: " .. fallback .. "\n⚠ Nenhum script encontrado para este jogo."
-            curLbl.TextColor3 = COL_WARN
-        else
-            curLbl.Text = "🎮 Jogo atual: " .. fallback
-            curLbl.TextColor3 = COL_DIM
-        end
-        loadPage(1)
-    end)
-end
-tJogos:GetPropertyChangedSignal("Visible"):Connect(function()
-    if tJogos.Visible and not started then started = true; startCatalog() end
-end)
+-- Função de refresh
+RScripts.State._refresh = function()
+    local myToken = debounceToken + 1
+    debounceToken = myToken
+    resultsParagraph:Set("⏳ Pesquisando scripts...", "Aguarde...")
+    redzlib:Notify({Title = "API", Description = "⏳ Consultando RScripts...", Type = "Info", Duration = 2})
 
--- ══════════════════════════════════════════════════════════
--- ABA 3: STATUS
--- ══════════════════════════════════════════════════════════
-local tStatus = createTabContent("Status")
-local sc = C.card(tStatus, 6, 185)
-local stT = Instance.new("TextLabel", sc)
-stT.Text = "STATUS DO SISTEMA"; stT.Font = Enum.Font.GothamBold
-stT.TextSize = 11; stT.TextColor3 = Color3.fromRGB(255,255,255)
-stT.BackgroundTransparency = 1
-stT.Position = UDim2.new(0,12,0,8); stT.Size = UDim2.new(1,-24,0,16)
-stT.TextXAlignment = Enum.TextXAlignment.Left
-stT.Size = UDim2.new(1,-96,0,16)
-do -- selo "ATIVO" com ícone OK
-    local pill = Instance.new("Frame", sc)
-    pill.Name = "StatusPill"
-    pill.BackgroundColor3 = Color3.fromRGB(14,34,20); pill.BackgroundTransparency = 0.15
-    pill.BorderSizePixel = 0
-    pill.AnchorPoint = Vector2.new(1,0)
-    pill.Position = UDim2.new(1,-12,0,5); pill.Size = UDim2.new(0,64,0,20)
-    Instance.new("UICorner", pill).CornerRadius = UDim.new(1,0)
-    local ps = Instance.new("UIStroke", pill)
-    ps.Color = Color3.fromRGB(60,180,90); ps.Thickness = 1; ps.Transparency = 0.55
-    CreateIcon(pill, "ok", 16, UDim2.new(0,3,0.5,-8), {z = 6})
-    local pt = Instance.new("TextLabel", pill)
-    pt.Text = "ATIVO"; pt.Font = Enum.Font.GothamBold; pt.TextSize = 9
-    pt.TextColor3 = Color3.fromRGB(120,220,120); pt.BackgroundTransparency = 1
-    pt.TextXAlignment = Enum.TextXAlignment.Left
-    pt.Position = UDim2.new(0,23,0,0); pt.Size = UDim2.new(1,-26,1,0)
+    RScripts.fetch(RScripts.State.query, RScripts.State.filters, RScripts.State.page,
+        function(data, err)
+            if myToken ~= debounceToken then return end
+            if err then
+                resultsParagraph:Set("⚠ Erro", err.message)
+                redzlib:Notify({Title = "RScripts API", Description = err.message, Type = "Error", Duration = 5})
+                return
+            end
+            local scripts = data and data.data
+            if scripts and scripts.scripts then scripts = scripts.scripts end
+            if type(scripts) ~= "table" then scripts = {} end
+            renderScripts(scripts)
+            pageInfo:Set("Página " .. RScripts.State.page .. " / " .. RScripts.State.totalPages,
+                RScripts.State.total .. " resultados")
+        end)
 end
-local sln = Instance.new("Frame", sc)
-sln.BackgroundColor3 = Color3.fromRGB(140,25,25); sln.BackgroundTransparency = 0.5
-sln.BorderSizePixel = 0
-sln.Position = UDim2.new(0,12,0,26); sln.Size = UDim2.new(1,-24,0,1)
-local statusRows, rowY = {}, 34
-for _, d in ipairs({
-    {k="executor", l="Executor"},{k="game", l="Jogo"},{k="player", l="Player"},
-    {k="fps", l="FPS"},{k="ping", l="Ping"},{k="players", l="Players"},
-    {k="place", l="PlaceId"},{k="job", l="JobId"},
-}) do
-    local b = Instance.new("TextLabel", sc)
-    b.Text = "●"; b.Font = Enum.Font.GothamBold; b.TextSize = 10
-    b.TextColor3 = Color3.fromRGB(80,220,80); b.BackgroundTransparency = 1
-    b.Position = UDim2.new(0,12,0,rowY); b.Size = UDim2.new(0,12,0,14)
-    b.TextXAlignment = Enum.TextXAlignment.Left
-    local okDot = CreateIcon(sc, "ok", 14, UDim2.new(0,10,0,rowY), {fade = false})
-    if okDot then b.Visible = false end
-    local lb = Instance.new("TextLabel", sc)
-    lb.Text = d.l..":"; lb.Font = Enum.Font.Gotham; lb.TextSize = 10
-    lb.TextColor3 = Color3.fromRGB(170,170,170); lb.BackgroundTransparency = 1
-    lb.Position = UDim2.new(0,26,0,rowY); lb.Size = UDim2.new(0,75,0,14)
-    lb.TextXAlignment = Enum.TextXAlignment.Left
-    local v = Instance.new("TextLabel", sc)
-    v.Text = "—"; v.Font = Enum.Font.GothamMedium; v.TextSize = 10
-    v.TextColor3 = Color3.fromRGB(230,230,230); v.BackgroundTransparency = 1
-    v.Position = UDim2.new(0,105,0,rowY); v.Size = UDim2.new(1,-115,0,14)
-    v.TextXAlignment = Enum.TextXAlignment.Left
-    v.TextTruncate = Enum.TextTruncate.AtEnd
-    statusRows[d.k] = v
-    rowY = rowY + 17
-end
-statusRows.executor.Size = UDim2.new(1,-139,0,14)   -- reserva espaço p/ o selo do Delta
-local deltaChip = CreateIcon(sc, "delta", 16, UDim2.new(1,-12,0,33), {anchor = Vector2.new(1,0)})
-if deltaChip then deltaChip.Visible = false end
-local gameNameCache, exeName = "Carregando...", "Desconhecido"
+
+-- Carrega automaticamente
 task.spawn(function()
-    local ok, info = pcall(function()
-        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
-    end)
-    gameNameCache = (ok and info and info.Name) or "Desconhecido"
+    task.wait(1)
+    RScripts.State._refresh()
 end)
-do
-    local ok, n, v = pcall(function() return identifyexecutor() end)
-    if ok and n then exeName = tostring(n) .. (v and (" " .. tostring(v)) or "") end
-end
+
+-- ══════════════════════════════════════════════════════════
+-- ABA STATUS
+-- ══════════════════════════════════════════════════════════
+Tabs.Status:AddSection({"Status do Sistema"})
+local statusP = Tabs.Status:AddParagraph({Title = "Carregando...", Content = "—"})
+
 task.spawn(function()
     local fc, fs = 0, tick()
-    addConn("fpsC", RunService.RenderStepped:Connect(function() fc = fc + 1 end))
-    while Alive and task.wait(1) do
-        statusRows.executor.Text = exeName
-        statusRows.executor.TextColor3 = Color3.fromRGB(120,220,120)
-        if deltaChip then deltaChip.Visible = string.find(string.lower(exeName), "delta", 1, true) ~= nil end
-        statusRows.game.Text = gameNameCache
-        statusRows.player.Text = LP.Name
-        local el = math.max(tick() - fs, 0.001)
+    RunService.RenderStepped:Connect(function() fc = fc + 1 end)
+    while task.wait(1) do
+        local el = tick() - fs
         local fps = math.floor(fc / el)
-        statusRows.fps.Text = tostring(fps)
-        statusRows.fps.TextColor3 = fps > 50 and Color3.fromRGB(120,220,120)
-            or (fps > 25 and Color3.fromRGB(220,200,80) or Color3.fromRGB(220,80,80))
         fc, fs = 0, tick()
-        statusRows.ping.Text = math.floor(LP:GetNetworkPing()*1000) .. " ms"
-        statusRows.players.Text = #Players:GetPlayers() .. " / " .. Players.MaxPlayers
-        statusRows.place.Text = tostring(game.PlaceId)
-        statusRows.job.Text = string.sub(game.JobId, 1, 16) .. "..."
+        local ping = math.floor(LP:GetNetworkPing() * 1000)
+        local ok, info = pcall(function()
+            return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+        end)
+        local gameName = ok and info.Name or "Desconhecido"
+        statusP:Set("● Executor: Detectado\n● Jogo: " .. gameName ..
+            "\n● Player: " .. LP.Name ..
+            "\n● FPS: " .. fps ..
+            "\n● Ping: " .. ping .. " ms" ..
+            "\n● Players: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers ..
+            "\n● PlaceId: " .. game.PlaceId ..
+            "\n● JobId: " .. string.sub(game.JobId, 1, 16) .. "...",
+            "Atualizado a cada 1s")
     end
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 4: MOVIMENTOS
+-- ABA MOVIMENTOS
 -- ══════════════════════════════════════════════════════════
-local tMov = createTabContent("Movimentos")
-local y = 6
-y = C.section(tMov, "Básicos", y)
-C.toggle(tMov, "Noclip", y, false, function(s) State.noclip=s end); y = y + BTN_H + GAP
-C.toggle(tMov, "Infinite Jump", y, false, function(s) State.infJump=s end); y = y + BTN_H + GAP
-C.slider(tMov, "WalkSpeed", 0, 500, 16, y, function(v)
-    State.walkSpeed=v; local h=getHum(); if h then h.WalkSpeed=v end
-end); y = y + 36 + GAP
-C.slider(tMov, "JumpPower", 0, 500, 50, y, function(v)
-    State.jumpPower=v; local h=getHum(); if h then h.UseJumpPower=true; h.JumpPower=v end
-end); y = y + 36 + GAP
-y = C.section(tMov, "Fly / Extras", y)
-C.button(tMov, "Fly (FlyGuiV3)", y, function()
+Tabs.Movimentos:AddSection({"Básicos"})
+Tabs.Movimentos:AddToggle({Name = "Noclip", Description = "Atravessa paredes", Default = false,
+    Callback = function(v) State.noclip = v end})
+Tabs.Movimentos:AddToggle({Name = "Infinite Jump", Description = "Pulo infinito", Default = false,
+    Callback = function(v) State.infJump = v end})
+Tabs.Movimentos:AddSlider({Name = "WalkSpeed", Min = 0, Max = 500, Increase = 1, Default = 16,
+    Callback = function(v)
+        State.walkSpeed = v
+        local h = getHum(); if h then h.WalkSpeed = v end
+    end})
+Tabs.Movimentos:AddSlider({Name = "JumpPower", Min = 0, Max = 500, Increase = 1, Default = 50,
+    Callback = function(v)
+        State.jumpPower = v
+        local h = getHum(); if h then h.JumpPower = v h.UseJumpPower = true end
+    end})
+
+Tabs.Movimentos:AddSection({"Fly & Extras"})
+Tabs.Movimentos:AddButton({"Fly (FlyGuiV3)", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-end); y = y + BTN_H + GAP
-C.button(tMov, "Infinite Yield (Admin)", y, function()
+end})
+Tabs.Movimentos:AddButton({"Infinite Yield (Admin)", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-end); y = y + BTN_H + GAP
-y = C.section(tMov, "Ações", y)
-C.button(tMov, "Reset Character", y, function()
-    local h=getHum(); if h then h.Health=0 end
-end); y = y + BTN_H + GAP
-C.button(tMov, "Sit", y, function() local h=getHum(); if h then h.Sit=true end end); y = y + BTN_H + GAP
-C.button(tMov, "Jump (Force)", y, function()
-    local h=getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-end); y = y + BTN_H + GAP
-C.button(tMov, "Dance", y, function()
+end})
+
+Tabs.Movimentos:AddSection({"Ações"})
+Tabs.Movimentos:AddButton({"Reset Character", function()
+    local h = getHum(); if h then h.Health = 0 end
+end})
+Tabs.Movimentos:AddButton({"Sit", function()
+    local h = getHum(); if h then h.Sit = true end
+end})
+Tabs.Movimentos:AddButton({"Jump (Force)", function()
+    local h = getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end})
+Tabs.Movimentos:AddButton({"Teleport to Spawn", function()
+    local sp = workspace:FindFirstChildOfClass("SpawnLocation")
+    if sp then tp(sp.Position + Vector3.new(0, 5, 0)) end
+end})
+Tabs.Movimentos:AddButton({"Reset Stats", function()
     local h = getHum()
-    if not h then return end
-    if not pcall(function() h:PlayEmote("dance") end) then chat("/e dance") end
-end); y = y + BTN_H + GAP
-C.button(tMov, "Teleport to Spawn", y, function()
-    local sp = workspace:FindFirstChildWhichIsA("SpawnLocation", true)
-    if sp then tp(sp.Position + Vector3.new(0,5,0))
-    else showToast("⚠ Nenhum SpawnLocation no mapa", "warning") end
-end); y = y + BTN_H + GAP
-local vfObjs
-C.toggle(tMov, "Vehicle Fly", y, false, function(on)
-    if Connections["vfly"] then Connections["vfly"]:Disconnect(); Connections["vfly"] = nil end
-    if vfObjs then for _, o in ipairs(vfObjs) do pcall(function() o:Destroy() end) end; vfObjs = nil end
-    if not on then return end
-    local h = getHum()
-    local seat = h and h.SeatPart
-    if not seat then showToast("⚠ Sente em um veículo primeiro", "warning"); return end
-    local bv = Instance.new("BodyVelocity")
-    bv.Name = "AKZVFly"; bv.MaxForce = Vector3.new(1e6,1e6,1e6); bv.Velocity = Vector3.zero; bv.Parent = seat
-    local bg = Instance.new("BodyGyro")
-    bg.Name = "AKZVFlyG"; bg.MaxTorque = Vector3.new(1e6,1e6,1e6); bg.P = 1e4; bg.CFrame = seat.CFrame; bg.Parent = seat
-    vfObjs = {bv, bg}
-    addConn("vfly", RunService.Heartbeat:Connect(function()
-        local hum, cam = getHum(), workspace.CurrentCamera
-        if not (seat.Parent and hum and hum.SeatPart == seat) then
-            if Connections["vfly"] then Connections["vfly"]:Disconnect(); Connections["vfly"] = nil end
-            for _, o in ipairs(vfObjs or {}) do pcall(function() o:Destroy() end) end
-            vfObjs = nil
-            return
-        end
-        local md, look = hum.MoveDirection, cam.CFrame.LookVector
-        if md.Magnitude > 0 then
-            local flat = Vector3.new(look.X, 0, look.Z)
-            local fwd = flat.Magnitude > 0 and md:Dot(flat.Unit) or 1
-            bv.Velocity = Vector3.new(md.X, look.Y * (fwd >= 0 and 1 or -1), md.Z).Unit * 80
-        else
-            bv.Velocity = Vector3.zero
-        end
-        bg.CFrame = CFrame.new(seat.Position, seat.Position + look)
-    end))
-end); y = y + BTN_H + GAP
-C.button(tMov, "Reset Stats", y, function()
-    local h = getHum()
-    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
-end)
+    if h then h.WalkSpeed = 16 h.JumpPower = 50 h.Health = h.MaxHealth end
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 5: COMBATE
+-- ABA COMBATE
 -- ══════════════════════════════════════════════════════════
-local tCom = createTabContent("Combate")
-y = 6
-y = C.section(tCom, "Aim", y)
-C.toggle(tCom, "Aimbot (Universal)", y, false, function(s)
-    if s then loadOnce("airhub", AIRHUB_URL) end
-end); y = y + BTN_H + GAP
-C.toggle(tCom, "Silent Aim", y, false, function(s)
-    if s then loadOnce("airhub", AIRHUB_URL) end
-end); y = y + BTN_H + GAP
-C.toggle(tCom, "Triggerbot", y, false, function(on)
-    if Connections["trigger"] then Connections["trigger"]:Disconnect(); Connections["trigger"] = nil end
-    if not on then return end
-    if not mouse1click then showToast("⚠ Executor sem mouse1click", "error"); return end
-    local last = 0
-    addConn("trigger", RunService.Heartbeat:Connect(function()
-        if os.clock() - last < 0.12 then return end
-        local cam, ch = workspace.CurrentCamera, LP.Character
-        if not (cam and ch) then return end
-        local rp = RaycastParams.new()
-        rp.FilterType = Enum.RaycastFilterType.Exclude
-        rp.FilterDescendantsInstances = {ch}
-        local r = workspace:Raycast(cam.CFrame.Position, cam.CFrame.LookVector * 1000, rp)
-        local m = r and r.Instance and r.Instance:FindFirstAncestorOfClass("Model")
-        local p = m and Players:GetPlayerFromCharacter(m)
-        if p and p ~= LP then last = os.clock(); pcall(mouse1click) end
-    end))
-end); y = y + BTN_H + GAP
-y = C.section(tCom, "Ataques", y)
-C.button(tCom, "Kill All (Touch)", y, function()
-    if not firetouchinterest then showToast("⚠ Executor sem firetouchinterest", "error"); return end
+Tabs.Combate:AddSection({"Aim"})
+Tabs.Combate:AddToggle({Name = "Aimbot (AirHub)", Default = false, Callback = function(v)
+    if v then loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))() end
+end})
+Tabs.Combate:AddToggle({Name = "Anti-Fling", Default = false, Callback = function(v) State.antiFling = v end})
+
+Tabs.Combate:AddSection({"Ataques"})
+Tabs.Combate:AddButton({"Kill All (Touch)", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
@@ -2021,247 +504,220 @@ C.button(tCom, "Kill All (Touch)", y, function()
             end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tCom, "Kill Aura (Instant)", y, function()
+end})
+Tabs.Combate:AddButton({"Kill Aura (Instant)", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local h = p.Character:FindFirstChildOfClass("Humanoid")
             if h then h.Health = 0 end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tCom, "Damage All (500)", y, function()
+end})
+Tabs.Combate:AddButton({"Damage All (500)", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local h = p.Character:FindFirstChildOfClass("Humanoid")
             if h then h:TakeDamage(500) end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tCom, "Fling Nearest", y, function()
-    local p = nearestPlayer()
-    if not p then showToast("⚠ Nenhum jogador por perto", "warning"); return end
-    flingPlayer(p)
-end); y = y + BTN_H + GAP
-y = C.section(tCom, "Estado", y)
-C.toggle(tCom, "Godmode", y, false, function(s) State.godmode=s end); y = y + BTN_H + GAP
-C.toggle(tCom, "Anti-Fling", y, false, function(s) State.antiFling=s end); y = y + BTN_H + GAP
-C.toggle(tCom, "Anti-AFK", y, false, function(s) State.antiAFK=s end); y = y + BTN_H + GAP
-C.toggle(tCom, "Anti-Void", y, false, function(s) State.antiVoid=s end); y = y + BTN_H + GAP
-C.button(tCom, "Heal Self (Full)", y, function()
+end})
+
+Tabs.Combate:AddSection({"Estado"})
+Tabs.Combate:AddToggle({Name = "Godmode", Default = false, Callback = function(v) State.godmode = v end})
+Tabs.Combate:AddToggle({Name = "Anti-AFK", Default = false, Callback = function(v) State.antiAFK = v end})
+Tabs.Combate:AddToggle({Name = "Anti-Void", Default = false, Callback = function(v) State.antiVoid = v end})
+Tabs.Combate:AddButton({"Heal Self (Full)", function()
     local h = getHum(); if h then h.Health = h.MaxHealth end
-end); y = y + BTN_H + GAP
-C.button(tCom, "Rage Mode (AirHub)", y, function()
-    loadOnce("airhub", AIRHUB_URL)
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 6: VISUAL
+-- ABA VISUAL
 -- ══════════════════════════════════════════════════════════
-local tVis = createTabContent("Visual")
-y = 6
-y = C.section(tVis, "ESP / Chams", y)
-C.toggle(tVis, "ESP Box (Universal)", y, false, function(s)
-    if s then loadOnce("airhub", AIRHUB_URL) end
-end); y = y + BTN_H + GAP
-C.button(tVis, "AirHub V2 (ESP + Aimbot)", y, function()
-    loadOnce("airhub", AIRHUB_URL)
-end); y = y + BTN_H + GAP
-y = C.section(tVis, "Iluminação", y)
-C.toggle(tVis, "Fullbright", y, false, function(s)
-    if s then
+Tabs.Visual:AddSection({"ESP / Chams"})
+Tabs.Visual:AddToggle({Name = "ESP Box (AirHub)", Default = false, Callback = function(v)
+    if v then loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))() end
+end})
+Tabs.Visual:AddButton({"AirHub V2 (ESP + Aimbot)", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end})
+
+Tabs.Visual:AddSection({"Iluminação"})
+Tabs.Visual:AddToggle({Name = "Fullbright", Default = false, Callback = function(v)
+    if v then
         Lighting.Ambient = Color3.fromRGB(178,178,178)
         Lighting.OutdoorAmbient = Color3.fromRGB(178,178,178)
         Lighting.Brightness = 3
     else
-        Lighting.Ambient = OrigLight.Ambient
-        Lighting.OutdoorAmbient = OrigLight.OutdoorAmbient
-        Lighting.Brightness = OrigLight.Brightness
+        Lighting.Ambient = Color3.fromRGB(70,70,70)
+        Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+        Lighting.Brightness = 1
     end
-end); y = y + BTN_H + GAP
-C.toggle(tVis, "Remove Fog", y, false, function(s)
-    if s then Lighting.FogEnd = 100000; Lighting.FogStart = 0
-    else Lighting.FogEnd = OrigLight.FogEnd; Lighting.FogStart = OrigLight.FogStart end
-end); y = y + BTN_H + GAP
-C.slider(tVis, "Field of View", 1, 120, 70, y, function(v)
-    State.fov = v; workspace.CurrentCamera.FieldOfView = v
-end); y = y + 36 + GAP
-y = C.section(tVis, "Efeitos", y)
-C.button(tVis, "Bloom ON", y, function()
-    local b = Lighting:FindFirstChild("AKZBloom") or Instance.new("BloomEffect", Lighting)
-    b.Name = "AKZBloom"; b.Intensity = 1; b.Size = 24
-end); y = y + BTN_H + GAP
-C.button(tVis, "Color Correct (Vivid)", y, function()
-    local c = Lighting:FindFirstChild("AKZColor") or Instance.new("ColorCorrectionEffect", Lighting)
-    c.Name = "AKZColor"; c.Saturation = 0.5; c.Contrast = 0.3
-end); y = y + BTN_H + GAP
-C.button(tVis, "Remove Post Effects", y, function()
+end})
+Tabs.Visual:AddToggle({Name = "Remove Fog", Default = false, Callback = function(v)
+    if v then Lighting.FogEnd = 100000 Lighting.FogStart = 0
+    else Lighting.FogEnd = 1000 Lighting.FogStart = 0 end
+end})
+Tabs.Visual:AddSlider({Name = "Field of View", Min = 1, Max = 120, Increase = 1, Default = 70,
+    Callback = function(v)
+        State.fov = v
+        workspace.CurrentCamera.FieldOfView = v
+    end})
+
+Tabs.Visual:AddSection({"Efeitos"})
+Tabs.Visual:AddButton({"Bloom ON", function()
+    local b = Instance.new("BloomEffect", Lighting); b.Intensity = 1; b.Size = 24
+end})
+Tabs.Visual:AddButton({"Color Correct (Vivid)", function()
+    local c = Instance.new("ColorCorrectionEffect", Lighting); c.Saturation = 0.5; c.Contrast = 0.3
+end})
+Tabs.Visual:AddButton({"Remove Post Effects", function()
     for _, v in ipairs(Lighting:GetChildren()) do
         if v:IsA("PostEffect") then v:Destroy() end
     end
-end); y = y + BTN_H + GAP
-C.button(tVis, "Remove Textures", y, function()
+end})
+Tabs.Visual:AddButton({"Remove Textures", function()
     for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("Decal") or v:IsA("Texture") then v.Transparency = 1 end
     end
-end); y = y + BTN_H + GAP
-C.button(tVis, "Restore Textures", y, function()
+end})
+Tabs.Visual:AddButton({"Restore Textures", function()
     for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("Decal") or v:IsA("Texture") then v.Transparency = 0 end
     end
-end); y = y + BTN_H + GAP
-C.button(tVis, "Remove Blur", y, function()
-    for _, v in ipairs(Lighting:GetChildren()) do
-        if v:IsA("BlurEffect") then v:Destroy() end
-    end
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 7: JOGADOR
+-- ABA JOGADOR
 -- ══════════════════════════════════════════════════════════
-local tJog = createTabContent("Jogador")
-y = 6
-y = C.section(tJog, "Aparência", y)
-C.button(tJog, "Become Invisible", y, function()
-    local ch = getChar()
+Tabs.Jogador:AddSection({"Aparência"})
+Tabs.Jogador:AddButton({"Become Invisible", function()
+    local ch = LP.Character
     if ch then for _, p in ipairs(ch:GetDescendants()) do
         if p:IsA("BasePart") then p.Transparency = 1 end
     end end
-end); y = y + BTN_H + GAP
-C.button(tJog, "Become Visible", y, function()
-    local ch = getChar()
+end})
+Tabs.Jogador:AddButton({"Become Visible", function()
+    local ch = LP.Character
     if ch then for _, p in ipairs(ch:GetDescendants()) do
         if p:IsA("BasePart") then p.Transparency = 0 end
     end end
-end); y = y + BTN_H + GAP
-C.button(tJog, "Rainbow Character", y, function()
+end})
+Tabs.Jogador:AddButton({"Rainbow Character", function()
     task.spawn(function()
         while task.wait(0.15) do
-            local ch = getChar()
+            local ch = LP.Character
             if ch then for _, p in ipairs(ch:GetDescendants()) do
                 if p:IsA("BasePart") then p.Color = Color3.fromHSV(tick()%1, 1, 1) end
             end end
         end
     end)
-end); y = y + BTN_H + GAP
-y = C.section(tJog, "Time / Equipe", y)
-C.button(tJog, "Change Team (Random)", y, function()
+end})
+
+Tabs.Jogador:AddSection({"Time / Equipe"})
+Tabs.Jogador:AddButton({"Change Team (Random)", function()
     local t = game:GetService("Teams"):GetTeams()
-    if #t > 0 then LP.Team = t[math.random(1,#t)] end
-end); y = y + BTN_H + GAP
-y = C.section(tJog, "Saúde", y)
-C.button(tJog, "Heal Self (Full)", y, function()
+    if #t > 0 then LP.Team = t[math.random(1, #t)] end
+end})
+
+Tabs.Jogador:AddSection({"Saúde"})
+Tabs.Jogador:AddButton({"Heal Self (Full)", function()
     local h = getHum(); if h then h.Health = h.MaxHealth end
-end); y = y + BTN_H + GAP
-C.button(tJog, "Reset Stats", y, function()
+end})
+Tabs.Jogador:AddButton({"Reset Stats", function()
     local h = getHum()
-    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
-end); y = y + BTN_H + GAP
-y = C.section(tJog, "Anti", y)
-C.toggle(tJog, "Anti-AFK", y, false, function(s) State.antiAFK = s end); y = y + BTN_H + GAP
-C.toggle(tJog, "Anti-Void", y, false, function(s) State.antiVoid = s end); y = y + BTN_H + GAP
-C.toggle(tJog, "Anti-Fling", y, false, function(s) State.antiFling = s end); y = y + BTN_H + GAP
-y = C.section(tJog, "Posição", y)
-C.button(tJog, "Save Position", y, function()
-    local h = getHRP()
-    if h then getgenv().AKZ_Saved = h.CFrame end
-    showToast("✓ Posição salva", "success")
-end); y = y + BTN_H + GAP
-C.button(tJog, "Load Position", y, function()
+    if h then h.WalkSpeed = 16 h.JumpPower = 50 h.Health = h.MaxHealth end
+end})
+
+Tabs.Jogador:AddSection({"Posição"})
+Tabs.Jogador:AddButton({"Save Position", function()
+    local h = getHRP(); if h then getgenv().AKZ_Saved = h.CFrame end
+    redzlib:Notify({Title = "Posição", Description = "✓ Salva!", Type = "Success", Duration = 2})
+end})
+Tabs.Jogador:AddButton({"Load Position", function()
     if getgenv().AKZ_Saved then tp(getgenv().AKZ_Saved.Position)
-        showToast("✓ Posição carregada", "success")
-    else showToast("⚠ Nenhuma posição salva", "warning") end
-end)
+        redzlib:Notify({Title = "Posição", Description = "✓ Carregada!", Type = "Success", Duration = 2})
+    end
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 8: MUNDO
+-- ABA MUNDO
 -- ══════════════════════════════════════════════════════════
-local tMun = createTabContent("Mundo")
-y = 6
-y = C.section(tMun, "Ambiente", y)
-C.slider(tMun, "Gravity", 0, 500, 196, y, function(v)
-    State.gravity = v; workspace.Gravity = v
-end); y = y + 36 + GAP
-C.slider(tMun, "Time of Day", 0, 24, 14, y, function(v)
-    Lighting.ClockTime = v
-end); y = y + 36 + GAP
-y = C.section(tMun, "Iluminação", y)
-C.button(tMun, "Fullbright World", y, function()
+Tabs.Mundo:AddSection({"Ambiente"})
+Tabs.Mundo:AddSlider({Name = "Gravity", Min = 0, Max = 500, Increase = 1, Default = 196,
+    Callback = function(v) State.gravity = v workspace.Gravity = v end})
+Tabs.Mundo:AddSlider({Name = "Time of Day", Min = 0, Max = 24, Increase = 1, Default = 14,
+    Callback = function(v) Lighting.ClockTime = v end})
+
+Tabs.Mundo:AddSection({"Iluminação"})
+Tabs.Mundo:AddButton({"Fullbright World", function()
     Lighting.Ambient = Color3.fromRGB(255,255,255)
     Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
     Lighting.Brightness = 5
-end); y = y + BTN_H + GAP
-C.button(tMun, "Reset Lighting", y, function()
+end})
+Tabs.Mundo:AddButton({"Reset Lighting", function()
     Lighting.Ambient = Color3.fromRGB(70,70,70)
     Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
-    Lighting.Brightness = 1; Lighting.ClockTime = 14
-end); y = y + BTN_H + GAP
-C.button(tMun, "Add Fog", y, function() Lighting.FogEnd = 100 end); y = y + BTN_H + GAP
-C.button(tMun, "Remove Fog", y, function() Lighting.FogEnd = 100000 end); y = y + BTN_H + GAP
-y = C.section(tMun, "Gravidade", y)
-C.toggle(tMun, "Low Gravity (Moon)", y, false, function(s)
-    workspace.Gravity = s and 20 or 196.2
-end); y = y + BTN_H + GAP
-C.toggle(tMun, "Freeze Time", y, false, nil); y = y + BTN_H + GAP
-y = C.section(tMun, "Limpeza", y)
-C.button(tMun, "Delete Map Parts", y, function()
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 14
+end})
+Tabs.Mundo:AddToggle({Name = "Low Gravity (Moon)", Default = false,
+    Callback = function(v) workspace.Gravity = v and 20 or 196.2 end})
+
+Tabs.Mundo:AddSection({"Limpeza"})
+Tabs.Mundo:AddButton({"Delete Map Parts", function()
     for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("BasePart") and v.Anchored then v:Destroy() end
     end
-end); y = y + BTN_H + GAP
-C.button(tMun, "Remove Effects", y, function()
+end})
+Tabs.Mundo:AddButton({"Remove Effects", function()
     for _, v in ipairs(Lighting:GetChildren()) do
         if v:IsA("PostEffect") then v:Destroy() end
     end
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 9: DIVERSÃO
+-- ABA DIVERSÃO
 -- ══════════════════════════════════════════════════════════
-local tDiv = createTabContent("Diversão")
-y = 6
-y = C.section(tDiv, "Emotes", y)
-C.button(tDiv, "All Emotes", y, function()
+Tabs.Diversao:AddSection({"Emotes"})
+Tabs.Diversao:AddButton({"All Emotes", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-end); y = y + BTN_H + GAP
-y = C.section(tDiv, "Interações", y)
-C.button(tDiv, "Bring All to Me", y, function()
+end})
+
+Tabs.Diversao:AddSection({"Interações"})
+Tabs.Diversao:AddButton({"Bring All to Me", function()
     local m = getHRP()
-    if m then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and p.Character then
-                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
-            end
+    if m then for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
         end
-    end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Freeze All", y, function()
+    end end
+end})
+Tabs.Diversao:AddButton({"Freeze All", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             if hrp then hrp.Anchored = true end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Unfreeze All", y, function()
+end})
+Tabs.Diversao:AddButton({"Unfreeze All", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             if hrp then hrp.Anchored = false end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Fling All", y, function()
+end})
+Tabs.Diversao:AddButton({"Fling All", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local h = p.Character:FindFirstChildOfClass("Humanoid")
             if h then h:ChangeState(Enum.HumanoidStateType.Physics) end
         end
     end
-end); y = y + BTN_H + GAP
-y = C.section(tDiv, "Efeitos", y)
-C.button(tDiv, "Explode All", y, function()
+end})
+Tabs.Diversao:AddButton({"Explode All", function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
@@ -2271,123 +727,64 @@ C.button(tDiv, "Explode All", y, function()
             end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Fake Lag (Local)", y, function()
-    for _ = 1, 30 do
-        local p = Instance.new("Part", workspace)
-        p.Size = Vector3.new(100,100,100); p.Transparency = 1
-        p.Anchored = true; p.CanCollide = false
-    end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Clear Fake Parts", y, function()
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("Part") and v.Transparency == 1
-        and v.Size == Vector3.new(100,100,100) then v:Destroy() end
-    end
-end); y = y + BTN_H + GAP
-C.button(tDiv, "Teleport to Random Player", y, function()
-    local o = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-            table.insert(o, p)
-        end
-    end
-    if #o > 0 and getHRP() then
-        local t = o[math.random(1,#o)]
-        getHRP().CFrame = t.Character.HumanoidRootPart.CFrame
-    end
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 10: ADMIN
+-- ABA ADMIN
 -- ══════════════════════════════════════════════════════════
-local tAdm = createTabContent("Admin")
-y = 6
-y = C.section(tAdm, "Admins", y)
-C.button(tAdm, "Infinite Yield", y, function()
+Tabs.Admin:AddSection({"Admins Universais"})
+Tabs.Admin:AddButton({"Infinite Yield", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Nameless Admin", y, function()
+end})
+Tabs.Admin:AddButton({"Nameless Admin", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Fates Admin", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/fatesc/fates-admin/main/main.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "PasteWare v2", y, function()
+end})
+Tabs.Admin:AddButton({"PasteWare v2", function()
     getgenv().bypass_adonis = true
     loadstring(game:HttpGet("https://raw.githubusercontent.com/FakeAngles/PasteWare-v2/refs/heads/main/PasteWare.lua"))()
-end); y = y + BTN_H + GAP
-y = C.section(tAdm, "Hubs", y)
-C.button(tAdm, "Kagu Hub (100+ jogos)", y, function()
+end})
+
+Tabs.Admin:AddSection({"Hubs"})
+Tabs.Admin:AddButton({"AirHub V2", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end})
+Tabs.Admin:AddButton({"Kagu Hub", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Kaguya11/KaguHubRework/main/Scripts/Loader.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "ZaZa Hub", y, function()
+end})
+Tabs.Admin:AddButton({"ZaZa Hub", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Berkcan61/ZaZa-Hub/refs/heads/main/ZaZa.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "AirHub V2", y, function()
-    loadOnce("airhub", AIRHUB_URL)
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Space Hub", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/onesoftworks/SpaceHub/main/SpaceHub.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Zephyr Universal", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/Dragonfire-RGB/Zephyr-Universal/main/Zephyr"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Pastefy Universal Hub", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/KercX/PastefyScripts/main/scripts/PastefyUniversalHub.lua"))()
-end); y = y + BTN_H + GAP
-y = C.section(tAdm, "Debug", y)
-C.button(tAdm, "Dex Explorer (via IY)", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Remote Spy (via Nameless)", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tAdm, "Adonis Bypass", y, function()
-    getgenv().bypass_adonis = true
-    showToast("✓ Bypass Adonis ativado", "success")
-end)
+end})
+Tabs.Admin:AddButton({"Sp3arParvus", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/JakeHukari/Sp3arParvus/refs/heads/main/Sp3arParvus.lua", true))()
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 11: TELEPORTES
+-- ABA TELEPORTES
 -- ══════════════════════════════════════════════════════════
-local tTp = createTabContent("Teleportes")
-y = 6
-y = C.section(tTp, "Locais", y)
-C.button(tTp, "Teleport to Spawn", y, function()
+Tabs.Teleportes:AddSection({"Locais"})
+Tabs.Teleportes:AddButton({"Teleport to Spawn", function()
     local sp = workspace:FindFirstChildOfClass("SpawnLocation")
     if sp then tp(sp.Position + Vector3.new(0,5,0)) end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport Up (+50)", y, function()
+end})
+Tabs.Teleportes:AddButton({"Teleport Up (+50)", function()
     local h = getHRP(); if h then h.CFrame = h.CFrame + Vector3.new(0,50,0) end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport Down (-50)", y, function()
+end})
+Tabs.Teleportes:AddButton({"Teleport Down (-50)", function()
     local h = getHRP(); if h then h.CFrame = h.CFrame - Vector3.new(0,50,0) end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport to Camera", y, function()
+end})
+Tabs.Teleportes:AddButton({"Teleport to Camera", function()
     tp(workspace.CurrentCamera.CFrame.Position)
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport to Mouse", y, function()
+end})
+Tabs.Teleportes:AddButton({"Teleport to Mouse", function()
     local m = LP:GetMouse()
     if m.Hit then tp(m.Hit.Position + Vector3.new(0,3,0)) end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Void Teleport", y, function() tp(Vector3.new(0,-500,0)) end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport to Highest", y, function()
-    local hi = -math.huge
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") and v.Position.Y > hi then hi = v.Position.Y end
-    end
-    tp(Vector3.new(0, hi+10, 0))
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport to Lowest", y, function()
-    local lo = math.huge
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") and v.Position.Y < lo then lo = v.Position.Y end
-    end
-    tp(Vector3.new(0, lo+10, 0))
-end); y = y + BTN_H + GAP
-y = C.section(tTp, "Players", y)
-C.button(tTp, "Teleport to Nearest", y, function()
+end})
+Tabs.Teleportes:AddButton({"Void Teleport", function()
+    tp(Vector3.new(0,-500,0))
+end})
+
+Tabs.Teleportes:AddSection({"Players"})
+Tabs.Teleportes:AddButton({"Teleport to Nearest", function()
     local c, d = nil, math.huge
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and getHRP() then
@@ -2396,46 +793,28 @@ C.button(tTp, "Teleport to Nearest", y, function()
         end
     end
     if c and getHRP() then getHRP().CFrame = c.Character.HumanoidRootPart.CFrame end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Teleport All to Me", y, function()
+end})
+Tabs.Teleportes:AddButton({"Teleport All to Me", function()
     local m = getHRP()
-    if m then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and p.Character then
-                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
-            end
+    if m then for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
         end
-    end
-end); y = y + BTN_H + GAP
-y = C.section(tTp, "Memória", y)
-C.button(tTp, "Save Position (Slot)", y, function()
-    local h = getHRP(); if h then getgenv().AKZ_Saved = h.CFrame end
-    showToast("✓ Salvo", "success")
-end); y = y + BTN_H + GAP
-C.button(tTp, "Load Position (Slot)", y, function()
-    if getgenv().AKZ_Saved then tp(getgenv().AKZ_Saved.Position) end
-end); y = y + BTN_H + GAP
-C.button(tTp, "Copy Position", y, function()
-    local h = getHRP()
-    if h and setclipboard then
-        setclipboard(tostring(h.Position))
-        showToast("✓ Copiado", "success")
-    end
-end)
+    end end
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 12: SERVIDOR
+-- ABA SERVIDOR
 -- ══════════════════════════════════════════════════════════
-local tSrv = createTabContent("Servidor")
-y = 6
-y = C.section(tSrv, "Conexão", y)
-C.button(tSrv, "Rejoin Server", y, function()
+Tabs.Servidor:AddSection({"Conexão"})
+Tabs.Servidor:AddButton({"Rejoin Server", function()
     TeleportService:Teleport(game.PlaceId, LP)
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Server Hop (Low)", y, function()
+end})
+Tabs.Servidor:AddButton({"Server Hop (Low Players)", function()
     local ok, s = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
+        return HttpService:JSONDecode(game:HttpGet(
+            "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"))
     end)
     if ok and s and s.data then
         for _, v in ipairs(s.data) do
@@ -2445,10 +824,11 @@ C.button(tSrv, "Server Hop (Low)", y, function()
             end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Server Hop (Full)", y, function()
+end})
+Tabs.Servidor:AddButton({"Server Hop (Full)", function()
     local ok, s = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
+        return HttpService:JSONDecode(game:HttpGet(
+            "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"))
     end)
     if ok and s and s.data then
         local b, mx = nil, 0
@@ -2457,50 +837,30 @@ C.button(tSrv, "Server Hop (Full)", y, function()
         end
         if b then TeleportService:TeleportToPlaceInstance(game.PlaceId, b.id, LP) end
     end
-end); y = y + BTN_H + GAP
-y = C.section(tSrv, "Info", y)
-C.button(tSrv, "Copy Job ID", y, function()
+end})
+
+Tabs.Servidor:AddSection({"Info"})
+Tabs.Servidor:AddButton({"Copy Job ID", function()
     if setclipboard then
         setclipboard(game.JobId)
-        showToast("✓ Copiado", "success")
+        redzlib:Notify({Title = "Copiado", Description = "✓ Job ID copiado", Type = "Success", Duration = 2})
     end
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Print Server Info", y, function()
+end})
+Tabs.Servidor:AddButton({"Print Server Info", function()
     print("Place:", game.PlaceId, "Job:", game.JobId)
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Print All Players", y, function()
-    for _, p in ipairs(Players:GetPlayers()) do print(p.Name, p.DisplayName) end
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Player Count", y, function()
-    showToast("Players: "..#Players:GetPlayers().."/"..Players.MaxPlayers, "info")
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Print All Teams", y, function()
-    for _, t in ipairs(game:GetService("Teams"):GetTeams()) do print(t.Name) end
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Server Stats", y, function()
-    showToast("FPS: "..math.floor(1/RunService.RenderStepped:Wait()).." | Ping: "..math.floor(LP:GetNetworkPing()*1000).."ms", "info")
-end); y = y + BTN_H + GAP
-y = C.section(tSrv, "Sair", y)
-C.button(tSrv, "Kick Self (Leave)", y, function()
-    LP:Kick("Saiu pelo AKZ HUB")
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Disconnect", y, function()
-    game:Shutdown()
-end); y = y + BTN_H + GAP
-C.button(tSrv, "Print Chat/Place Info", y, function()
-    print("Place:", game.PlaceId, "Players:", #Players:GetPlayers())
-end)
+end})
+Tabs.Servidor:AddButton({"Player Count", function()
+    redzlib:Notify({Title = "Players", Description = "#Players:GetPlayers().."/"..Players.MaxPlayers", Type = "Info", Duration = 3})
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 13: CHAT
+-- ABA CHAT
 -- ══════════════════════════════════════════════════════════
-local tCh = createTabContent("Chat")
-y = 6
+Tabs.Chat:AddSection({"Spam"})
 local spamOn = false
-y = C.section(tCh, "Spam", y)
-C.toggle(tCh, "Chat Spam", y, false, function(s)
-    spamOn = s
-    if s then
+Tabs.Chat:AddToggle({Name = "Chat Spam", Default = false, Callback = function(v)
+    spamOn = v
+    if v then
         task.spawn(function()
             while spamOn do
                 chat(State.spamMsg)
@@ -2508,87 +868,58 @@ C.toggle(tCh, "Chat Spam", y, false, function(s)
             end
         end)
     end
-end); y = y + BTN_H + GAP
-C.slider(tCh, "Spam Speed (s)", 0.1, 5, 1, y, function(v) State.spamSpeed = v end); y = y + 36 + GAP
-y = C.section(tCh, "Mensagens", y)
-C.button(tCh, "Say 'Hello World'", y, function() chat("Hello World") end); y = y + BTN_H + GAP
-C.button(tCh, "Say 'GG'", y, function() chat("GG") end); y = y + BTN_H + GAP
-C.button(tCh, "Say 'AKZ on top'", y, function() chat("AKZ on top") end); y = y + BTN_H + GAP
-C.button(tCh, "Clear Chat", y, function()
+end})
+Tabs.Chat:AddSlider({Name = "Spam Speed (s)", Min = 0.1, Max = 5, Increase = 0.1, Default = 1,
+    Callback = function(v) State.spamSpeed = v end})
+
+Tabs.Chat:AddSection({"Mensagens"})
+Tabs.Chat:AddButton({"Say 'Hello World'", function() chat("Hello World") end})
+Tabs.Chat:AddButton({"Say 'GG'", function() chat("GG") end})
+Tabs.Chat:AddButton({"Say 'AKZ on top'", function() chat("AKZ on top") end})
+Tabs.Chat:AddButton({"Clear Chat", function()
     for _ = 1, 30 do chat("") end
-end); y = y + BTN_H + GAP
-C.button(tCh, "Fake System Message", y, function()
-    local g = Instance.new("ScreenGui", LP.PlayerGui)
-    local l = Instance.new("TextLabel", g)
-    l.Text = "[Servidor] AKZ HUB ativado"
-    l.Size = UDim2.new(0,300,0,30)
-    l.Position = UDim2.new(0.5,-150,0,100)
-    l.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    l.TextColor3 = Color3.fromRGB(255,255,255)
-    task.delay(5, function() g:Destroy() end)
-end); y = y + BTN_H + GAP
-C.button(tCh, "Emote Spam", y, function()
+end})
+Tabs.Chat:AddButton({"Emote Spam", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tCh, "Chat Mimic (Nearest)", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/UnknownAMD/Chat-Mimicker-V1/main/ChatMimic.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tCh, "Bypass Filter", y, function() end); y = y + BTN_H + GAP
-C.button(tCh, "Copy Last Message", y, function() end); y = y + BTN_H + GAP
-C.button(tCh, "Print Chat Log", y, function() end); y = y + BTN_H + GAP
-C.button(tCh, "Set Spam Message", y, function()
-    showToast("No console: State.spamMsg = 'texto'", "info")
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 14: CÂMERA
+-- ABA CÂMERA
 -- ══════════════════════════════════════════════════════════
-local tCam = createTabContent("Câmera")
-y = 6
-y = C.section(tCam, "FOV", y)
-C.button(tCam, "Zoom In (-10)", y, function()
+Tabs.Camera:AddSection({"FOV"})
+Tabs.Camera:AddButton({"Zoom In (-10)", function()
     workspace.CurrentCamera.FieldOfView = math.max(1, workspace.CurrentCamera.FieldOfView - 10)
-end); y = y + BTN_H + GAP
-C.button(tCam, "Zoom Out (+10)", y, function()
+end})
+Tabs.Camera:AddButton({"Zoom Out (+10)", function()
     workspace.CurrentCamera.FieldOfView = math.min(120, workspace.CurrentCamera.FieldOfView + 10)
-end); y = y + BTN_H + GAP
-C.button(tCam, "Reset FOV (70)", y, function()
+end})
+Tabs.Camera:AddButton({"Reset FOV (70)", function()
     workspace.CurrentCamera.FieldOfView = 70
-end); y = y + BTN_H + GAP
-C.button(tCam, "FOV 120", y, function()
+end})
+Tabs.Camera:AddButton({"FOV 120", function()
     workspace.CurrentCamera.FieldOfView = 120
-end); y = y + BTN_H + GAP
-C.button(tCam, "FOV 1", y, function()
+end})
+Tabs.Camera:AddButton({"FOV 1", function()
     workspace.CurrentCamera.FieldOfView = 1
-end); y = y + BTN_H + GAP
-y = C.section(tCam, "Modo", y)
-C.button(tCam, "First Person", y, function()
+end})
+
+Tabs.Camera:AddSection({"Modo"})
+Tabs.Camera:AddButton({"First Person", function()
     LP.CameraMode = Enum.CameraMode.LockFirstPerson
-end); y = y + BTN_H + GAP
-C.button(tCam, "Third Person", y, function()
+end})
+Tabs.Camera:AddButton({"Third Person", function()
     LP.CameraMode = Enum.CameraMode.Classic
-end); y = y + BTN_H + GAP
-C.button(tCam, "Reset Camera", y, function()
+end})
+Tabs.Camera:AddButton({"Reset Camera", function()
     workspace.CurrentCamera.CameraSubject = getHum()
-end); y = y + BTN_H + GAP
-C.button(tCam, "Lock to Torso", y, function()
-    local ch = getChar()
-    local torso = ch and (ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso"))
-    if torso then workspace.CurrentCamera.CameraSubject = torso end
-end); y = y + BTN_H + GAP
-C.button(tCam, "Spectate Player", y, function() end); y = y + BTN_H + GAP
-C.button(tCam, "Camera Shake", y, function() end); y = y + BTN_H + GAP
-C.toggle(tCam, "Invert Camera", y, false, nil); y = y + BTN_H + GAP
-C.button(tCam, "Free Cam", y, function() end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 15: PROTEÇÃO
+-- ABA PROTEÇÃO
 -- ══════════════════════════════════════════════════════════
-local tPro = createTabContent("Proteção")
-y = 6
-y = C.section(tPro, "Anti", y)
-C.toggle(tPro, "Anti-Kick", y, false, function(s)
-    if s then
+Tabs.Protecao:AddSection({"Anti"})
+Tabs.Protecao:AddToggle({Name = "Anti-Kick", Default = false, Callback = function(v)
+    if v then
         local mt = getrawmetatable and getrawmetatable(game)
         if mt then
             local old = mt.__namecall
@@ -2600,263 +931,185 @@ C.toggle(tPro, "Anti-Kick", y, false, function(s)
             setreadonly(mt, true)
         end
     end
-end); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-Fling", y, false, function(s) State.antiFling=s end); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-Void", y, false, function(s) State.antiVoid=s end); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-AFK", y, false, function(s) State.antiAFK=s end); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-Teleport", y, false, nil); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-Invisible", y, false, nil); y = y + BTN_H + GAP
-C.toggle(tPro, "Anti-God", y, false, nil); y = y + BTN_H + GAP
-C.toggle(tPro, "Safe Mode", y, false, nil); y = y + BTN_H + GAP
-C.toggle(tPro, "Stealth Mode", y, false, nil); y = y + BTN_H + GAP
-y = C.section(tPro, "Limpeza", y)
-C.button(tPro, "Remove All Flingers", y, function()
+end})
+Tabs.Protecao:AddToggle({Name = "Anti-Fling", Default = false, Callback = function(v) State.antiFling = v end})
+Tabs.Protecao:AddToggle({Name = "Anti-Void", Default = false, Callback = function(v) State.antiVoid = v end})
+Tabs.Protecao:AddToggle({Name = "Anti-AFK", Default = false, Callback = function(v) State.antiAFK = v end})
+
+Tabs.Protecao:AddSection({"Limpeza"})
+Tabs.Protecao:AddButton({"Remove All Flingers", function()
     for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("BodyVelocity") and v.Name ~= "AKZFly" then v:Destroy() end
     end
-end); y = y + BTN_H + GAP
-C.button(tPro, "Clear Explosions", y, function()
+end})
+Tabs.Protecao:AddButton({"Clear Explosions", function()
     for _, v in ipairs(workspace:GetDescendants()) do
         if v:IsA("Explosion") then v:Destroy() end
     end
-end); y = y + BTN_H + GAP
-C.button(tPro, "Reset Physics", y, function()
+end})
+Tabs.Protecao:AddButton({"Reset Physics", function()
     local h = getHRP()
     if h then
         for _, v in ipairs(h:GetChildren()) do
             if v:IsA("BodyMover") or v:IsA("BodyVelocity") or v:IsA("BodyGyro") then v:Destroy() end
         end
     end
-end); y = y + BTN_H + GAP
-C.button(tPro, "Unlock All Parts", y, function()
-    for _, v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") then v.Anchored = false end
-    end
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 16: UTILIDADES
+-- ABA UTILIDADES
 -- ══════════════════════════════════════════════════════════
-local tUti = createTabContent("Utilidades")
-y = 6
-y = C.section(tUti, "Informações", y)
-C.button(tUti, "Copy Position", y, function()
+Tabs.Utilidades:AddSection({"Informações"})
+Tabs.Utilidades:AddButton({"Copy Position", function()
     local h = getHRP()
-    if h and setclipboard then setclipboard(tostring(h.Position)) end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Copy Rotation", y, function()
-    local h = getHRP()
-    if h and setclipboard then setclipboard(tostring(h.Orientation)) end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Ping (ms)", y, function()
-    showToast("Ping: "..math.floor(LP:GetNetworkPing()*1000).." ms", "info")
-end); y = y + BTN_H + GAP
-C.button(tUti, "Memory Usage", y, function()
-    showToast("Memory: "..math.floor(collectgarbage("count")/1024).." MB", "info")
-end); y = y + BTN_H + GAP
-C.button(tUti, "Print Character Info", y, function()
-    local ch = getChar()
-    if ch then
-        for _, v in ipairs(ch:GetDescendants()) do
-            if v:IsA("BasePart") then print(v.Name, v.Position) end
-        end
+    if h and setclipboard then
+        setclipboard(tostring(h.Position))
+        redzlib:Notify({Title = "Copiado", Description = "✓ Posição copiada", Type = "Success", Duration = 2})
     end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Print Workspace Stats", y, function()
-    print("Parts:", #workspace:GetDescendants())
-end); y = y + BTN_H + GAP
-y = C.section(tUti, "Debug", y)
-C.button(tUti, "Print Services", y, function()
+end})
+Tabs.Utilidades:AddButton({"Ping (ms)", function()
+    redzlib:Notify({Title = "Ping", Description = math.floor(LP:GetNetworkPing()*1000).." ms", Type = "Info", Duration = 3})
+end})
+Tabs.Utilidades:AddButton({"Memory Usage", function()
+    redzlib:Notify({Title = "Memória", Description = math.floor(collectgarbage("count")/1024).." MB", Type = "Info", Duration = 3})
+end})
+
+Tabs.Utilidades:AddSection({"Debug"})
+Tabs.Utilidades:AddButton({"Print Services", function()
     for _, s in ipairs(game:GetChildren()) do
         if s:IsA("Service") then print(s.ClassName) end
     end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Dump ReplicatedStorage", y, function()
-    for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-        print(v:GetFullName())
-    end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Find RemoteEvents", y, function()
+end})
+Tabs.Utilidades:AddButton({"Find RemoteEvents", function()
     for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
         if v:IsA("RemoteEvent") then print(v.Name) end
     end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Find RemoteFunctions", y, function()
-    for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
-        if v:IsA("RemoteFunction") then print(v.Name) end
-    end
-end); y = y + BTN_H + GAP
-C.button(tUti, "List Executor Functions", y, function()
-    for _, f in ipairs({"getrawmetatable","setreadonly","newcclosure","hookfunction","getgenv","getgc","getsenv"}) do
-        print(f, type(rawget(getfenv(), f)))
-    end
-end); y = y + BTN_H + GAP
-C.button(tUti, "Clear Console", y, function()
+end})
+Tabs.Utilidades:AddButton({"Clear Console", function()
     print("\n\n\n\n\n\n\n\n\n")
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 17: SCRIPTS
+-- ABA SCRIPTS
 -- ══════════════════════════════════════════════════════════
-local tScr = createTabContent("Scripts")
-y = 6
-y = C.section(tScr, "Hubs Universais", y)
-C.button(tScr, "Infinite Yield", y, function()
+Tabs.Scripts:AddSection({"Hubs Universais"})
+Tabs.Scripts:AddButton({"Infinite Yield", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "Nameless Admin", y, function()
+end})
+Tabs.Scripts:AddButton({"Nameless Admin", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "PasteWare v2", y, function()
+end})
+Tabs.Scripts:AddButton({"PasteWare v2", function()
     getgenv().bypass_adonis = true
     loadstring(game:HttpGet("https://raw.githubusercontent.com/FakeAngles/PasteWare-v2/refs/heads/main/PasteWare.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "AirHub V2", y, function()
-    loadOnce("airhub", AIRHUB_URL)
-end); y = y + BTN_H + GAP
-C.button(tScr, "Kagu Hub", y, function()
+end})
+Tabs.Scripts:AddButton({"AirHub V2", function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end})
+Tabs.Scripts:AddButton({"Kagu Hub", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Kaguya11/KaguHubRework/main/Scripts/Loader.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "ZaZa Hub", y, function()
+end})
+Tabs.Scripts:AddButton({"ZaZa Hub", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Berkcan61/ZaZa-Hub/refs/heads/main/ZaZa.lua"))()
-end); y = y + BTN_H + GAP
-y = C.section(tScr, "Utilitários", y)
-C.button(tScr, "Sp3arParvus", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/JakeHukari/Sp3arParvus/refs/heads/main/Sp3arParvus.lua", true))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "Universal ESP", y, function()
+end})
+
+Tabs.Scripts:AddSection({"Utilitários"})
+Tabs.Scripts:AddButton({"Universal ESP", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/zzerexx/scripts/main/UniversalEsp.lua", "UniversalEsp"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "Universal Aimbot", y, function()
+end})
+Tabs.Scripts:AddButton({"Universal Aimbot", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/zzerexx/scripts/main/UniversalAimbot.lua", "UniversalAimbot"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "FlyGuiV3", y, function()
+end})
+Tabs.Scripts:AddButton({"FlyGuiV3", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "RideAndSlide", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/synteriax/rideandslide/main/rideandslide.lua"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "Zephyr Universal", y, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/Dragonfire-RGB/Zephyr-Universal/main/Zephyr"))()
-end); y = y + BTN_H + GAP
-C.button(tScr, "All Emotes", y, function()
+end})
+Tabs.Scripts:AddButton({"All Emotes", function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 18: CONFIG
+-- ABA CONFIG
 -- ══════════════════════════════════════════════════════════
-local tCfg = createTabContent("Config")
-y = 6
-y = C.section(tCfg, "Reset", y)
-C.button(tCfg, "Reset WalkSpeed (16)", y, function()
+Tabs.ConfigTab:AddSection({"Reset"})
+Tabs.ConfigTab:AddButton({"Reset WalkSpeed (16)", function()
     local h = getHum(); if h then h.WalkSpeed = 16 end
     State.walkSpeed = 16
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reset JumpPower (50)", y, function()
+end})
+Tabs.ConfigTab:AddButton({"Reset JumpPower (50)", function()
     local h = getHum()
     if h then h.JumpPower = 50 h.UseJumpPower = true end
     State.jumpPower = 50
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reset Gravity (196)", y, function()
+end})
+Tabs.ConfigTab:AddButton({"Reset Gravity (196)", function()
     workspace.Gravity = 196.2
     State.gravity = 196.2
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reset FOV (70)", y, function()
+end})
+Tabs.ConfigTab:AddButton({"Reset FOV (70)", function()
     workspace.CurrentCamera.FieldOfView = 70
     State.fov = 70
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reset Lighting", y, function()
+end})
+Tabs.ConfigTab:AddButton({"Reset Lighting", function()
     Lighting.Ambient = Color3.fromRGB(70,70,70)
     Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
-    Lighting.Brightness = 1; Lighting.ClockTime = 14
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reset All Config", y, function()
-    for k, v in pairs(State) do
-        if type(v) == "boolean" then State[k] = false end
-    end
-end); y = y + BTN_H + GAP
-y = C.section(tCfg, "Interface", y)
-C.button(tCfg, "Toggle UI", y, function()
-    Home.Visible = not Home.Visible
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Minimize Menu", y, function()
-    Home.Visible = false
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Print State", y, function()
+    Lighting.Brightness = 1
+    Lighting.ClockTime = 14
+end})
+
+Tabs.ConfigTab:AddSection({"Interface"})
+Tabs.ConfigTab:AddButton({"Print State", function()
     for k, v in pairs(State) do print(k, v) end
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Set WalkSpeed 100", y, function()
-    State.walkSpeed = 100
-    local h = getHum(); if h then h.WalkSpeed = 100 end
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Set WalkSpeed 500", y, function()
-    State.walkSpeed = 500
-    local h = getHum(); if h then h.WalkSpeed = 500 end
-end); y = y + BTN_H + GAP
-y = C.section(tCfg, "Sistema", y)
-C.button(tCfg, "Unload Menu", y, function()
-    cleanConns()
-    ScreenGui:Destroy()
-    ToastGui:Destroy()
-end); y = y + BTN_H + GAP
-C.button(tCfg, "Reload (Execute novamente)", y, function()
-    showToast("Execute o script novamente para recarregar", "info")
-end)
+    redzlib:Notify({Title = "Estado", Description = "✓ Impresso no console", Type = "Success", Duration = 2})
+end})
+Tabs.ConfigTab:AddButton({"Unload Menu", function()
+    redzlib:Notify({Title = "AKZ HUB", Description = "Encerrando...", Type = "Warning", Duration = 2})
+    task.wait(0.5)
+    for _, gui in ipairs(game:GetService("CoreGui"):GetChildren()) do
+        if gui.Name == "redz Hub | Brookhaven RP.lua" or gui:GetAttribute("redzlib") then
+            gui:Destroy()
+        end
+    end
+end})
 
 -- ══════════════════════════════════════════════════════════
--- ABA 19: SOBRE
+-- ABA SOBRE
 -- ══════════════════════════════════════════════════════════
-local tSob = createTabContent("Sobre")
-y = 6
-y = C.section(tSob, "Info", y)
-C.button(tSob, "AKZ HUB — V1", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "Dev: Akira / Angel (mesmo criador)", y, function() end, {left = "dev", none = true}); y = y + BTN_H + GAP
-C.button(tSob, "19 abas • 250+ features", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "13 jogos keyless integrados", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "Compatível: Delta Executor", y, function() end, {left = "delta", right = "ok"}); y = y + BTN_H + GAP
-y = C.section(tSob, "Créditos Open Source", y)
-C.button(tSob, "Infinite Yield — Edge", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "AirHub V2 — Exunys", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "Universal ESP/Aimbot — zzerexx", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "FlyGuiV3 — XNEOFF", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "Sp3arParvus — JakeHukari", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "KaguHub — Kaguya11", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "ZaZa Hub — Berkcan61", y, function() end, {none = true}); y = y + BTN_H + GAP
-C.button(tSob, "Discord: discord.gg/kc7myVSq3", y, function()
+Tabs.Sobre:AddSection({"Informações do Projeto"})
+Tabs.Sobre:AddParagraph({Title = "AKZ HUB — V1", Content = "Desenvolvido por Akira / Angel\n\"Akira e Angel são 2 nicks do mesmo Criador.\""})
+Tabs.Sobre:AddParagraph({Title = "Estatísticas", Content = "19 abas • 250+ funções\nCatálogo RScripts integrado"})
+
+Tabs.Sobre:AddSection({"Créditos Open Source"})
+Tabs.Sobre:AddParagraph({Title = "Bibliotecas e Scripts", Content = "• redzlib (UI) — realgengar\n• Infinite Yield — Edge\n• AirHub V2 — Exunys\n• Universal ESP/Aimbot — zzerexx\n• FlyGuiV3 — XNEOFF\n• KaguHub — Kaguya11\n• ZaZa Hub — Berkcan61"})
+
+Tabs.Sobre:AddButton({"📋 Copiar Discord", function()
     if setclipboard then
         setclipboard("https://discord.gg/kc7myVSq3")
-        showToast("✓ Discord copiado!", "success")
+        redzlib:Notify({Title = "Discord", Description = "✓ Copiado!", Type = "Success", Duration = 3})
     end
-end, {left = "discord", right = "link"}); y = y + BTN_H + GAP
-C.button(tSob, "Unload Menu", y, function()
-    cleanConns()
-    ScreenGui:Destroy()
-    ToastGui:Destroy()
-end)
+end})
 
 -- ══════════════════════════════════════════════════════════
 -- LOOPS GLOBAIS
 -- ══════════════════════════════════════════════════════════
-addConn("noclip", RunService.Stepped:Connect(function()
+RunService.Stepped:Connect(function()
     if State.noclip and LP.Character then
         for _, p in ipairs(LP.Character:GetDescendants()) do
             if p:IsA("BasePart") then p.CanCollide = false end
         end
     end
-end))
+end)
 
-addConn("infJump", UIS.JumpRequest:Connect(function()
+UIS.JumpRequest:Connect(function()
     if State.infJump and getHum() then
         getHum():ChangeState(Enum.HumanoidStateType.Jumping)
     end
-end))
+end)
 
 task.spawn(function()
     while task.wait(1) do
         if State.antiAFK then pcall(function()
             local vu = game:GetService("VirtualUser")
-            vu:CaptureController(); vu:ClickButton2(Vector2.new())
+            vu:CaptureController()
+            vu:ClickButton2(Vector2.new())
         end) end
     end
 end)
@@ -2882,349 +1135,10 @@ task.spawn(function()
     end
 end)
 
--- ══════════════════════════════════════════════════════════
--- REGISTRAR 19 ABAS
--- ══════════════════════════════════════════════════════════
-local TAB_ORDER = {
-    {"Principal","🏠"},{"Jogos","🎮"},{"Status","📊"},
-    {"Movimentos","🏃"},{"Combate","⚔"},{"Visual","👁"},
-    {"Jogador","🧍"},{"Mundo","🌍"},{"Diversão","🎉"},
-    {"Admin","🛡"},{"Teleportes","📍"},{"Servidor","🖥"},
-    {"Chat","💬"},{"Câmera","🎥"},{"Proteção","🔒"},
-    {"Utilidades","🔧"},{"Scripts","📦"},{"Config","⚙"},
-    {"Sobre","ℹ"},
-}
-for i, d in ipairs(TAB_ORDER) do createTabBtn(d[1], d[2], i) end
-for name, d in pairs(TabBtns) do
-    d.button.MouseButton1Click:Connect(function() selectTab(name) end)
-end
-selectTab("Principal")
-
--- ══════════════════════════════════════════════════════════
--- LOGO ARRASTÁVEL
--- ══════════════════════════════════════════════════════════
-local Act = Instance.new("TextButton", ScreenGui)
-Act.Name = "Activate"
-Act.Text = ""; Act.AutoButtonColor = false
-Act.BackgroundColor3 = Color3.fromRGB(15,5,5)
-Act.BorderSizePixel = 0
-Act.Position = UDim2.new(0,12,0.28,0)
-Act.Size = UDim2.new(0,50,0,50)
-Act.ClipsDescendants = true; Act.Active = true; Act.ZIndex = 10
-Instance.new("UICorner", Act).CornerRadius = UDim.new(1,0)
-local LI = Instance.new("ImageLabel", Act)
-LI.Image = LOGO_ID; LI.ScaleType = Enum.ScaleType.Crop
-LI.BackgroundTransparency = 1; LI.Size = UDim2.new(1,0,1,0)
-LI.ZIndex = 2; LI.Active = false
-local LS = Instance.new("UIStroke", Act)
-LS.Color = Color3.fromRGB(200,30,30); LS.Thickness = 2
-makeDraggable(Act, nil, function()
-    Home.Visible = not Home.Visible
-    if Home.Visible then showToast("Menu aberto", "info") end
-end)
-
--- ══════════════════════════════════════════════════════════
--- TEMAS: "Original" e "Dark clean"  (botão "mudar tema ^" no header)
--- ══════════════════════════════════════════════════════════
-;(function()
-    local TH = {
-        Background = Color3.fromRGB(10, 11, 13),
-        Panel      = Color3.fromRGB(16, 17, 20),
-        Card       = Color3.fromRGB(21, 22, 26),
-        CardHover  = Color3.fromRGB(28, 29, 34),
-        Border     = Color3.fromRGB(55, 57, 63),
-        Text       = Color3.fromRGB(240, 240, 243),
-        SubText    = Color3.fromRGB(125, 127, 133),
-        Muted      = Color3.fromRGB(85, 87, 93),
-        White      = Color3.fromRGB(235, 236, 240),
-    }
-
-    local dark = false
-    local Orig = {}   -- [instância] = {propriedade = valor original}
-
-    -- ───────── Efeito shimmer (igual ao enviado) ─────────
-    local function AddShimmer(Frame)
-        Frame.ClipsDescendants = true
-
-        local Shine = Instance.new("Frame")
-        Shine.Name = "DiagonalShimmer"
-        Shine.Size = UDim2.new(0.18, 0, 2, 0)
-        Shine.Position = UDim2.new(-0.4, 0, -0.45, 0)
-        Shine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        Shine.BackgroundTransparency = 0
-        Shine.BorderSizePixel = 0
-        Shine.Rotation = 17
-        Shine.ZIndex = Frame.ZIndex + 10
-        Shine.Parent = Frame
-
-        local Gradient = Instance.new("UIGradient")
-        Gradient.Name = "ShimmerGradient"
-        Gradient.Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0.00, 1),
-            NumberSequenceKeypoint.new(0.30, 1),
-            NumberSequenceKeypoint.new(0.47, 0.94),
-            NumberSequenceKeypoint.new(0.50, 0.76),
-            NumberSequenceKeypoint.new(0.53, 0.94),
-            NumberSequenceKeypoint.new(0.70, 1),
-            NumberSequenceKeypoint.new(1.00, 1)
-        })
-        Gradient.Parent = Shine
-
-        task.spawn(function()
-            while Frame.Parent do
-                if not Shine.Visible then
-                    task.wait(0.25)   -- parado enquanto o tema Original está ativo
-                else
-                    Shine.Position = UDim2.new(-0.4, 0, -0.45, 0)
-
-                    local Tween = TweenService:Create(
-                        Shine,
-                        TweenInfo.new(2.7, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
-                        { Position = UDim2.new(1.15, 0, -0.45, 0) }
-                    )
-
-                    Tween:Play()
-                    Tween.Completed:Wait()
-
-                    task.wait(2.5)
-                end
-            end
-        end)
-
-        return Shine
-    end
-
-    local Shine = AddShimmer(Home)
-    Shine.Visible = false
-
-    -- ───────── Conversão de cores (vermelho → cinza limpo) ─────────
-    local function tinted(c)
-        local r, g, b = c.R * 255, c.G * 255, c.B * 255
-        return r > g * 1.3 + 3 and r > b * 1.3 + 3
-    end
-    local function lum(c)
-        return 0.3 * c.R * 255 + 0.59 * c.G * 255 + 0.11 * c.B * 255
-    end
-    local function hasText(o)
-        return o:IsA("TextLabel") or o:IsA("TextButton") or o:IsA("TextBox")
-    end
-    local function mapColor(o, k, c)
-        if not tinted(c) then return c end
-        if k == "BackgroundColor3" then
-            local l = lum(c)
-            if l >= 70 then
-                if hasText(o) then return Color3.fromRGB(88, 90, 96) end
-                return TH.White
-            end
-            local g = math.floor(11 + l + 0.5)
-            return Color3.fromRGB(g, g + 1, g + 5)
-        elseif k == "TextColor3" then
-            return TH.SubText
-        end
-        return TH.Border   -- Color (UIStroke) e ScrollBarImageColor3
-    end
-    local COLOR_KEYS = { BackgroundColor3 = true, TextColor3 = true, Color = true, ScrollBarImageColor3 = true }
-
-    local function setOrig(i, k)
-        local t = Orig[i]
-        if not t then t = {}; Orig[i] = t end
-        if t[k] == nil then t[k] = i[k] end
-    end
-    local function put(i, k, v)        -- altera e guarda o original p/ restaurar
-        setOrig(i, k)
-        i[k] = v
-    end
-    local function recolor(i, k)
-        local c = i[k]
-        if typeof(c) == "Color3" and tinted(c) then
-            setOrig(i, k)
-            i[k] = mapColor(i, k, c)
-        end
-    end
-
-    -- animações (tween) continuam coloridas pelo tema ativo
-    State.themeMap = function(o, p)
-        if not dark then return p end
-        local np = {}
-        for k, v in pairs(p) do
-            if COLOR_KEYS[k] and typeof(v) == "Color3" then
-                local t = Orig[o]
-                if not t then t = {}; Orig[o] = t end
-                t[k] = v
-                np[k] = mapColor(o, k, v)
-            else
-                np[k] = v
-            end
-        end
-        return np
-    end
-
-    local function themeInst(i)
-        if i:IsA("GuiObject") then
-            recolor(i, "BackgroundColor3")
-            if hasText(i) then recolor(i, "TextColor3") end
-            if i:IsA("ScrollingFrame") then recolor(i, "ScrollBarImageColor3") end
-        elseif i:IsA("UIStroke") then
-            recolor(i, "Color")
-        elseif i:IsA("UIGradient") and i.Name ~= "ShimmerGradient" then
-            put(i, "Enabled", false)
-        end
-    end
-
-    local function applyDark()
-        dark = true
-        for _, d in ipairs(ScreenGui:GetDescendants()) do themeInst(d) end
-
-        put(Home, "BackgroundColor3", TH.Background)
-        put(BgI, "Visible", false)
-        put(BgO, "BackgroundColor3", TH.Background)
-        put(BgO, "BackgroundTransparency", 0)
-        put(Sidebar, "BackgroundColor3", TH.Panel)
-        put(Sidebar, "BackgroundTransparency", 0)
-        put(HS, "Color", TH.Border)
-        put(HS, "Transparency", 0.68)
-        put(TS, "Enabled", false)
-        local cr = Home:FindFirstChildOfClass("UICorner")
-        if cr then put(cr, "CornerRadius", UDim.new(0, 14)) end
-
-        Shine.Visible = true
-    end
-
-    local function applyOriginal()
-        dark = false
-        for i, t in pairs(Orig) do
-            for k, v in pairs(t) do
-                pcall(function() i[k] = v end)
-            end
-        end
-        for i in pairs(Orig) do Orig[i] = nil end
-        Shine.Visible = false
-
-        -- reaplica o visual da aba selecionada
-        local cur = currentTab
-        currentTab = nil
-        if cur then selectTab(cur) end
-    end
-
-    -- novos elementos (ex.: lista do catálogo) já nascem no tema ativo
-    ScreenGui.DescendantAdded:Connect(function(i)
-        if not dark then return end
-        task.defer(function()
-            if i.Parent then themeInst(i) end
-        end)
-    end)
-    ToastGui.DescendantAdded:Connect(function(i)
-        if not dark then return end
-        task.defer(function()
-            if not i.Parent then return end
-            if i:IsA("UIGradient") then
-                i.Enabled = false
-            elseif i:IsA("Frame") and i.Parent == TC then
-                i.BackgroundColor3 = mapColor(i, "BackgroundColor3", i.BackgroundColor3)
-            end
-        end)
-    end)
-
-    -- ───────── UI: botão "mudar tema ^" dentro da aba Principal ─────────
-    local Card, Holder = State.themeCard, State.themeHolder
-    local CLOSED_H, OPEN_H = 44, 102
-    local open = false
-
-    local ThemeBtn = Instance.new("TextButton", Card)
-    ThemeBtn.Name = "ThemeBtn"
-    ThemeBtn.Font = Enum.Font.Gotham
-    ThemeBtn.Text = "  mudar tema ^"
-    ThemeBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-    ThemeBtn.TextSize = 11
-    ThemeBtn.TextXAlignment = Enum.TextXAlignment.Left
-    ThemeBtn.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
-    ThemeBtn.BackgroundTransparency = 0.35
-    ThemeBtn.BorderSizePixel = 0
-    ThemeBtn.AutoButtonColor = false
-    ThemeBtn.Position = UDim2.new(0, 8, 0, 8)
-    ThemeBtn.Size = UDim2.new(1, -16, 0, 28)
-    ThemeBtn.ZIndex = 4
-    Instance.new("UICorner", ThemeBtn).CornerRadius = UDim.new(0, 6)
-    local TBS = Instance.new("UIStroke", ThemeBtn)
-    TBS.Color = Color3.fromRGB(80, 20, 20); TBS.Thickness = 1; TBS.Transparency = 0.4
-    hoverFX(ThemeBtn)
-    do
-        local tp = Instance.new("UIPadding", ThemeBtn)
-        tp.PaddingLeft = UDim.new(0, 26)
-        CreateIcon(ThemeBtn, "settings", 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6, fade = false})
-    end
-
-    local CurLbl = Instance.new("TextLabel", ThemeBtn)
-    CurLbl.Font = Enum.Font.GothamMedium
-    CurLbl.TextSize = 10
-    CurLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
-    CurLbl.BackgroundTransparency = 1
-    CurLbl.TextXAlignment = Enum.TextXAlignment.Right
-    CurLbl.AnchorPoint = Vector2.new(1, 0.5)
-    CurLbl.Position = UDim2.new(1, -10, 0.5, 0)
-    CurLbl.Size = UDim2.new(0, 90, 0, 14)
-    CurLbl.ZIndex = 5
-
-    local rows = {}
-    local function refreshRows()
-        for n, row in pairs(rows) do
-            local sel = ((n == "Dark clean") == dark)
-            row.Text = (sel and "●  " or "    ") .. n
-            row.TextColor3 = sel and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-            tween(row, 0.15, {
-                BackgroundTransparency = sel and 0.35 or 1,
-                BackgroundColor3 = Color3.fromRGB(80, 15, 15),
-            })
-        end
-        CurLbl.Text = dark and "Dark clean" or "Original"
-    end
-
-    local function setOpen(v)
-        open = v
-        local h = v and OPEN_H or CLOSED_H
-        if v then for _, r in pairs(rows) do r.Visible = true end end
-        tween(Card, 0.18, { Size = UDim2.new(1, -16, 0, h) })
-        tween(Holder, 0.18, { Position = UDim2.new(0, 0, 0, State.themeCardY + h + 8) })
-        if not v then
-            task.delay(0.2, function()
-                if not open then for _, r in pairs(rows) do r.Visible = false end end
-            end)
-        end
-    end
-
-    local function setTheme(name)
-        if name == "Dark clean" then
-            if not dark then applyDark() end
-        else
-            if dark then applyOriginal() end
-        end
-        refreshRows()
-        setOpen(false)
-        showToast("Tema: " .. name, "info")
-    end
-
-    for idx, name in ipairs({ "Original", "Dark clean" }) do
-        local row = Instance.new("TextButton", Card)
-        row.Name = name
-        row.Font = Enum.Font.GothamMedium
-        row.TextSize = 10
-        row.TextXAlignment = Enum.TextXAlignment.Left
-        row.BackgroundColor3 = Color3.fromRGB(80, 15, 15)
-        row.BackgroundTransparency = 1
-        row.BorderSizePixel = 0
-        row.AutoButtonColor = false
-        row.Position = UDim2.new(0, 8, 0, 42 + (idx - 1) * 26)
-        row.Size = UDim2.new(1, -16, 0, 24)
-        row.ZIndex = 4
-        row.Visible = false
-        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
-        rows[name] = row
-        row.MouseButton1Click:Connect(function() setTheme(name) end)
-    end
-    refreshRows()
-
-    ThemeBtn.MouseButton1Click:Connect(function() setOpen(not open) end)
-end)()
-
-print("[AKZ HUB V1] Carregado! 19 abas — by: Akira / Angel")
-showToast("✓ AKZ HUB carregado!", "success")
+print("[AKZ HUB V1 — redzlib Edition] Carregado! by: Akira / Angel")
+redzlib:Notify({
+    Title = "AKZ HUB",
+    Description = "✓ Carregado com sucesso! by Akira / Angel",
+    Type = "Success",
+    Duration = 5
+})
