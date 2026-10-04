@@ -164,23 +164,20 @@ end
 
 -- ══════════════════════════════════════════════════════════
 -- ÍCONES — helper reutilizável (CreateIcon)
--- Ícones pequenos (14–28 px) em "chip" escuro arredondado: o fundo preto do
--- asset se funde ao chip e os cantos pretos ficam recortados pelo UICorner.
--- Para PNGs já transparentes: ICON_CHIP = false (mostra só o símbolo).
--- Se algum símbolo escuro sumir no chip, defina bg = Color3 claro na entrada.
+-- Ícones pequenos (14–28 px), imagem normal, sem chip/fundo.
+-- chip=true só em ícones que ainda têm fundo preto (hoje: delta).
 -- ══════════════════════════════════════════════════════════
-local ICON_CHIP = true
-local ICON_BG   = Color3.fromRGB(9, 9, 11)   -- neutro: o tema Dark clean não o recolore
+local ICON_BG   = Color3.fromRGB(9, 9, 11)
 local ICONS = {
-    discord = {id = "111273545070543"},
-    mask    = {id = "100667250387847"},
-    keys    = {id = "114933903118359"},
-    delta   = {id = "99769499679235"},
-    link    = {id = "85389585510984"},
-    ok      = {id = "90377058971104"},
-    click   = {id = "131844655231197"},
-    crown   = {id = "110427325805917"},
-    hacker  = {id = "120189978843499"},
+    discord = {id = "99300355597480"},
+    mask    = {id = "131593450648046"},
+    keys    = {id = "72660940735884"},
+    delta   = {id = "99769499679235", chip = true},
+    link    = {id = "132464250084813"},
+    ok      = {id = "82785730682526"},
+    click   = {id = "110025416672748"},
+    crown   = {id = "119833773196800"},
+    hacker  = {id = "96862415635956"},
 }
 
 local function CreateIcon(parent, key, size, pos, opts)
@@ -198,7 +195,7 @@ local function CreateIcon(parent, key, size, pos, opts)
     img.Position = pos or UDim2.new(0, 0, 0, 0)
     img.Size = UDim2.new(0, size, 0, size)
     img.ZIndex = opts.z or 5
-    if ICON_CHIP then
+    if def.chip then
         img.BackgroundColor3 = def.bg or ICON_BG
         img.BackgroundTransparency = 0
         local cr = Instance.new("UICorner", img)
