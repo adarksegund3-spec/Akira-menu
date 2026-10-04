@@ -21,7 +21,7 @@ WindUI:AddTheme({
 local Window = WindUI:CreateWindow({
     Title = "Drip Menu",
     Icon = "door-open",
-    Author = "by Akira / Angel 👑",
+    Author = "by O Caro rei 👑",
     Theme = "Crimson",
 })
 
@@ -75,7 +75,7 @@ end)
 -- DISCORD
 -- ========================================================================
 
-local DiscordLink = "https://discord.gg/kc7myVSq3"
+local DiscordLink = "https://discord.gg/RWUA3wHF7"
 
 local TabDiscord = Window:Tab({ Title = "Discord", Icon = "message-circle" })
 local discordSection = TabDiscord:Section({ Title = "🌐 Entre no nosso Discord", TextXAlignment = "Left" })
@@ -1128,7 +1128,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ========================================================================
--- CRÉDITOS
+-- CRÉDITOS (só O Caro rei 👑)
 -- ========================================================================
 
 local creditosPage = TabCreditos:Section({
@@ -1137,47 +1137,8 @@ local creditosPage = TabCreditos:Section({
 })
 
 creditosPage:Button({
-    Title = "👑 Akira / Angel",
-    Desc = "Dono / Desenvolvedor",
-    Callback = function() notify("Créditos", "Akira / Angel 👑") end
-})
-
--- Aviso com destaque amarelo
-local avisoSection = TabCreditos:Section({
-    Title = "⚠️ Aviso",
-    TextXAlignment = "Left"
-})
-
-pcall(function()
-    avisoSection:Paragraph({
-        Title = "⚠️ São 2 Kicks do mesmo criador.",
-        Desc = "Akira / Angel",
-        Color = Color3.fromHex("#facc15"),
-    })
-end)
-
--- Borda amarela (UIStroke) aplicada no aviso
-task.defer(function()
-    pcall(function()
-        local el = avisoSection.ElementFrame or avisoSection.UIElements and avisoSection.UIElements.Main
-        if el then
-            local stroke = Instance.new("UIStroke")
-            stroke.Color = Color3.fromRGB(250, 204, 21)
-            stroke.Thickness = 2
-            stroke.Parent = el
-        end
-    end)
-end)
-
-creditosPage:Button({
-    Title = "💬 Copiar Discord da comunidade",
-    Callback = function()
-        if copyText("https://discord.gg/kc7myVSq3") then
-            notify("Discord", "Link copiado!")
-        else
-            notify("Discord", "Falha. Use: https://discord.gg/kc7myVSq3")
-        end
-    end
+    Title = "👑 O Caro rei 👑",
+    Callback = function() notify("Créditos", "O Caro rei 👑") end
 })
 
 -- ========================================================================
