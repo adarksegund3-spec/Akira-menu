@@ -416,7 +416,7 @@ end
 local IconMap = {
     autoBtn = "click",   -- ícone padrão no canto dos botões de ação (nil = desliga)
     sections = {
-        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Discord"] = "discord", ["Tema"] = "settings",
+        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Discord"] = "discord", ["Seletor de UI"] = "settings", ["Tema"] = "settings",
         ["Atalhos Rápidos"] = "click", ["Info"] = "hacker", ["Créditos Open Source"] = "link",
         ["Hubs Universais"] = "code", ["Hubs"] = "code", ["Utilitários"] = "devlogo",
         ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "settings",
@@ -1377,6 +1377,130 @@ do
         end
     end)
     y = y + DC_H + 8
+
+    -- ── BLOCO: SELETOR DE UI ──
+    y = C.section(tPrin, "Seletor de UI", y)
+    do
+        -- atalhos mostrados dentro de cada UI externa (mesmos do hub)
+        local QUICK = {
+            {"Infinite Yield (Admin)", function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+            end},
+            {"AirHub V2 (ESP + Aimbot)", function() loadOnce("airhub", AIRHUB_URL) end},
+            {"FlyGuiV3", function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+            end},
+            {"All Emotes", function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+            end},
+        }
+        local BRAND, BY = "AKZ HUB", "by Akira / Angel"
+
+        local UI_LIST = {
+            {name = "FluentPro", tag = "Fluent modded", run = function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/StyearX/Fluent-modded/refs/heads/main/Fluent/Example/FluentPro%20Example"))()
+            end},
+            {name = "Luna", tag = "Nebula Softworks", run = function()
+                local Luna = loadstring(game:HttpGet("https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/refs/heads/main/source.lua", true))()
+                local W = Luna:CreateWindow({
+                    Name = BRAND, Subtitle = BY, LoadingEnabled = false,
+                    LoadingTitle = BRAND, LoadingSubtitle = BY,
+                    ConfigSettings = {RootFolder = nil, ConfigFolder = "AKZHub"},
+                    KeySystem = false,
+                })
+                local T = W:CreateTab({Name = "Atalhos", Icon = "build", ImageSource = "Material", ShowTitle = true})
+                for _, q in ipairs(QUICK) do T:CreateButton({Name = q[1], Callback = q[2]}) end
+            end},
+            {name = "Drip Client", tag = "Black / White", run = function()
+                local Drip = loadstring(game:HttpGet("https://raw.githubusercontent.com/Young-Apfelmus/Drip-Library/main/drip-ui-library.lua"))()
+                pcall(function() Drip:AutoLoadLucide() end)
+                local win = Drip:CreateWindow({Title = BRAND, Subtitle = BY, ToggleBind = Enum.KeyCode.RightShift})
+                local okI, ico = pcall(function() return Drip.icon("home") end)
+                local tab = win:Tab("Atalhos", okI and ico or nil)
+                for _, q in ipairs(QUICK) do tab:Button({Title = q[1], Callback = q[2]}) end
+            end},
+            {name = "Rayfield", tag = "Sirius", run = function()
+                local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+                local W = Rayfield:CreateWindow({
+                    Name = BRAND, LoadingTitle = BRAND, LoadingSubtitle = BY,
+                    ConfigurationSaving = {Enabled = false}, KeySystem = false,
+                })
+                local T = W:CreateTab("Atalhos", 4483362458)
+                for _, q in ipairs(QUICK) do T:CreateButton({Name = q[1], Callback = q[2]}) end
+            end},
+            {name = "Orion", tag = "Shlexware", run = function()
+                local Orion = loadstring(game:HttpGet("https://raw.githubusercontent.com/shlexware/Orion/main/source"))()
+                local W = Orion:MakeWindow({Name = BRAND, HidePremium = false, SaveConfig = false, ConfigFolder = "AKZHub"})
+                local T = W:MakeTab({Name = "Atalhos", Icon = "rbxassetid://4483345998", PremiumOnly = false})
+                for _, q in ipairs(QUICK) do T:AddButton({Name = q[1], Callback = q[2]}) end
+                Orion:Init()
+            end},
+            {name = "Fluent", tag = "dawid-scripts", run = function()
+                local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+                local W = Fluent:CreateWindow({
+                    Title = BRAND, SubTitle = BY, TabWidth = 140, Size = UDim2.fromOffset(420, 300),
+                    Acrylic = false, Theme = "Dark", MinimizeKey = Enum.KeyCode.LeftControl,
+                })
+                local T = W:AddTab({Title = "Atalhos", Icon = "home"})
+                for _, q in ipairs(QUICK) do T:AddButton({Title = q[1], Callback = q[2]}) end
+                W:SelectTab(1)
+            end},
+        }
+
+        local ROW_H = 24
+        local selH = 8 + #UI_LIST * ROW_H + 6 + BTN_H + 8
+        local sc = C.card(tPrin, y, selH)
+        local selected = 1
+        local rowBtns = {}
+
+        local function refreshSel()
+            for i, r in ipairs(rowBtns) do
+                local on = (i == selected)
+                r.Text = (on and "●  " or "    ") .. UI_LIST[i].name
+                r.TextColor3 = on and WHITE or Color3.fromRGB(150,150,150)
+                tween(r, 0.15, {
+                    BackgroundTransparency = on and 0.35 or 1,
+                    BackgroundColor3 = Color3.fromRGB(80,15,15),
+                })
+            end
+        end
+
+        for i, ui in ipairs(UI_LIST) do
+            local r = Instance.new("TextButton", sc)
+            r.Name = "UIRow_" .. ui.name
+            r.Font = Enum.Font.GothamMedium; r.TextSize = 10
+            r.TextXAlignment = Enum.TextXAlignment.Left
+            r.BackgroundColor3 = Color3.fromRGB(80,15,15); r.BackgroundTransparency = 1
+            r.BorderSizePixel = 0; r.AutoButtonColor = false
+            r.Position = UDim2.new(0, 8, 0, 8 + (i - 1) * ROW_H)
+            r.Size = UDim2.new(1, -16, 0, ROW_H - 2)
+            Instance.new("UICorner", r).CornerRadius = UDim.new(0, 5)
+            local tg = Instance.new("TextLabel", r)
+            tg.BackgroundTransparency = 1; tg.Font = Enum.Font.Gotham; tg.TextSize = 9
+            tg.TextColor3 = Color3.fromRGB(110,110,110); tg.Text = ui.tag
+            tg.TextXAlignment = Enum.TextXAlignment.Right
+            tg.AnchorPoint = Vector2.new(1, 0.5); tg.Position = UDim2.new(1, -8, 0.5, 0)
+            tg.Size = UDim2.new(0.5, 0, 0, 12)
+            rowBtns[i] = r
+            r.MouseButton1Click:Connect(function() selected = i; refreshSel() end)
+        end
+        refreshSel()
+
+        C.button(sc, "ABRIR UI SELECIONADA", 8 + #UI_LIST * ROW_H + 6, function()
+            local ui = UI_LIST[selected]
+            showToast("Abrindo " .. ui.name .. "...", "info")
+            task.spawn(function()
+                local ok, e = pcall(ui.run)
+                if ok then
+                    showToast("✓ " .. ui.name .. " carregada", "success")
+                else
+                    warn("[AKZ HUB] UI " .. ui.name .. ": " .. tostring(e))
+                    showToast("⚠ " .. ui.name .. " falhou ao abrir", "error")
+                end
+            end)
+        end, {right = "click"})
+        y = y + selH + 8
+    end
 
     -- ── BLOCO 3: TEMA (o botão é montado no fim do script) ──
     y = C.section(tPrin, "Tema", y)
@@ -3583,6 +3707,7 @@ end)
         rows[name] = row
         row.MouseButton1Click:Connect(function() setTheme(name) end)
     end
+    applyDark()      -- padrão: Dark clean (o vermelho só aparece ao escolher "Original")
     refreshRows()
 
     ThemeBtn.MouseButton1Click:Connect(function() setOpen(not open) end)
