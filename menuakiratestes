@@ -796,85 +796,86 @@ end
 -- ABA 1: PRINCIPAL
 -- ══════════════════════════════════════════════════════════
 local tPrin = createTabContent("Principal")
-local intro = C.card(tPrin, 6, 150)
-
-local iT = Instance.new("TextLabel", intro)
-iT.Text = "AKZ HUB"; iT.Font = Enum.Font.GothamBold; iT.TextSize = 16
-iT.TextColor3 = Color3.fromRGB(255,255,255); iT.BackgroundTransparency = 1
-iT.Position = UDim2.new(0,12,0,10); iT.Size = UDim2.new(1,-24,0,20)
-iT.TextXAlignment = Enum.TextXAlignment.Left
-
-local iS = Instance.new("TextLabel", intro)
-iS.Text = "V1 — Premium Edition"; iS.Font = Enum.Font.GothamMedium
-iS.TextSize = 9; iS.TextColor3 = Color3.fromRGB(220,60,60)
-iS.BackgroundTransparency = 1; iS.Position = UDim2.new(0,12,0,30)
-iS.Size = UDim2.new(1,-24,0,12); iS.TextXAlignment = Enum.TextXAlignment.Left
-
-local dL = Instance.new("TextLabel", intro)
-dL.Text = "👤 Desenvolvedor:  Akira / Angel"
-dL.Font = Enum.Font.Gotham; dL.TextSize = 10
-dL.TextColor3 = Color3.fromRGB(220,220,220); dL.BackgroundTransparency = 1
-dL.Position = UDim2.new(0,12,0,50); dL.Size = UDim2.new(1,-24,0,14)
-dL.TextXAlignment = Enum.TextXAlignment.Left; dL.TextTruncate = Enum.TextTruncate.AtEnd
-
--- NOTA sobre os nicks
-local dNote = Instance.new("TextLabel", intro)
-dNote.Text = "\"Akira e Angel são 2 nicks do mesmo Criador.\""
-dNote.Font = Enum.Font.GothamMedium; dNote.TextSize = 9
-dNote.TextColor3 = Color3.fromRGB(220,160,160); dNote.BackgroundTransparency = 1
-dNote.TextXAlignment = Enum.TextXAlignment.Left
-dNote.Position = UDim2.new(0,12,0,64); dNote.Size = UDim2.new(1,-24,0,12); dNote.TextTruncate = Enum.TextTruncate.AtEnd
-
-local dc = Instance.new("TextLabel", intro)
-dc.Text = "💬 Comunidade:  discord.gg/kc7myVSq3"
-dc.Font = Enum.Font.Gotham; dc.TextSize = 10
-dc.TextColor3 = Color3.fromRGB(220,220,220); dc.BackgroundTransparency = 1
-dc.Position = UDim2.new(0,12,0,82); dc.Size = UDim2.new(1,-90,0,14)
-dc.TextXAlignment = Enum.TextXAlignment.Left; dc.TextTruncate = Enum.TextTruncate.AtEnd
-
-local cb = Instance.new("TextButton", intro)
-cb.Font = Enum.Font.GothamBold; cb.Text = "COPIAR"
-cb.TextSize = 9; cb.TextColor3 = Color3.fromRGB(255,255,255)
-cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
-cb.BorderSizePixel = 0; cb.AutoButtonColor = false
-cb.AnchorPoint = Vector2.new(1,0)
-cb.Position = UDim2.new(1,-10,0,82); cb.Size = UDim2.new(0,60,0,18)
-Instance.new("UICorner", cb).CornerRadius = UDim.new(0,4)
-cb.MouseButton1Click:Connect(function()
-    if setclipboard then
-        setclipboard("https://discord.gg/kc7myVSq3")
-        cb.Text = "✓ OK"; cb.BackgroundColor3 = Color3.fromRGB(60,180,90)
-        showToast("✓ Discord copiado!", "success")
-        task.delay(2, function()
-            cb.Text = "COPIAR"; cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
-        end)
-    else
-        showToast("⚠ Executor sem clipboard", "warning")
+do
+    local function lbl(parent, text, size, color, font, x, y, w, h)
+        local l = Instance.new("TextLabel", parent)
+        l.Text = text; l.Font = font; l.TextSize = size; l.TextColor3 = color
+        l.BackgroundTransparency = 1
+        l.Position = UDim2.new(0, x, 0, y); l.Size = UDim2.new(1, -w, 0, h)
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextTruncate = Enum.TextTruncate.AtEnd
+        return l
     end
-end)
+    local WHITE = Color3.fromRGB(255,255,255)
+    local LIGHT = Color3.fromRGB(220,220,220)
+    local GREY  = Color3.fromRGB(150,150,150)
+    local y = 6
 
-local dsc = Instance.new("TextLabel", intro)
-dsc.Text = "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos."
-dsc.Font = Enum.Font.Gotham; dsc.TextSize = 9
-dsc.TextColor3 = Color3.fromRGB(170,170,170); dsc.TextWrapped = true
-dsc.BackgroundTransparency = 1; dsc.Position = UDim2.new(0,12,0,104)
-dsc.Size = UDim2.new(1,-24,0,40); dsc.TextXAlignment = Enum.TextXAlignment.Left
-dsc.TextYAlignment = Enum.TextYAlignment.Top
+    -- ── BLOCO 1: CRÉDITOS ──
+    y = C.section(tPrin, "Créditos", y)
+    local cr = C.card(tPrin, y, 120)
+    lbl(cr, "AKZ HUB", 16, WHITE, Enum.Font.GothamBold, 12, 10, 24, 20)
+    lbl(cr, "V1 — Premium Edition", 9, Color3.fromRGB(220,60,60), Enum.Font.GothamMedium, 12, 30, 24, 12)
+    lbl(cr, "👤 Desenvolvedor:  Akira / Angel", 10, LIGHT, Enum.Font.Gotham, 12, 48, 24, 14)
+    lbl(cr, "\"Akira e Angel são 2 nicks do mesmo Criador.\"", 9, Color3.fromRGB(220,160,160), Enum.Font.GothamMedium, 12, 63, 24, 12)
+    local dsc = lbl(cr, "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos.", 9, Color3.fromRGB(170,170,170), Enum.Font.Gotham, 12, 80, 24, 36)
+    dsc.TextWrapped = true; dsc.TextTruncate = Enum.TextTruncate.None
+    dsc.TextYAlignment = Enum.TextYAlignment.Top
+    y = y + 120 + 8
 
-local py = 164
-py = C.section(tPrin, "Atalhos Rápidos", py)
-C.button(tPrin, "Infinite Yield (Admin)", py, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
-end); py = py + BTN_H + GAP
-C.button(tPrin, "AirHub V2 (ESP + Aimbot)", py, function()
-    loadOnce("airhub", AIRHUB_URL)
-end); py = py + BTN_H + GAP
-C.button(tPrin, "FlyGuiV3", py, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-end); py = py + BTN_H + GAP
-C.button(tPrin, "All Emotes", py, function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
-end)
+    -- ── BLOCO 2: COMUNIDADE ──
+    y = C.section(tPrin, "Comunidade", y)
+    local cm = C.card(tPrin, y, 54)
+    lbl(cm, "💬 Discord oficial", 10, LIGHT, Enum.Font.GothamMedium, 12, 9, 90, 14)
+    lbl(cm, "discord.gg/kc7myVSq3", 10, GREY, Enum.Font.Gotham, 12, 27, 90, 14)
+    local cb = Instance.new("TextButton", cm)
+    cb.Font = Enum.Font.GothamBold; cb.Text = "COPIAR"
+    cb.TextSize = 9; cb.TextColor3 = WHITE
+    cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
+    cb.BorderSizePixel = 0; cb.AutoButtonColor = false
+    cb.AnchorPoint = Vector2.new(1, 0.5)
+    cb.Position = UDim2.new(1, -10, 0.5, 0); cb.Size = UDim2.new(0, 64, 0, 22)
+    Instance.new("UICorner", cb).CornerRadius = UDim.new(0, 5)
+    cb.MouseButton1Click:Connect(function()
+        if setclipboard then
+            setclipboard("https://discord.gg/kc7myVSq3")
+            cb.Text = "✓ OK"; cb.BackgroundColor3 = Color3.fromRGB(60,180,90)
+            showToast("✓ Discord copiado!", "success")
+            task.delay(2, function()
+                cb.Text = "COPIAR"; cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
+            end)
+        else
+            showToast("⚠ Executor sem clipboard", "warning")
+        end
+    end)
+    y = y + 54 + 8
+
+    -- ── BLOCO 3: TEMA (o botão é montado no fim do script) ──
+    y = C.section(tPrin, "Tema", y)
+    local tm = C.card(tPrin, y, 44)
+    tm.ClipsDescendants = true
+    local holder = Instance.new("Frame", tPrin)   -- atalhos descem junto quando a lista de temas abre
+    holder.Name = "AtalhosHolder"
+    holder.BackgroundTransparency = 1; holder.BorderSizePixel = 0
+    holder.Position = UDim2.new(0, 0, 0, y + 44 + 8)
+    holder.Size = UDim2.new(1, 0, 0, 158)
+    State.themeCard, State.themeHolder, State.themeCardY = tm, holder, y
+
+    -- ── ATALHOS RÁPIDOS ──
+    local hy = C.section(holder, "Atalhos Rápidos", 0)
+    C.button(holder, "Infinite Yield (Admin)", hy, function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+    end); hy = hy + BTN_H + GAP
+    C.button(holder, "AirHub V2 (ESP + Aimbot)", hy, function()
+        loadOnce("airhub", AIRHUB_URL)
+    end); hy = hy + BTN_H + GAP
+    C.button(holder, "FlyGuiV3", hy, function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+    end); hy = hy + BTN_H + GAP
+    C.button(holder, "All Emotes", hy, function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+    end)
+end
 
 -- ══════════════════════════════════════════════════════════
 -- ABA 2: JOGOS — CATÁLOGO DINÂMICO (RoScripts API)
@@ -2931,38 +2932,40 @@ end)
         end)
     end)
 
-    -- ───────── UI: botão "mudar tema ^" + listinha ─────────
-    Header.ZIndex = 6
+    -- ───────── UI: botão "mudar tema ^" dentro da aba Principal ─────────
+    local Card, Holder = State.themeCard, State.themeHolder
+    local CLOSED_H, OPEN_H = 44, 102
+    local open = false
 
-    local ThemeBtn = Instance.new("TextButton", Header)
+    local ThemeBtn = Instance.new("TextButton", Card)
     ThemeBtn.Name = "ThemeBtn"
-    ThemeBtn.Font = Enum.Font.GothamMedium
-    ThemeBtn.Text = "mudar tema ^"
+    ThemeBtn.Font = Enum.Font.Gotham
+    ThemeBtn.Text = "  mudar tema ^"
     ThemeBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-    ThemeBtn.TextSize = 10
-    ThemeBtn.BackgroundColor3 = Color3.fromRGB(30, 5, 5)
-    ThemeBtn.BackgroundTransparency = 0.2
+    ThemeBtn.TextSize = 11
+    ThemeBtn.TextXAlignment = Enum.TextXAlignment.Left
+    ThemeBtn.BackgroundColor3 = Color3.fromRGB(20, 5, 5)
+    ThemeBtn.BackgroundTransparency = 0.35
     ThemeBtn.BorderSizePixel = 0
     ThemeBtn.AutoButtonColor = false
-    ThemeBtn.Position = UDim2.new(0, 10, 0, 11)
-    ThemeBtn.Size = UDim2.new(0, 92, 0, 20)
-    ThemeBtn.ZIndex = 8
-    Instance.new("UICorner", ThemeBtn).CornerRadius = UDim.new(0, 5)
+    ThemeBtn.Position = UDim2.new(0, 8, 0, 8)
+    ThemeBtn.Size = UDim2.new(1, -16, 0, 28)
+    ThemeBtn.ZIndex = 4
+    Instance.new("UICorner", ThemeBtn).CornerRadius = UDim.new(0, 6)
     local TBS = Instance.new("UIStroke", ThemeBtn)
-    TBS.Color = Color3.fromRGB(140, 25, 25); TBS.Thickness = 1; TBS.Transparency = 0.4
+    TBS.Color = Color3.fromRGB(80, 20, 20); TBS.Thickness = 1; TBS.Transparency = 0.4
     hoverFX(ThemeBtn)
 
-    local List = Instance.new("Frame", Header)
-    List.Name = "ThemeList"
-    List.BackgroundColor3 = Color3.fromRGB(15, 5, 5)
-    List.BorderSizePixel = 0
-    List.Position = UDim2.new(0, 10, 0, 35)
-    List.Size = UDim2.new(0, 108, 0, 58)
-    List.Visible = false
-    List.ZIndex = 9
-    Instance.new("UICorner", List).CornerRadius = UDim.new(0, 6)
-    local LST = Instance.new("UIStroke", List)
-    LST.Color = Color3.fromRGB(140, 25, 25); LST.Thickness = 1; LST.Transparency = 0.3
+    local CurLbl = Instance.new("TextLabel", ThemeBtn)
+    CurLbl.Font = Enum.Font.GothamMedium
+    CurLbl.TextSize = 10
+    CurLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+    CurLbl.BackgroundTransparency = 1
+    CurLbl.TextXAlignment = Enum.TextXAlignment.Right
+    CurLbl.AnchorPoint = Vector2.new(1, 0.5)
+    CurLbl.Position = UDim2.new(1, -10, 0.5, 0)
+    CurLbl.Size = UDim2.new(0, 90, 0, 14)
+    CurLbl.ZIndex = 5
 
     local rows = {}
     local function refreshRows()
@@ -2975,6 +2978,20 @@ end)
                 BackgroundColor3 = Color3.fromRGB(80, 15, 15),
             })
         end
+        CurLbl.Text = dark and "Dark clean" or "Original"
+    end
+
+    local function setOpen(v)
+        open = v
+        local h = v and OPEN_H or CLOSED_H
+        if v then for _, r in pairs(rows) do r.Visible = true end end
+        tween(Card, 0.18, { Size = UDim2.new(1, -16, 0, h) })
+        tween(Holder, 0.18, { Position = UDim2.new(0, 0, 0, State.themeCardY + h + 8) })
+        if not v then
+            task.delay(0.2, function()
+                if not open then for _, r in pairs(rows) do r.Visible = false end end
+            end)
+        end
     end
 
     local function setTheme(name)
@@ -2984,12 +3001,12 @@ end)
             if dark then applyOriginal() end
         end
         refreshRows()
-        List.Visible = false
+        setOpen(false)
         showToast("Tema: " .. name, "info")
     end
 
     for idx, name in ipairs({ "Original", "Dark clean" }) do
-        local row = Instance.new("TextButton", List)
+        local row = Instance.new("TextButton", Card)
         row.Name = name
         row.Font = Enum.Font.GothamMedium
         row.TextSize = 10
@@ -2998,21 +3015,17 @@ end)
         row.BackgroundTransparency = 1
         row.BorderSizePixel = 0
         row.AutoButtonColor = false
-        row.Position = UDim2.new(0, 4, 0, 4 + (idx - 1) * 26)
-        row.Size = UDim2.new(1, -8, 0, 24)
-        row.ZIndex = 10
+        row.Position = UDim2.new(0, 8, 0, 42 + (idx - 1) * 26)
+        row.Size = UDim2.new(1, -16, 0, 24)
+        row.ZIndex = 4
+        row.Visible = false
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 5)
         rows[name] = row
         row.MouseButton1Click:Connect(function() setTheme(name) end)
     end
     refreshRows()
 
-    ThemeBtn.MouseButton1Click:Connect(function()
-        List.Visible = not List.Visible
-    end)
-    Home:GetPropertyChangedSignal("Visible"):Connect(function()
-        List.Visible = false
-    end)
+    ThemeBtn.MouseButton1Click:Connect(function() setOpen(not open) end)
 end)()
 
 print("[AKZ HUB V1] Carregado! 19 abas — by: Akira / Angel")
