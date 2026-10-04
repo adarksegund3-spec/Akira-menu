@@ -1,13 +1,25 @@
 --[[
     ═══════════════════════════════════════════════════════════
-    AKZ HUB — V1 (Upgrade Premium Compacto)
+    AKZ HUB — V1 (Upgrade Premium Compacto + RScripts)
     ═══════════════════════════════════════════════════════════
     • 19 abas • 250+ funções • Componentes reutilizáveis
-    • Jogos keyless funcionais com fallback
+    • Catálogo dinâmico RScripts integrado na aba Jogos
     • UI compacta e responsiva (adapta ao viewport)
     • Toasts • Detecção de jogo • Tratamento de erros
     ═══════════════════════════════════════════════════════════
 ]]
+
+-- ══════════════════════════════════════════════════════════
+-- CONFIGURAÇÃO RSCRIPTS API
+-- ══════════════════════════════════════════════════════════
+local Config = {
+    -- ⚠️ SUBSTITUA PELA SUA CHAVE OFUSCADA EM PRODUÇÃO
+    RScriptsAPI = "rsc_live_ptG1hM5ur2ykBFr7slsAPHyPb6fOnwku",
+    ResultsPerPage = 10,
+    CacheEnabled = true,
+    CacheDuration = 60,
+    APIEndpoint = "https://api.rscripts.net/v1/scripts",
+}
 
 local Players         = game:GetService("Players")
 local UIS             = game:GetService("UserInputService")
@@ -27,7 +39,7 @@ for _, n in ipairs({"AKZUniversal","AKZUniversalToast"}) do
 end
 
 -- ══════════════════════════════════════════════════════════
--- RESPONSIVIDADE — tamanho adaptativo
+-- RESPONSIVIDADE
 -- ══════════════════════════════════════════════════════════
 local function getViewport()
     local cam = workspace.CurrentCamera
@@ -38,7 +50,6 @@ local function getViewport()
     return Vector2.new(1280, 720)
 end
 local vp = getViewport()
--- Dimensões compactas com máximo responsivo
 local HOME_W = math.clamp(math.floor(vp.X * 0.62), 480, 660)
 local HOME_H = math.clamp(math.floor(vp.Y * 0.68), 360, 460)
 
@@ -92,7 +103,7 @@ end
 
 local function makeDraggable(handle, target, onClick)
     target = target or handle
-    local dragging, moved, dragInput, dragStart, startPos = false, false
+    local dragging, moved, dragInput, dragStart, startPos = false, false, nil, nil, nil
     local THRESH = 5
     handle.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1
@@ -133,7 +144,6 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999
 ScreenGui.Parent = game:GetService("CoreGui")
 
--- TOASTS
 local ToastGui = Instance.new("ScreenGui")
 ToastGui.Name = "AKZUniversalToast"
 ToastGui.ResetOnSpawn = false
@@ -194,7 +204,7 @@ local function showToast(msg, kind)
     end)
 end
 
--- HOME compacta
+-- HOME
 local Home = Instance.new("Frame", ScreenGui)
 Home.Name = "Home"
 Home.BackgroundColor3 = Color3.fromRGB(12,4,4)
@@ -216,11 +226,9 @@ BgO.BackgroundColor3 = Color3.fromRGB(0,0,0); BgO.BackgroundTransparency = 0.35
 BgO.BorderSizePixel = 0; BgO.Size = UDim2.new(1,0,1,0); BgO.ZIndex = 1
 horrorGrad(BgO)
 
--- Header compacto
 local Header = Instance.new("Frame", Home)
 Header.BackgroundTransparency = 1; Header.Size = UDim2.new(1,0,0,42); Header.ZIndex = 5
 
--- TÍTULO centralizado — "AKZ HUB"
 local Title = Instance.new("TextLabel", Header)
 Title.Font = Enum.Font.GothamBold
 Title.Text = "AKZ HUB"
@@ -234,7 +242,6 @@ Title.ZIndex = 6
 local TS = Instance.new("UIStroke", Title)
 TS.Color = Color3.fromRGB(200,30,30); TS.Thickness = 2
 
--- Sub (dev) pequenininha
 local Sub = Instance.new("TextLabel", Header)
 Sub.Font = Enum.Font.Gotham
 Sub.Text = "by: Akira / Angel  •  V1"
@@ -265,7 +272,7 @@ HL.Size = UDim2.new(1,-20,0,1); HL.ZIndex = 5
 
 makeDraggable(Header, Home)
 
--- SIDEBAR compacta
+-- SIDEBAR
 local Sidebar = Instance.new("ScrollingFrame", Home)
 Sidebar.BackgroundColor3 = Color3.fromRGB(8,3,3); Sidebar.BackgroundTransparency = 0.3
 Sidebar.BorderSizePixel = 0
@@ -336,7 +343,7 @@ local function createTabContent(name)
 end
 
 -- ══════════════════════════════════════════════════════════
--- COMPONENTES compactos
+-- COMPONENTES
 -- ══════════════════════════════════════════════════════════
 local C = {}
 local BTN_H, GAP, PAD = 28, 4, 8
@@ -528,7 +535,7 @@ function C.search(parent, y, onChange)
 end
 
 -- ══════════════════════════════════════════════════════════
--- MÓDULO DE JOGOS
+-- MÓDULO DE JOGOS (fallback estático — usado se API falhar)
 -- ══════════════════════════════════════════════════════════
 local GameModule = { games = {
     {id="mm2", name="MM2 — Murder Mystery 2", icon="🔪",
@@ -634,7 +641,6 @@ dL.TextColor3 = Color3.fromRGB(220,220,220); dL.BackgroundTransparency = 1
 dL.Position = UDim2.new(0,12,0,50); dL.Size = UDim2.new(1,-24,0,14)
 dL.TextXAlignment = Enum.TextXAlignment.Left
 
--- NOTA sobre os nicks
 local dNote = Instance.new("TextLabel", intro)
 dNote.Text = "\"Akira e Angel são 2 nicks do mesmo Criador.\""
 dNote.Font = Enum.Font.GothamMedium; dNote.TextSize = 9
@@ -694,135 +700,441 @@ C.button(tPrin, "All Emotes", py, function()
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 2: JOGOS
+-- ABA 2: JOGOS (Catálogo Dinâmico RScripts)
 -- ══════════════════════════════════════════════════════════
 local tJogos = createTabContent("Jogos")
+
+local CatalogState = {
+    query = "",
+    page = 1,
+    totalPages = 1,
+    hasNext = false,
+    hasPrev = false,
+    loading = false,
+    filters = { noKey = true, mobile = true, free = true },
+    sort = "recommended",
+    results = {},
+}
+local DebounceToken = 0
+local Cache = {}
+
+-- Construção da URL
+local function BuildURL(query, filters, page, sort)
+    local parts = {}
+    if query and query ~= "" then
+        table.insert(parts, "q=" .. HttpService:UrlEncode(query))
+    end
+    table.insert(parts, "page=" .. tostring(page))
+    table.insert(parts, "limit=" .. tostring(Config.ResultsPerPage))
+    table.insert(parts, "sort=" .. (sort or "recommended"))
+    if filters.noKey then table.insert(parts, "noKeySystem=true") end
+    if filters.mobile then table.insert(parts, "mobileOnly=true") end
+    if filters.free then table.insert(parts, "freeOnly=true") end
+    return Config.APIEndpoint .. "?" .. table.concat(parts, "&")
+end
+
+-- Requisição HTTP com tratamento de erros
+local function FetchScripts(url)
+    local headers = {
+        ["Authorization"] = "Bearer " .. Config.RScriptsAPI,
+        ["Accept"] = "application/json",
+    }
+    local ok, response = pcall(function()
+        return HttpService:RequestAsync({
+            Url = url,
+            Method = "GET",
+            Headers = headers,
+        })
+    end)
+    if not ok or not response then
+        return nil, "connection"
+    end
+    local code = response.StatusCode
+    if code == 200 then
+        local ok2, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        if ok2 and data then return data, nil end
+        return nil, "parse"
+    elseif code == 400 then return nil, "⚠ Requisição inválida (400)."
+    elseif code == 401 then return nil, "⚠ API Key inválida (401)."
+    elseif code == 403 then return nil, "⚠ Acesso negado (403)."
+    elseif code == 404 then return nil, "⚠ Recurso não encontrado (404)."
+    elseif code == 429 then return nil, "⚠ Muitas requisições. Aguarde alguns segundos (429)."
+    elseif code >= 500 then return nil, "⚠ Servidor temporariamente indisponível ("..code..")."
+    else return nil, "⚠ Erro HTTP "..code end
+end
+
+-- Execução segura do script
+local function ExecuteCatalogScript(rawScript, scriptInline)
+    local source = nil
+    if scriptInline and scriptInline ~= "" then
+        source = scriptInline
+    elseif rawScript and rawScript ~= "" then
+        local ok, fetched = pcall(function()
+            return game:HttpGet(rawScript)
+        end)
+        if ok and fetched and #fetched > 10 then source = fetched end
+    end
+    if not source then
+        showToast("⚠ Nenhum código executável disponível", "warning")
+        return false
+    end
+    local ok, err = pcall(function()
+        loadstring(source)()
+    end)
+    if ok then
+        showToast("✓ Script executado!", "success")
+        return true
+    else
+        warn("[AKZ] Erro ao executar script: " .. tostring(err))
+        showToast("⚠ Falha ao executar script", "error")
+        return false
+    end
+end
+
+-- Interface do catálogo
+local yCat = 6
+
 local wc = Instance.new("Frame", tJogos)
 wc.BackgroundColor3 = Color3.fromRGB(35,28,5); wc.BackgroundTransparency = 0.15
-wc.BorderSizePixel = 0; wc.Position = UDim2.new(0,PAD,0,6)
-wc.Size = UDim2.new(1,-PAD*2,0,52)
+wc.BorderSizePixel = 0; wc.Position = UDim2.new(0,PAD,0,yCat)
+wc.Size = UDim2.new(1,-PAD*2,0,46)
 Instance.new("UICorner", wc).CornerRadius = UDim.new(0,7)
 local ws = Instance.new("UIStroke", wc)
 ws.Color = Color3.fromRGB(230,200,50); ws.Thickness = 1.5; ws.Transparency = 0.15
 local wt = Instance.new("TextLabel", wc)
-wt.Text = "⚠  AVISO"; wt.Font = Enum.Font.GothamBold; wt.TextSize = 10
+wt.Text = "⚠  CATÁLOGO DINÂMICO — RSCRIPTS"; wt.Font = Enum.Font.GothamBold; wt.TextSize = 9
 wt.TextColor3 = Color3.fromRGB(240,210,70); wt.BackgroundTransparency = 1
 wt.TextXAlignment = Enum.TextXAlignment.Left
-wt.Position = UDim2.new(0,10,0,4); wt.Size = UDim2.new(1,-20,0,14)
+wt.Position = UDim2.new(0,10,0,4); wt.Size = UDim2.new(1,-20,0,12)
 local wd = Instance.new("TextLabel", wc)
-wd.Text = "Os scripts desta seção são gratuitos e sem key. Não possuem vínculo oficial com o AKZ Hub."
-wd.Font = Enum.Font.Gotham; wd.TextSize = 9
+wd.Text = "Scripts revisados e filtrados. Execute por sua conta e risco."
+wd.Font = Enum.Font.Gotham; wd.TextSize = 8
 wd.TextColor3 = Color3.fromRGB(220,200,140); wd.TextWrapped = true
 wd.BackgroundTransparency = 1
-wd.Position = UDim2.new(0,10,0,20); wd.Size = UDim2.new(1,-20,0,28)
+wd.Position = UDim2.new(0,10,0,18); wd.Size = UDim2.new(1,-20,0,24)
 wd.TextXAlignment = Enum.TextXAlignment.Left; wd.TextYAlignment = Enum.TextYAlignment.Top
+yCat = yCat + 52
 
-local currentGame = GameModule.getCurrent()
-local curLbl = Instance.new("TextLabel", tJogos)
-curLbl.Font = Enum.Font.GothamMedium; curLbl.TextSize = 10
-curLbl.BackgroundTransparency = 1; curLbl.TextXAlignment = Enum.TextXAlignment.Left
-curLbl.Position = UDim2.new(0,PAD+2,0,62); curLbl.Size = UDim2.new(1,-PAD*2,0,14)
-if currentGame then
-    curLbl.Text = "✓ Jogo suportado: "..currentGame.name
-    curLbl.TextColor3 = Color3.fromRGB(120,220,120)
-else
-    curLbl.Text = "⚠ Este jogo não possui suporte atualmente."
-    curLbl.TextColor3 = Color3.fromRGB(220,180,80)
+local searchBox = C.search(tJogos, yCat, nil)
+yCat = yCat + 34
+
+-- Filtros
+local filterRow = Instance.new("Frame", tJogos)
+filterRow.BackgroundTransparency = 1
+filterRow.Position = UDim2.new(0,PAD,0,yCat); filterRow.Size = UDim2.new(1,-PAD*2,0,26)
+
+local function makeFilterChip(parent, text, xOff, w, initialState, onChange)
+    local btn = Instance.new("TextButton", parent)
+    btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 9
+    btn.TextColor3 = initialState and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140)
+    btn.BackgroundColor3 = initialState and Color3.fromRGB(140,25,25) or Color3.fromRGB(25,8,8)
+    btn.BorderSizePixel = 0; btn.AutoButtonColor = false
+    btn.Position = UDim2.new(0,xOff,0,0); btn.Size = UDim2.new(0,w,0,24)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,5)
+    local s = Instance.new("UIStroke", btn)
+    s.Color = initialState and Color3.fromRGB(200,50,50) or Color3.fromRGB(80,20,20)
+    s.Thickness = 1; s.Transparency = initialState and 0.2 or 0.5
+    btn.MouseButton1Click:Connect(function()
+        local newState = not initialState
+        initialState = newState
+        btn.TextColor3 = newState and Color3.fromRGB(255,255,255) or Color3.fromRGB(140,140,140)
+        btn.BackgroundColor3 = newState and Color3.fromRGB(140,25,25) or Color3.fromRGB(25,8,8)
+        s.Color = newState and Color3.fromRGB(200,50,50) or Color3.fromRGB(80,20,20)
+        s.Transparency = newState and 0.2 or 0.5
+        if onChange then onChange(newState) end
+    end)
+    return btn
 end
 
-local searchInput = C.search(tJogos, 80, nil)
-local cards = {}
-local function renderGames(filter)
-    filter = (filter or ""):lower()
-    for _, c in ipairs(cards) do c:Destroy() end
-    cards = {}
-    local y, found = 114, 0
-    for _, g in ipairs(GameModule.games) do
-        if filter == "" or g.name:lower():find(filter,1,true) then
-            local c = Instance.new("Frame", tJogos)
-            c.BackgroundColor3 = Color3.fromRGB(18,6,6); c.BackgroundTransparency = 0.3
-            c.BorderSizePixel = 0; c.Position = UDim2.new(0,PAD,0,y)
-            c.Size = UDim2.new(1,-PAD*2,0,72)
-            Instance.new("UICorner", c).CornerRadius = UDim.new(0,7)
-            local s = Instance.new("UIStroke", c)
-            s.Color = Color3.fromRGB(100,20,20); s.Thickness = 1; s.Transparency = 0.5
-            local ifrm = Instance.new("Frame", c)
-            ifrm.BackgroundColor3 = Color3.fromRGB(35,10,10); ifrm.BorderSizePixel = 0
-            ifrm.Position = UDim2.new(0,8,0,10); ifrm.Size = UDim2.new(0,34,0,34)
-            Instance.new("UICorner", ifrm).CornerRadius = UDim.new(0,6)
-            local il = Instance.new("TextLabel", ifrm)
-            il.Text = g.icon; il.Font = Enum.Font.GothamBold; il.TextSize = 16
-            il.BackgroundTransparency = 1; il.Size = UDim2.new(1,0,1,0)
-            local nl = Instance.new("TextLabel", c)
-            nl.Text = g.name; nl.Font = Enum.Font.GothamBold; nl.TextSize = 11
-            nl.TextColor3 = Color3.fromRGB(255,255,255)
-            nl.TextXAlignment = Enum.TextXAlignment.Left; nl.BackgroundTransparency = 1
-            nl.Position = UDim2.new(0,50,0,8); nl.Size = UDim2.new(1,-125,0,14)
-            if currentGame and currentGame.id == g.id then
-                local cur = Instance.new("TextLabel", c)
-                cur.Text = "● JOGO ATUAL"; cur.Font = Enum.Font.GothamBold
-                cur.TextSize = 8; cur.TextColor3 = Color3.fromRGB(120,220,120)
-                cur.BackgroundTransparency = 1
-                cur.Position = UDim2.new(0,50,0,22); cur.Size = UDim2.new(0,80,0,12)
-            end
-            local dl = Instance.new("TextLabel", c)
-            dl.Text = g.desc or ""; dl.Font = Enum.Font.Gotham; dl.TextSize = 9
-            dl.TextColor3 = Color3.fromRGB(160,160,160)
-            dl.TextXAlignment = Enum.TextXAlignment.Left; dl.TextWrapped = true
-            dl.BackgroundTransparency = 1
-            dl.Position = UDim2.new(0,50,0,(currentGame and currentGame.id == g.id) and 34 or 22)
-            dl.Size = UDim2.new(1,-60,0,32)
-            local eb = Instance.new("TextButton", c)
-            eb.Font = Enum.Font.GothamBold; eb.Text = "▶"
-            eb.TextSize = 12; eb.TextColor3 = Color3.fromRGB(255,255,255)
-            eb.BackgroundColor3 = Color3.fromRGB(140,25,25)
-            eb.BorderSizePixel = 0; eb.AutoButtonColor = false
-            eb.AnchorPoint = Vector2.new(1,0)
-            eb.Position = UDim2.new(1,-8,0,8); eb.Size = UDim2.new(0,30,0,24)
-            Instance.new("UICorner", eb).CornerRadius = UDim.new(0,5)
-            local sl = Instance.new("TextLabel", c)
-            sl.Text = ""; sl.Font = Enum.Font.GothamMedium; sl.TextSize = 8
-            sl.TextColor3 = Color3.fromRGB(120,220,120)
-            sl.TextXAlignment = Enum.TextXAlignment.Right; sl.BackgroundTransparency = 1
-            sl.AnchorPoint = Vector2.new(1,0)
-            sl.Position = UDim2.new(1,-8,0,36); sl.Size = UDim2.new(0,120,0,12)
-            eb.MouseEnter:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(180,40,40)}) end)
-            eb.MouseLeave:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(140,25,25)}) end)
-            local running = false
-            eb.MouseButton1Click:Connect(function()
-                if running then
-                    showToast("⏳ Já está carregando...", "warning")
-                    return
+local chipNoKey = makeFilterChip(filterRow, "🔑 Sem Key", 0, 88, true, function(s)
+    CatalogState.filters.noKey = s
+    CatalogState.page = 1
+    if searchBox then searchBox.Text = searchBox.Text end
+end)
+local chipMobile = makeFilterChip(filterRow, "📱 Mobile", 94, 76, true, function(s)
+    CatalogState.filters.mobile = s
+    CatalogState.page = 1
+    if searchBox then searchBox.Text = searchBox.Text end
+end)
+local chipFree = makeFilterChip(filterRow, "🆓 Grátis", 176, 76, true, function(s)
+    CatalogState.filters.free = s
+    CatalogState.page = 1
+    if searchBox then searchBox.Text = searchBox.Text end
+end)
+yCat = yCat + 32
+
+local resultScroll = Instance.new("ScrollingFrame", tJogos)
+resultScroll.BackgroundTransparency = 1; resultScroll.BorderSizePixel = 0
+resultScroll.Position = UDim2.new(0,0,0,yCat)
+resultScroll.Size = UDim2.new(1,0,1,-yCat-40)
+resultScroll.CanvasSize = UDim2.new(0,0,0,0)
+resultScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+resultScroll.ScrollBarThickness = 2
+resultScroll.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
+resultScroll.ScrollBarImageTransparency = 0.3
+
+local statusBar = Instance.new("Frame", tJogos)
+statusBar.BackgroundColor3 = Color3.fromRGB(18,6,6); statusBar.BackgroundTransparency = 0.35
+statusBar.BorderSizePixel = 0
+statusBar.Position = UDim2.new(0,PAD,1,-36); statusBar.Size = UDim2.new(1,-PAD*2,0,28)
+Instance.new("UICorner", statusBar).CornerRadius = UDim.new(0,6)
+
+local statusLabel = Instance.new("TextLabel", statusBar)
+statusLabel.Text = "Pronto"; statusLabel.Font = Enum.Font.Gotham; statusLabel.TextSize = 9
+statusLabel.TextColor3 = Color3.fromRGB(180,180,180); statusLabel.BackgroundTransparency = 1
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Position = UDim2.new(0,8,0,0); statusLabel.Size = UDim2.new(0.5,0,1,0)
+
+local prevBtn = Instance.new("TextButton", statusBar)
+prevBtn.Text = "◀"; prevBtn.Font = Enum.Font.GothamBold; prevBtn.TextSize = 10
+prevBtn.TextColor3 = Color3.fromRGB(255,255,255); prevBtn.BackgroundColor3 = Color3.fromRGB(60,15,15)
+prevBtn.BorderSizePixel = 0; prevBtn.AutoButtonColor = false
+prevBtn.AnchorPoint = Vector2.new(1,0)
+prevBtn.Position = UDim2.new(1,-70,0,4); prevBtn.Size = UDim2.new(0,26,0,20)
+Instance.new("UICorner", prevBtn).CornerRadius = UDim.new(0,4)
+
+local pageLabel = Instance.new("TextLabel", statusBar)
+pageLabel.Text = "1 / 1"; pageLabel.Font = Enum.Font.GothamBold; pageLabel.TextSize = 9
+pageLabel.TextColor3 = Color3.fromRGB(220,60,60); pageLabel.BackgroundTransparency = 1
+pageLabel.AnchorPoint = Vector2.new(1,0)
+pageLabel.Position = UDim2.new(1,-40,0,0); pageLabel.Size = UDim2.new(0,30,1,0)
+
+local nextBtn = Instance.new("TextButton", statusBar)
+nextBtn.Text = "▶"; nextBtn.Font = Enum.Font.GothamBold; nextBtn.TextSize = 10
+nextBtn.TextColor3 = Color3.fromRGB(255,255,255); nextBtn.BackgroundColor3 = Color3.fromRGB(60,15,15)
+nextBtn.BorderSizePixel = 0; nextBtn.AutoButtonColor = false
+nextBtn.AnchorPoint = Vector2.new(1,0)
+nextBtn.Position = UDim2.new(1,-8,0,4); nextBtn.Size = UDim2.new(0,26,0,20)
+Instance.new("UICorner", nextBtn).CornerRadius = UDim.new(0,4)
+
+-- Renderização de cards
+local function RenderResults(data)
+    for _, c in ipairs(resultScroll:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then c:Destroy() end
+    end
+    local scripts = data and data.data and data.data.scripts or {}
+    if #scripts == 0 then
+        local nl = Instance.new("TextLabel", resultScroll)
+        nl.Text = "🔍 Nenhum script encontrado.\nTente:\n• outro nome\n• remover algum filtro\n• desativar Mobile\n• desativar Sem Key"
+        nl.Font = Enum.Font.Gotham; nl.TextSize = 10
+        nl.TextColor3 = Color3.fromRGB(160,160,160); nl.TextWrapped = true
+        nl.BackgroundTransparency = 1
+        nl.Position = UDim2.new(0,PAD,0,20); nl.Size = UDim2.new(1,-PAD*2,0,80)
+        nl.TextXAlignment = Enum.TextXAlignment.Left; nl.TextYAlignment = Enum.TextYAlignment.Top
+        return
+    end
+    local yCard = 6
+    for _, s in ipairs(scripts) do
+        local card = Instance.new("Frame", resultScroll)
+        card.BackgroundColor3 = Color3.fromRGB(18,6,6); card.BackgroundTransparency = 0.3
+        card.BorderSizePixel = 0; card.Position = UDim2.new(0,PAD,0,yCard)
+        card.Size = UDim2.new(1,-PAD*2,0,92)
+        Instance.new("UICorner", card).CornerRadius = UDim.new(0,7)
+        local cs = Instance.new("UIStroke", card)
+        cs.Color = Color3.fromRGB(100,20,20); cs.Thickness = 1; cs.Transparency = 0.5
+
+        local title = Instance.new("TextLabel", card)
+        title.Text = s.title or s.name or "Sem título"
+        title.Font = Enum.Font.GothamBold; title.TextSize = 10
+        title.TextColor3 = Color3.fromRGB(255,255,255); title.BackgroundTransparency = 1
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Position = UDim2.new(0,10,0,6); title.Size = UDim2.new(1,-20,0,14)
+        title.TextTruncate = Enum.TextTruncate.AtEnd
+
+        local gameName = (s.game and (s.game.title or s.game.name)) or s.gameName or "Universal"
+        local gLbl = Instance.new("TextLabel", card)
+        gLbl.Text = "🎮 " .. gameName; gLbl.Font = Enum.Font.Gotham; gLbl.TextSize = 9
+        gLbl.TextColor3 = Color3.fromRGB(200,200,200); gLbl.BackgroundTransparency = 1
+        gLbl.TextXAlignment = Enum.TextXAlignment.Left
+        gLbl.Position = UDim2.new(0,10,0,22); gLbl.Size = UDim2.new(0.6,0,0,12)
+        gLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+        local tagY = 36
+        local function addTag(text, color)
+            local t = Instance.new("TextLabel", card)
+            t.Text = text; t.Font = Enum.Font.GothamBold; t.TextSize = 8
+            t.TextColor3 = color or Color3.fromRGB(180,180,180)
+            t.BackgroundTransparency = 1
+            t.TextXAlignment = Enum.TextXAlignment.Left
+            t.Position = UDim2.new(0,10,0,tagY); t.Size = UDim2.new(0.6,0,0,12)
+            tagY = tagY + 12
+        end
+        if s.isMobileReady or s.mobile then addTag("📱 Mobile", Color3.fromRGB(100,200,100)) end
+        if (s.isKeySystem == false) or (s.noKey == true) then addTag("🔑 No Key", Color3.fromRGB(100,180,220)) end
+        if (s.isPaid == false) or (s.free == true) then addTag("🆓 Free", Color3.fromRGB(220,200,80)) end
+        local riskLevel = s.risk and (s.risk.level or s.risk) or s.riskLevel
+        if riskLevel then
+            local rc = (riskLevel == "Safe" or riskLevel == "Low") and Color3.fromRGB(80,200,80)
+                or ((riskLevel == "Medium" or riskLevel == "Moderate") and Color3.fromRGB(220,200,80) or Color3.fromRGB(220,80,80))
+            addTag("⚠ Risk: "..tostring(riskLevel), rc)
+        end
+        local creatorName = s.creator and (s.creator.username or s.creator.name) or s.author
+        if creatorName then
+            addTag("👤 "..tostring(creatorName), Color3.fromRGB(160,160,160))
+        end
+
+        local execBtn = Instance.new("TextButton", card)
+        execBtn.Text = "▶ EXECUTAR"; execBtn.Font = Enum.Font.GothamBold; execBtn.TextSize = 10
+        execBtn.TextColor3 = Color3.fromRGB(255,255,255); execBtn.BackgroundColor3 = Color3.fromRGB(140,25,25)
+        execBtn.BorderSizePixel = 0; execBtn.AutoButtonColor = false
+        execBtn.AnchorPoint = Vector2.new(1,1)
+        execBtn.Position = UDim2.new(1,-8,1,-6); execBtn.Size = UDim2.new(0,100,0,24)
+        Instance.new("UICorner", execBtn).CornerRadius = UDim.new(0,5)
+        execBtn.MouseEnter:Connect(function() tween(execBtn, 0.12, {BackgroundColor3 = Color3.fromRGB(180,40,40)}) end)
+        execBtn.MouseLeave:Connect(function() tween(execBtn, 0.12, {BackgroundColor3 = Color3.fromRGB(140,25,25)}) end)
+        execBtn.MouseButton1Click:Connect(function()
+            execBtn.Text = "⏳..."; execBtn.BackgroundColor3 = Color3.fromRGB(180,150,40)
+            local ok = ExecuteCatalogScript(s.rawScript or s.script or s.code, nil)
+            execBtn.Text = ok and "✓ EXECUTADO" or "⚠ ERRO"
+            execBtn.BackgroundColor3 = ok and Color3.fromRGB(60,180,90) or Color3.fromRGB(180,40,40)
+            task.delay(2, function()
+                if execBtn and execBtn.Parent then
+                    execBtn.Text = "▶ EXECUTAR"
+                    execBtn.BackgroundColor3 = Color3.fromRGB(140,25,25)
                 end
-                running = true
-                eb.Text = "⏳"
-                sl.Text = "Carregando..."
-                sl.TextColor3 = Color3.fromRGB(220,200,80)
-                GameModule.execute(g, function(msg, kind)
-                    sl.Text = msg
-                    sl.TextColor3 = kind == "success" and Color3.fromRGB(120,220,120)
-                        or (kind == "error" and Color3.fromRGB(220,80,80) or Color3.fromRGB(220,200,80))
-                end)
-                task.wait(0.8)
-                eb.Text = "▶"
-                running = false
             end)
-            table.insert(cards, c)
-            y = y + 78
-            found = found + 1
+        end)
+
+        yCard = yCard + 98
+    end
+end
+
+-- Paginação
+local function applyPagination(pag)
+    CatalogState.totalPages = pag.totalPages or 1
+    CatalogState.hasNext = pag.hasNextPage or false
+    CatalogState.hasPrev = pag.hasPrevPage or false
+    prevBtn.BackgroundColor3 = CatalogState.hasPrev and Color3.fromRGB(60,15,15) or Color3.fromRGB(30,8,8)
+    nextBtn.BackgroundColor3 = CatalogState.hasNext and Color3.fromRGB(60,15,15) or Color3.fromRGB(30,8,8)
+    pageLabel.Text = tostring(CatalogState.page) .. " / " .. tostring(CatalogState.totalPages)
+end
+
+-- Busca principal
+local function DoSearch(query, page, skipCache)
+    if CatalogState.loading then return end
+    query = query or CatalogState.query
+    page = page or CatalogState.page
+    CatalogState.query = query
+    CatalogState.page = page
+
+    local cacheKey = (query or "") .. "|" .. tostring(CatalogState.filters.noKey)
+        .. "|" .. tostring(CatalogState.filters.mobile)
+        .. "|" .. tostring(CatalogState.filters.free)
+        .. "|" .. tostring(page) .. "|" .. CatalogState.sort
+
+    if Config.CacheEnabled and not skipCache then
+        local cached = Cache[cacheKey]
+        if cached and (tick() - cached.time) < Config.CacheDuration then
+            RenderResults(cached.data)
+            local pag = cached.data.meta and cached.data.meta.pagination
+                and cached.data.meta.pagination.scripts or {}
+            applyPagination(pag)
+            local count = #((cached.data.data and cached.data.data.scripts) or {})
+            statusLabel.Text = "Cache • " .. tostring(count) .. " resultados"
+            return
         end
     end
-    if found == 0 then
-        local nr = Instance.new("TextLabel", tJogos)
-        nr.Text = "🔍 Nenhum jogo encontrado."
-        nr.Font = Enum.Font.Gotham; nr.TextSize = 11
-        nr.TextColor3 = Color3.fromRGB(160,160,160); nr.BackgroundTransparency = 1
-        nr.Position = UDim2.new(0,PAD,0,y+14); nr.Size = UDim2.new(1,-PAD*2,0,16)
-        table.insert(cards, nr)
+
+    CatalogState.loading = true
+    statusLabel.Text = "⏳ Pesquisando scripts..."
+    for _, c in ipairs(resultScroll:GetChildren()) do
+        if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then c:Destroy() end
     end
+    local loading = Instance.new("TextLabel", resultScroll)
+    loading.Name = "Loading"
+    loading.Text = "⏳ Carregando..."; loading.Font = Enum.Font.Gotham; loading.TextSize = 11
+    loading.TextColor3 = Color3.fromRGB(200,200,200); loading.BackgroundTransparency = 1
+    loading.Position = UDim2.new(0,0,0,40); loading.Size = UDim2.new(1,0,0,20)
+
+    task.spawn(function()
+        local url = BuildURL(query, CatalogState.filters, page, CatalogState.sort)
+        local data, err = FetchScripts(url)
+        CatalogState.loading = false
+
+        if loading and loading.Parent then loading:Destroy() end
+
+        if not data then
+            statusLabel.Text = err or "⚠ Falha na requisição"
+            statusLabel.TextColor3 = Color3.fromRGB(220,80,80)
+            local retry = Instance.new("TextButton", resultScroll)
+            retry.Text = "↻ TENTAR NOVAMENTE"
+            retry.Font = Enum.Font.GothamBold; retry.TextSize = 10
+            retry.TextColor3 = Color3.fromRGB(255,255,255); retry.BackgroundColor3 = Color3.fromRGB(140,25,25)
+            retry.BorderSizePixel = 0; retry.AutoButtonColor = false
+            retry.Position = UDim2.new(0.5,-70,0,60); retry.Size = UDim2.new(0,140,0,28)
+            Instance.new("UICorner", retry).CornerRadius = UDim.new(0,5)
+            retry.MouseButton1Click:Connect(function()
+                retry:Destroy()
+                DoSearch(query, page, true)
+            end)
+            return
+        end
+
+        statusLabel.TextColor3 = Color3.fromRGB(180,180,180)
+        local scripts = (data.data and data.data.scripts) or {}
+        local pag = (data.meta and data.meta.pagination and data.meta.pagination.scripts) or {}
+        applyPagination(pag)
+        statusLabel.Text = tostring(#scripts) .. " resultados • Página " .. page .. "/" .. CatalogState.totalPages
+
+        if Config.CacheEnabled then
+            Cache[cacheKey] = { data = data, time = tick() }
+        end
+        RenderResults(data)
+    end)
 end
-searchInput:GetPropertyChangedSignal("Text"):Connect(function() renderGames(searchInput.Text) end)
-renderGames("")
+
+-- Eventos
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    DebounceToken = DebounceToken + 1
+    local token = DebounceToken
+    task.delay(0.4, function()
+        if token ~= DebounceToken then return end
+        DoSearch(searchBox.Text, 1)
+    end)
+end)
+
+prevBtn.MouseButton1Click:Connect(function()
+    if CatalogState.hasPrev and not CatalogState.loading then
+        DoSearch(CatalogState.query, CatalogState.page - 1)
+    end
+end)
+
+nextBtn.MouseButton1Click:Connect(function()
+    if CatalogState.hasNext and not CatalogState.loading then
+        DoSearch(CatalogState.query, CatalogState.page + 1)
+    end
+end)
+
+-- Detecção automática do jogo atual
+task.spawn(function()
+    task.wait(0.5)
+    local ok, info = pcall(function()
+        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+    end)
+    if ok and info then
+        statusLabel.Text = "🎮 " .. info.Name .. " — buscando scripts..."
+        local url = Config.APIEndpoint .. "?placeId=" .. tostring(game.PlaceId)
+            .. "&limit=" .. tostring(Config.ResultsPerPage) .. "&page=1"
+        task.spawn(function()
+            local data, err = FetchScripts(url)
+            if data then
+                CatalogState.page = 1
+                local scripts = (data.data and data.data.scripts) or {}
+                local pag = (data.meta and data.meta.pagination and data.meta.pagination.scripts) or {}
+                applyPagination(pag)
+                statusLabel.Text = tostring(#scripts) .. " scripts para " .. info.Name
+                RenderResults(data)
+            else
+                statusLabel.Text = "⚠ " .. (err or "Sem scripts para este jogo")
+                DoSearch("", 1)
+            end
+        end)
+    else
+        DoSearch("", 1)
+    end
+end)
 
 -- ══════════════════════════════════════════════════════════
 -- ABA 3: STATUS
@@ -1760,10 +2072,10 @@ end)
 local tSob = createTabContent("Sobre")
 y = 6
 y = C.section(tSob, "Info", y)
-C.button(tSob, "AKZ HUB — V1", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "AKZ HUB — V1 + RScripts", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "Dev: Akira / Angel (mesmo criador)", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "19 abas • 250+ features", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "13 jogos keyless integrados", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Catálogo dinâmico RScripts", y, function() end); y = y + BTN_H + GAP
 y = C.section(tSob, "Créditos Open Source", y)
 C.button(tSob, "Infinite Yield — Edge", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "AirHub V2 — Exunys", y, function() end); y = y + BTN_H + GAP
@@ -1772,6 +2084,7 @@ C.button(tSob, "FlyGuiV3 — XNEOFF", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "Sp3arParvus — JakeHukari", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "KaguHub — Kaguya11", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "ZaZa Hub — Berkcan61", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "RScripts API — rscripts.net", y, function() end); y = y + BTN_H + GAP
 C.button(tSob, "Discord: discord.gg/kc7myVSq3", y, function()
     if setclipboard then
         setclipboard("https://discord.gg/kc7myVSq3")
@@ -1872,5 +2185,5 @@ makeDraggable(Act, nil, function()
     if Home.Visible then showToast("Menu aberto", "info") end
 end)
 
-print("[AKZ HUB V1] Carregado! 19 abas — by: Akira / Angel")
+print("[AKZ HUB V1 + RScripts] Carregado! 19 abas — by: Akira / Angel")
 showToast("✓ AKZ HUB carregado!", "success")
