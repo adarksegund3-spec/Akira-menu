@@ -186,6 +186,23 @@ local ICONS = {
     games   = {id = "16736723178", decal = true},
     gamer   = {},
     dev     = {id = "10885640695", decal = true},   -- se não carregar, troque por {fb = "crown"}
+    -- lista nova (Creator Store). Algum em branco/escuro? Troque por {fb = "outro_icone"}
+    crown2  = {id = "1092787192", decal = true},
+    creator = {id = "10885652202", decal = true},
+    owner   = {id = "10885637368", decal = true},
+    star    = {id = "17882171697", decal = true},
+    gamehub = {id = "4943108454", decal = true},
+    gamepass= {id = "130675933568490", decal = true},
+    gamelogo= {id = "16908349663", decal = true},
+    home    = {id = "42773042", decal = true},
+    code    = {id = "10400885466", decal = true},
+    devlogo = {id = "3300971588", decal = true},
+    settings= {id = "87347743901802", decal = true},
+    search  = {id = "5107220223", decal = true},
+    arrow   = {id = "72178835386540", decal = true},
+    close   = {id = "5107150321", decal = true},
+    check   = {id = "8541911223", decal = true},
+    warn    = {id = "2328131581", decal = true},
 }
 
 local function iconDef(key)
@@ -199,13 +216,18 @@ end
 local IconMap = {
     autoBtn = "click",   -- ícone padrão no canto dos botões de ação (nil = desliga)
     sections = {
-        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Tema"] = "keys",
+        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Tema"] = "settings",
         ["Atalhos Rápidos"] = "click", ["Info"] = "hacker", ["Créditos Open Source"] = "link",
-        ["Hubs Universais"] = "keys", ["Hubs"] = "keys", ["Utilitários"] = "keys",
-        ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "keys",
+        ["Hubs Universais"] = "code", ["Hubs"] = "code", ["Utilitários"] = "devlogo",
+        ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "settings",
         ["Anti"] = "ok", ["ESP / Chams"] = "hood", ["Aim"] = "cod", ["Ataques"] = "cod",
-        ["Emotes"] = "gift", ["Spam"] = "discord", ["Mensagens"] = "discord",
-        ["Reset"] = "keys", ["Interface"] = "hood",
+        ["Estado"] = "check", ["Emotes"] = "gift", ["Interações"] = "star", ["Efeitos"] = "star",
+        ["Spam"] = "discord", ["Mensagens"] = "discord", ["Reset"] = "settings", ["Interface"] = "hood",
+        ["Básicos"] = "arrow", ["Fly / Extras"] = "star", ["Ações"] = "click", ["Iluminação"] = "star",
+        ["Aparência"] = "creator", ["Saúde"] = "ok", ["Time / Equipe"] = "gamepass", ["Posição"] = "arrow",
+        ["Ambiente"] = "gamehub", ["Gravidade"] = "arrow", ["Limpeza"] = "close", ["Locais"] = "home",
+        ["Players"] = "gamepass", ["Memória"] = "star", ["Sair"] = "close", ["FOV"] = "search",
+        ["Modo"] = "settings", ["Informações"] = "hacker",
     },
 }
 
@@ -344,9 +366,10 @@ local function showToast(msg, kind)
     ic.Font = Enum.Font.GothamBold; ic.TextSize = 13; ic.TextColor3 = ac
     ic.BackgroundTransparency = 1
     ic.Position = UDim2.new(0,14,0,0); ic.Size = UDim2.new(0,20,1,0)
-    if kind == "success" then
+    local tk = (kind == "success" and "ok") or ((kind == "warning" or kind == "error") and "warn") or nil
+    if tk and iconDef(tk) then
         ic.Text = ""
-        CreateIcon(t, "ok", 16, UDim2.new(0,14,0.5,-8), {fade = false})
+        CreateIcon(t, tk, 16, UDim2.new(0,14,0.5,-8), {fade = false})
     end
     local lbl = Instance.new("TextLabel", t)
     lbl.Text = msg; lbl.Font = Enum.Font.Gotham; lbl.TextSize = 11
@@ -451,10 +474,11 @@ SL.BorderSizePixel = 0; SL.Position = UDim2.new(1,-1,0,0); SL.Size = UDim2.new(0
 local Tabs, TabBtns, currentTab = {}, {}, nil
 
 local TAB_ICONS = {
-    Principal = "crown", Jogos = "games", Status = "hacker", Combate = "cod",
-    Admin = "mask", ["Diversão"] = "gift", Jogador = "gamer", Chat = "discord",
-    Servidor = "link", Utilidades = "click", Scripts = "keys", ["Proteção"] = "ok",
-    Config = "keys", Sobre = "dev",
+    Principal = "crown", Jogos = "games", Status = "hacker", Movimentos = "arrow",
+    Combate = "cod", Visual = "star", Jogador = "gamepass", Mundo = "gamehub",
+    ["Diversão"] = "gift", Admin = "mask", Teleportes = "home", Servidor = "link",
+    Chat = "discord", ["Câmera"] = "search", ["Proteção"] = "ok", Utilidades = "keys",
+    Scripts = "code", Config = "settings", Sobre = "dev",
 }
 local TAB_ICON_PAD = 30
 
@@ -740,6 +764,8 @@ function C.search(parent, y, onChange)
     ic.Text = "🔎"; ic.Font = Enum.Font.Gotham; ic.TextSize = 12
     ic.BackgroundTransparency = 1; ic.Position = UDim2.new(0,6,0,0)
     ic.Size = UDim2.new(0,20,1,0)
+    local si = CreateIcon(b, "search", 16, UDim2.new(0,8,0.5,-8), {fade = false})
+    if si then ic.Visible = false end
     local i = Instance.new("TextBox", b)
     i.PlaceholderText = "Pesquisar..."
     i.PlaceholderColor3 = Color3.fromRGB(120,120,120)
@@ -3122,6 +3148,11 @@ end)
     local TBS = Instance.new("UIStroke", ThemeBtn)
     TBS.Color = Color3.fromRGB(80, 20, 20); TBS.Thickness = 1; TBS.Transparency = 0.4
     hoverFX(ThemeBtn)
+    do
+        local tp = Instance.new("UIPadding", ThemeBtn)
+        tp.PaddingLeft = UDim.new(0, 26)
+        CreateIcon(ThemeBtn, "settings", 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6, fade = false})
+    end
 
     local CurLbl = Instance.new("TextLabel", ThemeBtn)
     CurLbl.Font = Enum.Font.GothamMedium
