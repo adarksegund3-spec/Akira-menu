@@ -178,11 +178,40 @@ local ICONS = {
     click   = {id = "110025416672748"},
     crown   = {id = "119833773196800"},
     hacker  = {id = "96862415635956"},
+    hood    = {id = "86970269949929"},
+    -- ▼ SLOTS: cole o ID entre aspas e o ícone aparece sozinho nas abas/linhas que o usam.
+    --   Enquanto estiver vazio, a aba continua com o emoji (ou usa o ícone "fb").
+    gift    = {id = "43510808", decal = true},
+    cod     = {fb = "hood"},
+    games   = {id = "16736723178", decal = true},
+    gamer   = {},
+    dev     = {id = "10885640695", decal = true},   -- se não carregar, troque por {fb = "crown"}
+}
+
+local function iconDef(key)
+    local d = ICONS[key]
+    if d and d.id then return d end
+    if d and d.fb then return iconDef(d.fb) end
+    return nil
+end
+
+-- Onde cada ícone é usado (edite aqui para trocar de lugar)
+local IconMap = {
+    autoBtn = "click",   -- ícone padrão no canto dos botões de ação (nil = desliga)
+    sections = {
+        ["Créditos"] = "dev", ["Comunidade"] = "discord", ["Tema"] = "keys",
+        ["Atalhos Rápidos"] = "click", ["Info"] = "hacker", ["Créditos Open Source"] = "link",
+        ["Hubs Universais"] = "keys", ["Hubs"] = "keys", ["Utilitários"] = "keys",
+        ["Admins"] = "mask", ["Debug"] = "hacker", ["Conexão"] = "link", ["Sistema"] = "keys",
+        ["Anti"] = "ok", ["ESP / Chams"] = "hood", ["Aim"] = "cod", ["Ataques"] = "cod",
+        ["Emotes"] = "gift", ["Spam"] = "discord", ["Mensagens"] = "discord",
+        ["Reset"] = "keys", ["Interface"] = "hood",
+    },
 }
 
 local function CreateIcon(parent, key, size, pos, opts)
     opts = opts or {}
-    local def = ICONS[key]
+    local def = iconDef(key)
     if not def then return nil end
     size = math.clamp(size or 18, 14, 28)
     local img = Instance.new("ImageLabel")
@@ -206,6 +235,19 @@ local function CreateIcon(parent, key, size, pos, opts)
         img.BackgroundTransparency = 1
     end
     img.Parent = parent
+    if def.decal then   -- ID de Decal: converte para o ID da imagem (se o executor suportar GetObjects)
+        task.spawn(function()
+            if def.resolved == nil then
+                local ok, tex = pcall(function()
+                    local o = game:GetObjects("rbxassetid://" .. def.id)[1]
+                    local d = o and (o:IsA("Decal") and o or o:FindFirstChildWhichIsA("Decal", true))
+                    return d and d.Texture
+                end)
+                def.resolved = (ok and type(tex) == "string" and tex ~= "") and tex or false
+            end
+            if def.resolved and img.Parent then img.Image = def.resolved end
+        end)
+    end
     if opts.fade ~= false then
         img.ImageTransparency = 1
         tween(img, 0.35, {ImageTransparency = 0})
@@ -408,13 +450,19 @@ SL.BorderSizePixel = 0; SL.Position = UDim2.new(1,-1,0,0); SL.Size = UDim2.new(0
 
 local Tabs, TabBtns, currentTab = {}, {}, nil
 
-local TAB_ICONS = {Status = "hacker", Admin = "mask", Scripts = "keys"}
+local TAB_ICONS = {
+    Principal = "crown", Jogos = "games", Status = "hacker", Combate = "cod",
+    Admin = "mask", ["Diversão"] = "gift", Jogador = "gamer", Chat = "discord",
+    Servidor = "link", Utilidades = "click", Scripts = "keys", ["Proteção"] = "ok",
+    Config = "keys", Sobre = "dev",
+}
 local TAB_ICON_PAD = 30
 
 local function createTabBtn(name, icon, order)
     local b = Instance.new("TextButton", Sidebar)
     b.Font = Enum.Font.GothamMedium
     local tabIcon = TAB_ICONS[name]
+    if tabIcon and not iconDef(tabIcon) then tabIcon = nil end
     b.Text = tabIcon and name or ("  "..icon.."  "..name)
     b.TextColor3 = Color3.fromRGB(140,140,140); b.TextSize = 10
     b.BackgroundColor3 = Color3.fromRGB(30,5,5); b.BackgroundTransparency = 1
@@ -502,7 +550,12 @@ function C.section(parent, title, y)
     l.Text = string.upper(title); l.Font = Enum.Font.GothamBold
     l.TextSize = 9; l.TextColor3 = Color3.fromRGB(200,60,60)
     l.TextXAlignment = Enum.TextXAlignment.Left; l.BackgroundTransparency = 1
-    l.Position = UDim2.new(0,PAD+2,0,y); l.Size = UDim2.new(1,-PAD*2,0,14)
+    local sk, off = IconMap.sections[title], 0
+    if sk and iconDef(sk) then
+        CreateIcon(parent, sk, 14, UDim2.new(0,PAD+2,0,y), {z = 5, fade = false})
+        off = 18
+    end
+    l.Position = UDim2.new(0,PAD+2+off,0,y); l.Size = UDim2.new(1,-PAD*2-off,0,14)
     local ln = Instance.new("Frame", parent)
     ln.BackgroundColor3 = Color3.fromRGB(140,25,25); ln.BackgroundTransparency = 0.6
     ln.BorderSizePixel = 0; ln.Position = UDim2.new(0,PAD+2,0,y+14)
@@ -570,19 +623,21 @@ function C.button(parent, text, y, cb, opt)
     ic.Text = "▶"; ic.Font = Enum.Font.GothamBold; ic.TextSize = 9
     ic.TextColor3 = Color3.fromRGB(220,35,35); ic.BackgroundTransparency = 1
     ic.Position = UDim2.new(1,-20,0,0); ic.Size = UDim2.new(0,14,1,0); ic.ZIndex = 6
-    if opt then
-        if opt.left then
-            local pad = Instance.new("UIPadding", b)
-            pad.PaddingLeft = UDim.new(0, 26)
-            CreateIcon(b, opt.left, 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6})
-        end
-        if opt.right then
-            local ri = CreateIcon(b, opt.right, 16, UDim2.new(1, -8, 0.5, 0), {anchor = Vector2.new(1, 0.5), z = 6})
-            if ri then
-                ic.Visible = false
-                b.MouseEnter:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -11, 0.5, 0)}) end)
-                b.MouseLeave:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -8, 0.5, 0)}) end)
-            end
+    opt = opt or {}
+    if opt.left then
+        local pad = Instance.new("UIPadding", b)
+        pad.PaddingLeft = UDim.new(0, 26)
+        CreateIcon(b, opt.left, 16, UDim2.new(0, 8 - 26, 0.5, 0), {anchor = Vector2.new(0, 0.5), z = 6})
+    end
+    local rk = opt.right
+    if rk == nil and not opt.none then rk = IconMap.autoBtn end
+    if rk then
+        local ri = CreateIcon(b, rk, 16, UDim2.new(1, -8, 0.5, 0),
+            {anchor = Vector2.new(1, 0.5), z = 6, fade = (opt.right ~= nil)})
+        if ri then
+            ic.Visible = false
+            b.MouseEnter:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -11, 0.5, 0)}) end)
+            b.MouseLeave:Connect(function() tween(ri, 0.12, {Position = UDim2.new(1, -8, 0.5, 0)}) end)
         end
     end
     hoverFX(b)
@@ -900,7 +955,7 @@ do
     local cr = C.card(tPrin, y, 120)
     lbl(cr, "AKZ HUB", 16, WHITE, Enum.Font.GothamBold, 12, 10, 24, 20)
     lbl(cr, "V1 — Premium Edition", 9, Color3.fromRGB(220,60,60), Enum.Font.GothamMedium, 12, 30, 24, 12)
-    CreateIcon(cr, "crown", 16, UDim2.new(0, 12, 0, 47))
+    CreateIcon(cr, "dev", 16, UDim2.new(0, 12, 0, 47))
     lbl(cr, "Desenvolvedor:  Akira / Angel", 10, LIGHT, Enum.Font.Gotham, 34, 48, 46, 14)
     lbl(cr, "\"Akira e Angel são 2 nicks do mesmo Criador.\"", 9, Color3.fromRGB(220,160,160), Enum.Font.GothamMedium, 12, 63, 24, 12)
     local dsc = lbl(cr, "Este script foi desenvolvido com muita dedicação, buscando oferecer uma experiência prática, moderna e funcional para diferentes jogos.", 9, Color3.fromRGB(170,170,170), Enum.Font.Gotham, 12, 80, 24, 36)
@@ -1770,6 +1825,8 @@ for _, d in ipairs({
     b.TextColor3 = Color3.fromRGB(80,220,80); b.BackgroundTransparency = 1
     b.Position = UDim2.new(0,12,0,rowY); b.Size = UDim2.new(0,12,0,14)
     b.TextXAlignment = Enum.TextXAlignment.Left
+    local okDot = CreateIcon(sc, "ok", 14, UDim2.new(0,10,0,rowY), {fade = false})
+    if okDot then b.Visible = false end
     local lb = Instance.new("TextLabel", sc)
     lb.Text = d.l..":"; lb.Font = Enum.Font.Gotham; lb.TextSize = 10
     lb.TextColor3 = Color3.fromRGB(170,170,170); lb.BackgroundTransparency = 1
@@ -2727,19 +2784,19 @@ end)
 local tSob = createTabContent("Sobre")
 y = 6
 y = C.section(tSob, "Info", y)
-C.button(tSob, "AKZ HUB — V1", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "Dev: Akira / Angel (mesmo criador)", y, function() end, {left = "crown"}); y = y + BTN_H + GAP
-C.button(tSob, "19 abas • 250+ features", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "13 jogos keyless integrados", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "AKZ HUB — V1", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "Dev: Akira / Angel (mesmo criador)", y, function() end, {left = "dev", none = true}); y = y + BTN_H + GAP
+C.button(tSob, "19 abas • 250+ features", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "13 jogos keyless integrados", y, function() end, {none = true}); y = y + BTN_H + GAP
 C.button(tSob, "Compatível: Delta Executor", y, function() end, {left = "delta", right = "ok"}); y = y + BTN_H + GAP
 y = C.section(tSob, "Créditos Open Source", y)
-C.button(tSob, "Infinite Yield — Edge", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "AirHub V2 — Exunys", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "Universal ESP/Aimbot — zzerexx", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "FlyGuiV3 — XNEOFF", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "Sp3arParvus — JakeHukari", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "KaguHub — Kaguya11", y, function() end); y = y + BTN_H + GAP
-C.button(tSob, "ZaZa Hub — Berkcan61", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Infinite Yield — Edge", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "AirHub V2 — Exunys", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "Universal ESP/Aimbot — zzerexx", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "FlyGuiV3 — XNEOFF", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "Sp3arParvus — JakeHukari", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "KaguHub — Kaguya11", y, function() end, {none = true}); y = y + BTN_H + GAP
+C.button(tSob, "ZaZa Hub — Berkcan61", y, function() end, {none = true}); y = y + BTN_H + GAP
 C.button(tSob, "Discord: discord.gg/kc7myVSq3", y, function()
     if setclipboard then
         setclipboard("https://discord.gg/kc7myVSq3")
