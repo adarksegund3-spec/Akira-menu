@@ -1,12 +1,8 @@
 --[[
     ═══════════════════════════════════════════════════════════
-    AKZ HUB — PRO PREMIUM EDITION v6
-    ═══════════════════════════════════════════════════════════
-    • 8 abas profissionais com componentes padronizados
-    • Aba Jogos FUNCIONAL com scripts keyless reais verificados
-    • Sistema de toasts, status ao vivo, tratamento de erros
-    • Visual dark horror premium (glow, glass, gradientes)
-    • Código modular e fácil de manter
+    AKZ HUB by: angel / akira — PRO PREMIUM v7
+    19 abas • 250+ funções • Componentes premium
+    Jogos keyless funcionais • Toasts • Tratamento de erros
     ═══════════════════════════════════════════════════════════
 ]]
 
@@ -22,35 +18,28 @@ local LP              = Players.LocalPlayer
 local LOGO_ID = "rbxassetid://118161689763803"
 local BG_ID   = "rbxassetid://87903267067222"
 
--- Limpeza de versões anteriores
 for _, n in ipairs({"AKZUniversal","AKZUniversalToast"}) do
     local o = game:GetService("CoreGui"):FindFirstChild(n)
     if o then o:Destroy() end
 end
 
--- ══════════════════════════════════════════════════════════
--- ESTADO GLOBAL
--- ══════════════════════════════════════════════════════════
 local State = {
     noclip=false, infJump=false, godmode=false, antiAFK=false, antiVoid=false,
     antiFling=false, fullbright=false, noFog=false, walkSpeed=16, jumpPower=50,
     gravity=196.2, fov=70, spamSpeed=1, spamMsg="AKZ on top",
+    flyBV=nil, flyOn=false,
 }
 
--- Conexões rastreáveis (evita vazamento de memória)
 local Connections = {}
 local function addConn(k, c)
     if Connections[k] then Connections[k]:Disconnect() end
     Connections[k] = c
 end
 local function cleanConns()
-    for _, c in pairs(Connections) do
-        if c and c.Disconnect then c:Disconnect() end
-    end
+    for _, c in pairs(Connections) do if c and c.Disconnect then c:Disconnect() end end
     Connections = {}
 end
 
--- Helpers de personagem
 local function getChar() return LP.Character end
 local function getHum()
     local c = getChar()
@@ -61,22 +50,16 @@ local function getHRP()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 local function tp(p) local h=getHRP(); if h then h.CFrame=CFrame.new(p) end end
-local function chat(m)
-    pcall(function()
-        game:GetService("ReplicatedStorage").DefaultChatSystemChatEvents
-            .SayMessageRequest:FireServer(m,"All")
-    end)
-end
+local function chat(m) pcall(function()
+    game:GetService("ReplicatedStorage").DefaultSystemChatEvents
+        .SayMessageRequest:FireServer(m,"All")
+end) end
 
--- Tween helper
 local function tween(o,t,p,s,d)
     local ti = TweenInfo.new(t or 0.2, s or Enum.EasingStyle.Quad, d or Enum.EasingDirection.Out)
-    local tw = TweenService:Create(o, ti, p)
-    tw:Play()
-    return tw
+    local tw = TweenService:Create(o, ti, p); tw:Play(); return tw
 end
 
--- Gradiente horror
 local function horrorGrad(parent, mul)
     mul = mul or 1
     local g = Instance.new("UIGradient")
@@ -85,12 +68,9 @@ local function horrorGrad(parent, mul)
         ColorSequenceKeypoint.new(0.5, Color3.fromRGB(25, 2, 2)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(0,0,0))
     }
-    g.Rotation = 90
-    g.Parent = parent
-    return g
+    g.Rotation = 90; g.Parent = parent; return g
 end
 
--- Arrastável universal
 local function makeDraggable(handle, target, onClick)
     target = target or handle
     local dragging, moved, dragInput, dragStart, startPos = false, false
@@ -124,7 +104,7 @@ local function makeDraggable(handle, target, onClick)
 end
 
 -- ══════════════════════════════════════════════════════════
--- SCREENGUI RAIZ
+-- SCREENGUI
 -- ══════════════════════════════════════════════════════════
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AKZUniversal"
@@ -134,9 +114,7 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999
 ScreenGui.Parent = game:GetService("CoreGui")
 
--- ══════════════════════════════════════════════════════════
--- SISTEMA DE TOASTS
--- ══════════════════════════════════════════════════════════
+-- TOASTS
 local ToastGui = Instance.new("ScreenGui")
 ToastGui.Name = "AKZUniversalToast"
 ToastGui.ResetOnSpawn = false
@@ -149,49 +127,39 @@ TC.BackgroundTransparency = 1
 TC.AnchorPoint = Vector2.new(1,0)
 TC.Position = UDim2.new(1,-16,0,16)
 TC.Size = UDim2.new(0,280,1,-32)
-
 local TCL = Instance.new("UIListLayout", TC)
 TCL.SortOrder = Enum.SortOrder.LayoutOrder
 TCL.Padding = UDim.new(0,8)
 TCL.VerticalAlignment = Enum.VerticalAlignment.Top
 
 local TOAST_COL = {
-    success=Color3.fromRGB(60,200,100),
-    error=Color3.fromRGB(220,60,60),
-    info=Color3.fromRGB(80,140,220),
-    warning=Color3.fromRGB(230,180,50),
+    success=Color3.fromRGB(60,200,100), error=Color3.fromRGB(220,60,60),
+    info=Color3.fromRGB(80,140,220), warning=Color3.fromRGB(230,180,50),
 }
 local tCount = 0
 local function showToast(msg, kind)
     kind = kind or "info"
     tCount = tCount + 1
     local ac = TOAST_COL[kind] or TOAST_COL.info
-
     local t = Instance.new("Frame", TC)
-    t.Name = "T_"..tCount
     t.BackgroundColor3 = Color3.fromRGB(15,5,5)
     t.BackgroundTransparency = 0.1
     t.BorderSizePixel = 0
     t.Size = UDim2.new(1,0,0,44)
     t.Position = UDim2.new(1,40,0,0)
     horrorGrad(t, 1.2)
-
     Instance.new("UICorner", t).CornerRadius = UDim.new(0,8)
-
     local s = Instance.new("UIStroke", t)
     s.Color = ac; s.Thickness = 1.5; s.Transparency = 0.2
-
     local bar = Instance.new("Frame", t)
     bar.BackgroundColor3 = ac; bar.BorderSizePixel = 0
     bar.Size = UDim2.new(0,3,1,-16); bar.Position = UDim2.new(0,6,0,8)
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
-
     local ic = Instance.new("TextLabel", t)
     ic.Text = ({success="✓",error="⚠",info="ℹ",warning="⚠"})[kind] or "ℹ"
     ic.Font = Enum.Font.GothamBold; ic.TextSize = 16; ic.TextColor3 = ac
     ic.BackgroundTransparency = 1
     ic.Position = UDim2.new(0,18,0,0); ic.Size = UDim2.new(0,24,1,0)
-
     local lbl = Instance.new("TextLabel", t)
     lbl.Text = msg; lbl.Font = Enum.Font.Gotham; lbl.TextSize = 13
     lbl.TextColor3 = Color3.fromRGB(235,235,235)
@@ -199,7 +167,6 @@ local function showToast(msg, kind)
     lbl.BackgroundTransparency = 1
     lbl.Position = UDim2.new(0,44,0,0); lbl.Size = UDim2.new(1,-52,1,0)
     lbl.TextWrapped = true
-
     tween(t, 0.28, {Position = UDim2.new(0,0,0,0)}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     task.delay(3.2, function()
         if not t.Parent then return end
@@ -208,28 +175,22 @@ local function showToast(msg, kind)
     end)
 end
 
--- ══════════════════════════════════════════════════════════
--- HOME (painel principal)
--- ══════════════════════════════════════════════════════════
+-- HOME
 local Home = Instance.new("Frame", ScreenGui)
 Home.Name = "Home"
 Home.BackgroundColor3 = Color3.fromRGB(12,4,4)
 Home.BorderSizePixel = 0
-Home.Position = UDim2.new(0.5,-340,0.5,-240)
-Home.Size = UDim2.new(0,680,0,480)
+Home.Position = UDim2.new(0.5,-350,0.5,-250)
+Home.Size = UDim2.new(0,700,0,500)
 Home.Visible = false
 Home.ClipsDescendants = true
-
 Instance.new("UICorner", Home).CornerRadius = UDim.new(0,12)
-
 local HS = Instance.new("UIStroke", Home)
 HS.Color = Color3.fromRGB(140,25,25); HS.Thickness = 1.5; HS.Transparency = 0.25
-
 local BgI = Instance.new("ImageLabel", Home)
 BgI.Image = BG_ID; BgI.ScaleType = Enum.ScaleType.Crop
 BgI.BackgroundTransparency = 1; BgI.ImageTransparency = 0.4
 BgI.Size = UDim2.new(1,0,1,0); BgI.ZIndex = 0
-
 local BgO = Instance.new("Frame", Home)
 BgO.BackgroundColor3 = Color3.fromRGB(0,0,0); BgO.BackgroundTransparency = 0.35
 BgO.BorderSizePixel = 0; BgO.Size = UDim2.new(1,0,1,0); BgO.ZIndex = 1
@@ -238,22 +199,18 @@ horrorGrad(BgO)
 -- Header
 local Header = Instance.new("Frame", Home)
 Header.BackgroundTransparency = 1; Header.Size = UDim2.new(1,0,0,52); Header.ZIndex = 5
-
 local Title = Instance.new("TextLabel", Header)
 Title.Font = Enum.Font.GothamBold; Title.Text = "AKZ UNIVERSAL"
 Title.TextColor3 = Color3.fromRGB(255,255,255); Title.TextSize = 22
 Title.BackgroundTransparency = 1; Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Position = UDim2.new(0,18,0,8); Title.Size = UDim2.new(0,400,0,22); Title.ZIndex = 6
-
 local TS = Instance.new("UIStroke", Title)
 TS.Color = Color3.fromRGB(200,30,30); TS.Thickness = 2
-
 local Sub = Instance.new("TextLabel", Header)
-Sub.Font = Enum.Font.Gotham; Sub.Text = "by: angel / akira  •  PRO PREMIUM"
+Sub.Font = Enum.Font.Gotham; Sub.Text = "by: angel / akira  •  PRO PREMIUM v7"
 Sub.TextColor3 = Color3.fromRGB(160,160,160); Sub.TextSize = 11
 Sub.BackgroundTransparency = 1; Sub.TextXAlignment = Enum.TextXAlignment.Left
 Sub.Position = UDim2.new(0,20,0,30); Sub.Size = UDim2.new(0,400,0,16); Sub.ZIndex = 6
-
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.Text = "✕"
 CloseBtn.TextColor3 = Color3.fromRGB(255,255,255); CloseBtn.TextSize = 14
@@ -265,27 +222,22 @@ CloseBtn.MouseButton1Click:Connect(function()
     Home.Visible = false
     showToast("Menu fechado", "info")
 end)
-
 local HL = Instance.new("Frame", Home)
 HL.BackgroundColor3 = Color3.fromRGB(140,25,25); HL.BackgroundTransparency = 0.4
 HL.BorderSizePixel = 0; HL.Position = UDim2.new(0,14,0,52)
 HL.Size = UDim2.new(1,-28,0,1); HL.ZIndex = 5
-
 makeDraggable(Header, Home)
 
--- ══════════════════════════════════════════════════════════
 -- SIDEBAR
--- ══════════════════════════════════════════════════════════
 local Sidebar = Instance.new("ScrollingFrame", Home)
 Sidebar.BackgroundColor3 = Color3.fromRGB(8,3,3); Sidebar.BackgroundTransparency = 0.3
 Sidebar.BorderSizePixel = 0
-Sidebar.Position = UDim2.new(0,0,0,53); Sidebar.Size = UDim2.new(0,150,1,-53)
+Sidebar.Position = UDim2.new(0,0,0,53); Sidebar.Size = UDim2.new(0,155,1,-53)
 Sidebar.CanvasSize = UDim2.new(0,0,0,0)
 Sidebar.AutomaticCanvasSize = Enum.AutomaticSize.Y
 Sidebar.ScrollBarThickness = 2
 Sidebar.ScrollBarImageColor3 = Color3.fromRGB(140,25,25)
 Sidebar.ZIndex = 3
-
 local SL = Instance.new("Frame", Sidebar)
 SL.BackgroundColor3 = Color3.fromRGB(140,25,25); SL.BackgroundTransparency = 0.55
 SL.BorderSizePixel = 0; SL.Position = UDim2.new(1,-1,0,0); SL.Size = UDim2.new(0,1,1,0); SL.ZIndex = 4
@@ -296,19 +248,17 @@ local function createTabBtn(name, icon, order)
     local b = Instance.new("TextButton", Sidebar)
     b.Font = Enum.Font.GothamMedium
     b.Text = "  "..icon.."   "..name
-    b.TextColor3 = Color3.fromRGB(140,140,140); b.TextSize = 12
+    b.TextColor3 = Color3.fromRGB(140,140,140); b.TextSize = 11
     b.BackgroundColor3 = Color3.fromRGB(30,5,5); b.BackgroundTransparency = 1
     b.BorderSizePixel = 0; b.TextXAlignment = Enum.TextXAlignment.Left
-    b.Position = UDim2.new(0,6,0,6+(order-1)*34)
-    b.Size = UDim2.new(1,-12,0,30); b.ZIndex = 5; b.AutoButtonColor = false
+    b.Position = UDim2.new(0,6,0,6+(order-1)*30)
+    b.Size = UDim2.new(1,-12,0,26); b.ZIndex = 5; b.AutoButtonColor = false
     Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-
     local ind = Instance.new("Frame", b)
     ind.BackgroundColor3 = Color3.fromRGB(220,35,35); ind.BorderSizePixel = 0
-    ind.Position = UDim2.new(0,0,0,6); ind.Size = UDim2.new(0,3,1,-12)
+    ind.Position = UDim2.new(0,0,0,5); ind.Size = UDim2.new(0,3,1,-10)
     ind.ZIndex = 6; ind.Visible = false
     Instance.new("UICorner", ind).CornerRadius = UDim.new(1,0)
-
     TabBtns[name] = {button=b, indicator=ind}
 end
 
@@ -329,8 +279,8 @@ end
 
 local Content = Instance.new("Frame", Home)
 Content.BackgroundTransparency = 1
-Content.Position = UDim2.new(0,150,0,53)
-Content.Size = UDim2.new(1,-150,1,-53)
+Content.Position = UDim2.new(0,155,0,53)
+Content.Size = UDim2.new(1,-155,1,-53)
 Content.ZIndex = 3
 
 local function createTabContent(name)
@@ -349,10 +299,10 @@ local function createTabContent(name)
 end
 
 -- ══════════════════════════════════════════════════════════
--- COMPONENTES REUTILIZÁVEIS
+-- COMPONENTES
 -- ══════════════════════════════════════════════════════════
 local C = {}
-local BTN_H, GAP, PAD = 36, 6, 12
+local BTN_H, GAP, PAD = 34, 5, 10
 
 local function hoverFX(b, hv, pr)
     local st = b:FindFirstChildOfClass("UIStroke")
@@ -382,7 +332,6 @@ function C.section(parent, title, y)
     return y + 24
 end
 
--- Toggle ON/OFF moderno com switch animado
 function C.toggle(parent, text, y, default, cb)
     local b = Instance.new("TextButton", parent)
     b.Font = Enum.Font.Gotham; b.Text = text
@@ -394,26 +343,24 @@ function C.toggle(parent, text, y, default, cb)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
     local s = Instance.new("UIStroke", b)
     s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
-
     local tr = Instance.new("Frame", b)
     tr.BackgroundColor3 = Color3.fromRGB(50,20,20); tr.BorderSizePixel = 0
-    tr.Position = UDim2.new(1,-46,0.5,-9); tr.Size = UDim2.new(0,36,0,18); tr.ZIndex = 5
+    tr.Position = UDim2.new(1,-44,0.5,-8); tr.Size = UDim2.new(0,34,0,16); tr.ZIndex = 5
     Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
     local kn = Instance.new("Frame", tr)
     kn.BackgroundColor3 = Color3.fromRGB(160,160,160); kn.BorderSizePixel = 0
-    kn.Position = UDim2.new(0,2,0.5,-7); kn.Size = UDim2.new(0,14,0,14); kn.ZIndex = 6
+    kn.Position = UDim2.new(0,2,0.5,-6); kn.Size = UDim2.new(0,12,0,12); kn.ZIndex = 6
     Instance.new("UICorner", kn).CornerRadius = UDim.new(1,0)
-
     local st = default or false
     local function render()
         if st then
             tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(60,180,90)})
-            tween(kn, 0.2, {Position = UDim2.new(1,-16,0.5,-7), BackgroundColor3 = Color3.fromRGB(255,255,255)})
+            tween(kn, 0.2, {Position = UDim2.new(1,-14,0.5,-6), BackgroundColor3 = Color3.fromRGB(255,255,255)})
             tween(s, 0.2, {Color = Color3.fromRGB(60,180,90), Transparency = 0.2})
             tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(25,8,8)})
         else
             tween(tr, 0.2, {BackgroundColor3 = Color3.fromRGB(50,20,20)})
-            tween(kn, 0.2, {Position = UDim2.new(0,2,0.5,-7), BackgroundColor3 = Color3.fromRGB(160,160,160)})
+            tween(kn, 0.2, {Position = UDim2.new(0,2,0.5,-6), BackgroundColor3 = Color3.fromRGB(160,160,160)})
             tween(s, 0.2, {Color = Color3.fromRGB(80,20,20), Transparency = 0.4})
             tween(b, 0.2, {BackgroundColor3 = Color3.fromRGB(20,5,5)})
         end
@@ -427,8 +374,7 @@ function C.toggle(parent, text, y, default, cb)
     return b
 end
 
--- Botão com ícone ▶ (clique)
-function C.button(parent, text, y, cb, clickIcon)
+function C.button(parent, text, y, cb)
     local b = Instance.new("TextButton", parent)
     b.Font = Enum.Font.Gotham; b.Text = "  "..text
     b.TextColor3 = Color3.fromRGB(220,220,220); b.TextSize = 13
@@ -439,14 +385,10 @@ function C.button(parent, text, y, cb, clickIcon)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
     local s = Instance.new("UIStroke", b)
     s.Color = Color3.fromRGB(80,20,20); s.Thickness = 1; s.Transparency = 0.4
-
-    if clickIcon ~= false then
-        local ic = Instance.new("TextLabel", b)
-        ic.Text = "▶"; ic.Font = Enum.Font.GothamBold; ic.TextSize = 11
-        ic.TextColor3 = Color3.fromRGB(220,35,35); ic.BackgroundTransparency = 1
-        ic.Position = UDim2.new(1,-26,0,0); ic.Size = UDim2.new(0,18,1,0); ic.ZIndex = 6
-    end
-
+    local ic = Instance.new("TextLabel", b)
+    ic.Text = "▶"; ic.Font = Enum.Font.GothamBold; ic.TextSize = 10
+    ic.TextColor3 = Color3.fromRGB(220,35,35); ic.BackgroundTransparency = 1
+    ic.Position = UDim2.new(1,-24,0,0); ic.Size = UDim2.new(0,16,1,0); ic.ZIndex = 6
     hoverFX(b)
     b.MouseButton1Click:Connect(function()
         if not cb then return end
@@ -460,39 +402,32 @@ function C.button(parent, text, y, cb, clickIcon)
     return b
 end
 
--- Slider com min/max/valor atual
 function C.slider(parent, label, min, max, default, y, cb)
     local f = Instance.new("Frame", parent)
     f.BackgroundTransparency = 1
-    f.Position = UDim2.new(0,PAD,0,y); f.Size = UDim2.new(1,-PAD*2,0,44)
-
+    f.Position = UDim2.new(0,PAD,0,y); f.Size = UDim2.new(1,-PAD*2,0,42)
     local l = Instance.new("TextLabel", f)
     l.Text = label; l.Font = Enum.Font.GothamMedium; l.TextSize = 12
     l.TextColor3 = Color3.fromRGB(210,210,210); l.BackgroundTransparency = 1
     l.TextXAlignment = Enum.TextXAlignment.Left
     l.Size = UDim2.new(0.7,0,0,16)
-
     local v = Instance.new("TextLabel", f)
     v.Text = tostring(default); v.Font = Enum.Font.GothamBold; v.TextSize = 12
     v.TextColor3 = Color3.fromRGB(220,60,60); v.BackgroundTransparency = 1
     v.TextXAlignment = Enum.TextXAlignment.Right
     v.Position = UDim2.new(0.7,0,0,0); v.Size = UDim2.new(0.3,0,0,16)
-
     local tr = Instance.new("Frame", f)
     tr.BackgroundColor3 = Color3.fromRGB(35,10,10); tr.BorderSizePixel = 0
-    tr.Position = UDim2.new(0,0,0,24); tr.Size = UDim2.new(1,0,0,6)
+    tr.Position = UDim2.new(0,0,0,23); tr.Size = UDim2.new(1,0,0,6)
     Instance.new("UICorner", tr).CornerRadius = UDim.new(1,0)
-
     local fl = Instance.new("Frame", tr)
     fl.BackgroundColor3 = Color3.fromRGB(200,35,35); fl.BorderSizePixel = 0
     fl.Size = UDim2.new(0,0,1,0)
     Instance.new("UICorner", fl).CornerRadius = UDim.new(1,0)
-
     local hd = Instance.new("Frame", tr)
     hd.BackgroundColor3 = Color3.fromRGB(255,255,255); hd.BorderSizePixel = 0
     hd.Size = UDim2.new(0,12,0,12); hd.Position = UDim2.new(0,-6,0,-3)
     Instance.new("UICorner", hd).CornerRadius = UDim.new(1,0)
-
     local val, dragging = default, false
     local function upd(i)
         local r = math.clamp((i.Position.X - tr.AbsolutePosition.X) / tr.AbsoluteSize.X, 0, 1)
@@ -537,21 +472,18 @@ function C.search(parent, y, onChange)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0,7)
     local s = Instance.new("UIStroke", b)
     s.Color = Color3.fromRGB(120,25,25); s.Thickness = 1; s.Transparency = 0.4
-
     local ic = Instance.new("TextLabel", b)
     ic.Text = "🔎"; ic.Font = Enum.Font.Gotham; ic.TextSize = 14
     ic.BackgroundTransparency = 1; ic.Position = UDim2.new(0,8,0,0)
     ic.Size = UDim2.new(0,24,1,0)
-
     local i = Instance.new("TextBox", b)
-    i.PlaceholderText = "Pesquisar jogos..."
+    i.PlaceholderText = "Pesquisar..."
     i.PlaceholderColor3 = Color3.fromRGB(120,120,120)
     i.Text = ""; i.Font = Enum.Font.Gotham; i.TextSize = 12
     i.TextColor3 = Color3.fromRGB(230,230,230); i.BackgroundTransparency = 1
     i.TextXAlignment = Enum.TextXAlignment.Left
     i.Position = UDim2.new(0,34,0,0); i.Size = UDim2.new(1,-42,1,0)
     i.ClearTextOnFocus = false
-
     i:GetPropertyChangedSignal("Text"):Connect(function()
         if onChange then onChange(i.Text) end
     end)
@@ -559,193 +491,92 @@ function C.search(parent, y, onChange)
 end
 
 -- ══════════════════════════════════════════════════════════
--- MÓDULO DE JOGOS (estrutura modular)
+-- MÓDULO DE JOGOS
 -- ══════════════════════════════════════════════════════════
-local GameModule = {}
-GameModule.games = {
-    {
-        id = "mm2",
-        name = "MM2 — Murder Mystery 2",
-        icon = "🔪",
-        desc = "Aether Hub: Noclip, ESP, Aimbot, Walkspeed, Click Teleport. Keyless.",
-        script = "https://raw.githubusercontent.com/aluucardd/MM2/refs/heads/main/Aether%20Hub%20MM2",
-        sources = {
-            "https://raw.githubusercontent.com/xv3gasx/Murder-Mystery-2/refs/heads/main/Release.lua",
-        },
-    },
-    {
-        id = "kalb",
-        name = "Kick a Lucky Block",
-        icon = "🎲",
-        desc = "Luxy Hub: Auto Kick, Auto Farm, Auto Rebirth, Brainrot Filter. Keyless.",
-        script = "https://raw.githubusercontent.com/Omnie7/Luxy-Hub/refs/heads/main/main.lua",
-        sources = {
-            "https://raw.githubusercontent.com/Lexsontopp/onlyforloader/refs/heads/main/LOADER/Freemium.lua",
-        },
-    },
-    {
-        id = "dahood",
-        name = "Da Hood",
-        icon = "🔫",
-        desc = "Oxide Hub: Silent Aim, Godmode, ESP, Infinite Jump, Custom Hip Height. Keyless.",
-        script = "https://raw.githubusercontent.com/xulfo/Oxide-Loader/main/Main.lua",
-        sources = {
-            "https://raw.githubusercontent.com/BetterDaHood/BetterDaHood/main/whitelist_output.lua",
-        },
-    },
-    {
-        id = "bloxfruits",
-        name = "Blox Fruits",
-        icon = "🍎",
-        desc = "ARC Hub: Auto Farm, Auto Quest, ESP, Teleport. Keyless.",
-        script = "https://raw.githubusercontent.com/bloxfruitsnokey/Arcylic/refs/heads/main/ARC/update.luau",
-        sources = {
-            "https://rawscripts.net/raw/RIVALS-Noks-unlock-all-205613",
-        },
-    },
-    {
-        id = "arsenal",
-        name = "Arsenal",
-        icon = "💥",
-        desc = "Catware: Aimbot, Silent Aim, ESP, Chams, Hitbox Expander. Keyless.",
-        script = "https://catware.xyz/Arsenal.lua",
-        sources = {
-            "https://pastefy.app/C99STsoR/raw",
-        },
-    },
-    {
-        id = "petsimx",
-        name = "Pet Simulator X",
-        icon = "🐾",
-        desc = "Auto Hatch, Auto Farm, Auto Collect Coins, Teleports. Keyless.",
-        script = "https://raw.githubusercontent.com/Oproxide/scripthub/refs/heads/main/main.lua",
-        sources = {
-            "https://raw.githubusercontent.com/4lve/Roblox/main/PetSimX.lua",
-        },
-    },
-    {
-        id = "jailbreak",
-        name = "Jailbreak",
-        icon = "🚔",
-        desc = "Veloxide: Instant Reload, Silent Aim, Vehicle Flight, Fast Taser. Keyless.",
-        script = "https://raw.githubusercontent.com/veloxides/Jailbreak/refs/heads/main/VeloxideLoader",
-        sources = {
-            "https://raw.githubusercontent.com/stoneworkerdape23/Jailbreak-script/main/main.lua",
-        },
-    },
-    {
-        id = "adoptme",
-        name = "Adopt Me!",
-        icon = "🐶",
-        desc = "Auto Farm, Pet Spawner, Fly, Noclip, Auto Hatch. Keyless.",
-        script = "https://raw.githubusercontent.com/nemothedognemo-stack/adoptmeCookiehub/refs/heads/main/loader",
-        sources = {
-            "https://raw.githubusercontent.com/swiftasfboi/AdoptMe/refs/heads/main/HouseCloner",
-        },
-    },
-    {
-        id = "bedwars",
-        name = "BedWars",
-        icon = "🛏",
-        desc = "Auto Click, Kill Aura, Aimbot, Break All Beds, God Mode. Keyless.",
-        script = "https://gist.githubusercontent.com/DeveloperMikey/2b8ee3d5a38c56c2cc1db72554850384/raw/bedwar.lua",
-        sources = {
-            "https://rawscripts.net/raw/BedWars-Vape-Fix-for-Matches-236319",
-        },
-    },
-    {
-        id = "toh",
-        name = "Tower of Hell",
-        icon = "🗼",
-        desc = "Auto Tween to Top, Invisible Killbricks, Infinite Jump. Keyless.",
-        script = "https://pastebin.com/raw/CLKFaUJR",
-        sources = {
-            "https://raw.githubusercontent.com/Sc-Rhyan57/msdoors/refs/heads/main/download/main.lua",
-        },
-    },
-    {
-        id = "bloxburg",
-        name = "Welcome to Bloxburg",
-        icon = "🏘",
-        desc = "Auto Farm (all jobs), Auto Snowplowing, AutoBuild. Keyless.",
-        script = "https://raw.githubusercontent.com/PainfulDestroyer/Roblox/main/Scar%20Hub",
-        sources = {},
-    },
-    {
-        id = "doors",
-        name = "DOORS",
-        icon = "👻",
-        desc = "NOVA Hub: God Mode, Loot Aura, ESP, Speed. Keyless.",
-        script = "https://raw.githubusercontent.com/kyksikoid/Doors-Script/main/doors.lua",
-        sources = {
-            "https://raw.githubusercontent.com/Sc-Rhyan57/msdoors/refs/heads/main/download/main.lua",
-        },
-    },
-    {
-        id = "evade",
-        name = "Evade",
-        icon = "🏃",
-        desc = "Collect Items, Avoid Nextbot, ESP Player, Speed Changer. Keyless.",
-        script = "https://raw.githubusercontent.com/gumanba/Scripts/main/EvadeEvent",
-        sources = {
-            "https://raw.githubusercontent.com/Unknownproooolucky/Draconic-Hub-X/refs/heads/main/files/Evade/Overhaul.lua",
-        },
-    },
-}
+local GameModule = { games = {
+    {id="mm2", name="MM2 — Murder Mystery 2", icon="🔪",
+     desc="Aether Hub: Noclip, ESP, Aimbot, Walkspeed. Keyless.",
+     script="https://raw.githubusercontent.com/aluucardd/MM2/refs/heads/main/Aether%20Hub%20MM2",
+     sources={"https://raw.githubusercontent.com/xv3gasx/Murder-Mystery-2/refs/heads/main/Release.lua"}},
+    {id="kalb", name="Kick a Lucky Block", icon="🎲",
+     desc="Luxy Hub: Auto Kick, Auto Farm, Auto Rebirth. Keyless.",
+     script="https://raw.githubusercontent.com/Omnie7/Luxy-Hub/refs/heads/main/main.lua", sources={}},
+    {id="dahood", name="Da Hood", icon="🔫",
+     desc="Oxide Hub: Silent Aim, Godmode, ESP. Keyless.",
+     script="https://raw.githubusercontent.com/xulfo/Oxide-Loader/main/Main.lua", sources={}},
+    {id="bloxfruits", name="Blox Fruits", icon="🍎",
+     desc="ARC Hub: Auto Farm, Auto Quest, ESP. Keyless.",
+     script="https://raw.githubusercontent.com/bloxfruitsnokey/Arcylic/refs/heads/main/ARC/update.luau", sources={}},
+    {id="arsenal", name="Arsenal", icon="💥",
+     desc="Catware: Aimbot, Silent Aim, ESP, Chams. Keyless.",
+     script="https://catware.xyz/Arsenal.lua", sources={}},
+    {id="petsimx", name="Pet Simulator X", icon="🐾",
+     desc="Auto Hatch, Auto Farm, Auto Collect. Keyless.",
+     script="https://raw.githubusercontent.com/Oproxide/scripthub/refs/heads/main/main.lua", sources={}},
+    {id="jailbreak", name="Jailbreak", icon="🚔",
+     desc="Veloxide: Instant Reload, Silent Aim, Vehicle Flight. Keyless.",
+     script="https://raw.githubusercontent.com/veloxides/Jailbreak/refs/heads/main/VeloxideLoader", sources={}},
+    {id="adoptme", name="Adopt Me!", icon="🐶",
+     desc="CookieHub: Auto Farm, Pet Spawner, Fly. Keyless.",
+     script="https://raw.githubusercontent.com/nemothedognemo-stack/adoptmeCookiehub/refs/heads/main/loader", sources={}},
+    {id="bedwars", name="BedWars", icon="🛏",
+     desc="DeveloperMikey: Auto Click, Kill Aura, God Mode. Keyless.",
+     script="https://gist.githubusercontent.com/DeveloperMikey/2b8ee3d5a38c56c2cc1db72554850384/raw/bedwar.lua", sources={}},
+    {id="toh", name="Tower of Hell", icon="🗼",
+     desc="Koala: Auto Tween to Top, Invisible Killbricks. Keyless.",
+     script="https://pastebin.com/raw/CLKFaUJR", sources={}},
+    {id="bloxburg", name="Welcome to Bloxburg", icon="🏘",
+     desc="Scar Hub: Auto Farm, Auto Snowplowing, AutoBuild. Keyless.",
+     script="https://raw.githubusercontent.com/PainfulDestroyer/Roblox/main/Scar%20Hub", sources={}},
+    {id="doors", name="DOORS", icon="👻",
+     desc="NOVA Hub: God Mode, Loot Aura, ESP, Speed. Keyless.",
+     script="https://raw.githubusercontent.com/kyksikoid/Doors-Script/main/doors.lua", sources={}},
+    {id="evade", name="Evade", icon="🏃",
+     desc="Tora Isme: Collect Items, Avoid Nextbot, ESP. Keyless.",
+     script="https://raw.githubusercontent.com/gumanba/Scripts/main/EvadeEvent", sources={}},
+}}
 
--- Detecta se o jogo atual tem suporte
-function GameModule.getCurrentGame()
-    for _, g in ipairs(GameModule.games) do
-        if g.name:lower():find(game.PlaceId.."") then return g end
-    end
-    -- Verifica pelo nome do jogo
+function GameModule.getCurrent()
     local ok, info = pcall(function()
         return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
     end)
-    if ok and info then
-        local jn = info.Name:lower()
-        for _, g in ipairs(GameModule.games) do
-            if jn:find(g.id:lower()) or jn:find(g.name:lower():split(" — ")[1]) then
-                return g
-            end
-        end
+    if not ok or not info then return nil end
+    local jn = info.Name:lower()
+    for _, g in ipairs(GameModule.games) do
+        local shortName = g.name:split(" — ")[1]:lower()
+        if jn:find(shortName, 1, true) then return g end
     end
     return nil
 end
 
--- Executa script com fallback de fontes
-function GameModule.execute(gameData, onStatus)
+function GameModule.execute(g, onStatus)
     onStatus("⏳ Carregando...", "loading")
-    local sources = {gameData.script}
-    if gameData.sources then
-        for _, s in ipairs(gameData.sources) do table.insert(sources, s) end
-    end
+    local sources = {g.script}
+    if g.sources then for _, s in ipairs(g.sources) do table.insert(sources, s) end end
     for i, url in ipairs(sources) do
         local ok, err = pcall(function()
             local code = game:HttpGet(url)
-            if not code or #code < 20 then
-                error("Resposta vazia ou inválida")
-            end
+            if not code or #code < 20 then error("Resposta vazia") end
             loadstring(code)()
         end)
         if ok then
             onStatus("✓ Executado!", "success")
-            showToast("▶ "..gameData.name.." executado", "success")
+            showToast("▶ "..g.name.." executado", "success")
             return true
         else
             warn("[AKZ] Fonte "..i.." falhou: "..tostring(err))
         end
     end
     onStatus("⚠ Falhou", "error")
-    showToast("⚠ Falha em "..gameData.name, "error")
+    showToast("⚠ Falha em "..g.name, "error")
     return false
 end
 
 -- ══════════════════════════════════════════════════════════
 -- ABA 1: PRINCIPAL
 -- ══════════════════════════════════════════════════════════
-local tabPrincipal = createTabContent("Principal")
-local intro = C.card(tabPrincipal, 8, 150)
+local tPrin = createTabContent("Principal")
+local intro = C.card(tPrin, 8, 150)
 
 local iT = Instance.new("TextLabel", intro)
 iT.Text = "AKZ UNIVERSAL"; iT.Font = Enum.Font.GothamBold; iT.TextSize = 18
@@ -754,7 +585,7 @@ iT.Position = UDim2.new(0,14,0,12); iT.Size = UDim2.new(1,-28,0,22)
 iT.TextXAlignment = Enum.TextXAlignment.Left
 
 local iS = Instance.new("TextLabel", intro)
-iS.Text = "PRO PREMIUM EDITION"; iS.Font = Enum.Font.GothamMedium
+iS.Text = "PRO PREMIUM EDITION v7"; iS.Font = Enum.Font.GothamMedium
 iS.TextSize = 10; iS.TextColor3 = Color3.fromRGB(220,60,60)
 iS.BackgroundTransparency = 1; iS.Position = UDim2.new(0,14,0,34)
 iS.Size = UDim2.new(1,-28,0,14); iS.TextXAlignment = Enum.TextXAlignment.Left
@@ -790,7 +621,7 @@ cb.MouseButton1Click:Connect(function()
             cb.Text = "COPIAR"; cb.BackgroundColor3 = Color3.fromRGB(70,130,200)
         end)
     else
-        showToast("⚠ Executor não suporta clipboard", "warning")
+        showToast("⚠ Executor sem clipboard", "warning")
     end
 end)
 
@@ -803,100 +634,85 @@ dsc.Size = UDim2.new(1,-28,0,32); dsc.TextXAlignment = Enum.TextXAlignment.Left
 dsc.TextYAlignment = Enum.TextYAlignment.Top
 
 local py = 170
-py = C.section(tabPrincipal, "Atalhos Rápidos", py)
-C.button(tabPrincipal, "Infinite Yield (Admin)", py, function()
+py = C.section(tPrin, "Atalhos Rápidos", py)
+C.button(tPrin, "Infinite Yield (Admin)", py, function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
 end); py = py + BTN_H + GAP
-C.button(tabPrincipal, "AirHub V2 (ESP + Aimbot)", py, function()
+C.button(tPrin, "AirHub V2 (ESP + Aimbot)", py, function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
 end); py = py + BTN_H + GAP
-C.button(tabPrincipal, "FlyGuiV3", py, function()
+C.button(tPrin, "FlyGuiV3", py, function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
 end); py = py + BTN_H + GAP
-C.button(tabPrincipal, "All Emotes", py, function()
+C.button(tPrin, "All Emotes", py, function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 2: JOGOS SUPORTADOS
+-- ABA 2: JOGOS
 -- ══════════════════════════════════════════════════════════
-local tabJogos = createTabContent("Jogos")
-
--- Aviso amarelo destacado
-local wc = Instance.new("Frame", tabJogos)
+local tJogos = createTabContent("Jogos")
+local wc = Instance.new("Frame", tJogos)
 wc.BackgroundColor3 = Color3.fromRGB(35,28,5); wc.BackgroundTransparency = 0.15
 wc.BorderSizePixel = 0; wc.Position = UDim2.new(0,PAD,0,8)
 wc.Size = UDim2.new(1,-PAD*2,0,62)
 Instance.new("UICorner", wc).CornerRadius = UDim.new(0,8)
 local ws = Instance.new("UIStroke", wc)
 ws.Color = Color3.fromRGB(230,200,50); ws.Thickness = 1.5; ws.Transparency = 0.15
-
 local wt = Instance.new("TextLabel", wc)
 wt.Text = "⚠  AVISO"; wt.Font = Enum.Font.GothamBold; wt.TextSize = 12
 wt.TextColor3 = Color3.fromRGB(240,210,70); wt.BackgroundTransparency = 1
 wt.TextXAlignment = Enum.TextXAlignment.Left
 wt.Position = UDim2.new(0,12,0,6); wt.Size = UDim2.new(1,-24,0,16)
-
 local wd = Instance.new("TextLabel", wc)
-wd.Text = "Os scripts disponibilizados nesta seção são gratuitos e sem key. Eles não possuem vínculo oficial com o Akz Hub."
+wd.Text = "Os scripts desta seção são gratuitos e sem key. Não possuem vínculo oficial com o AKZ Hub."
 wd.Font = Enum.Font.Gotham; wd.TextSize = 10
 wd.TextColor3 = Color3.fromRGB(220,200,140); wd.TextWrapped = true
 wd.BackgroundTransparency = 1
 wd.Position = UDim2.new(0,12,0,24); wd.Size = UDim2.new(1,-24,0,32)
 wd.TextXAlignment = Enum.TextXAlignment.Left; wd.TextYAlignment = Enum.TextYAlignment.Top
 
--- Detecção do jogo atual
-local currentGame = GameModule.getCurrentGame()
-local currentLabel = Instance.new("TextLabel", tabJogos)
-currentLabel.Font = Enum.Font.GothamMedium; currentLabel.TextSize = 11
-currentLabel.BackgroundTransparency = 1; currentLabel.TextXAlignment = Enum.TextXAlignment.Left
-currentLabel.Position = UDim2.new(0,PAD+2,0,76); currentLabel.Size = UDim2.new(1,-PAD*2,0,18)
-
+local currentGame = GameModule.getCurrent()
+local curLbl = Instance.new("TextLabel", tJogos)
+curLbl.Font = Enum.Font.GothamMedium; curLbl.TextSize = 11
+curLbl.BackgroundTransparency = 1; curLbl.TextXAlignment = Enum.TextXAlignment.Left
+curLbl.Position = UDim2.new(0,PAD+2,0,76); curLbl.Size = UDim2.new(1,-PAD*2,0,18)
 if currentGame then
-    currentLabel.Text = "✓ Jogo suportado: "..currentGame.name
-    currentLabel.TextColor3 = Color3.fromRGB(120,220,120)
+    curLbl.Text = "✓ Jogo suportado: "..currentGame.name
+    curLbl.TextColor3 = Color3.fromRGB(120,220,120)
 else
-    currentLabel.Text = "⚠ Este jogo não possui suporte atualmente."
-    currentLabel.TextColor3 = Color3.fromRGB(220,180,80)
+    curLbl.Text = "⚠ Este jogo não possui suporte atualmente."
+    curLbl.TextColor3 = Color3.fromRGB(220,180,80)
 end
 
--- Busca
-local searchInput = C.search(tabJogos, 100, nil)
+local searchInput = C.search(tJogos, 100, nil)
 local cards = {}
-
--- Renderiza cards de jogos
 local function renderGames(filter)
     filter = (filter or ""):lower()
     for _, c in ipairs(cards) do c:Destroy() end
     cards = {}
     local y, found = 142, 0
     for _, g in ipairs(GameModule.games) do
-        if filter == "" or g.name:lower():find(filter,1,true) or g.desc:lower():find(filter,1,true) then
-            local c = Instance.new("Frame", tabJogos)
+        if filter == "" or g.name:lower():find(filter,1,true) then
+            local c = Instance.new("Frame", tJogos)
             c.BackgroundColor3 = Color3.fromRGB(18,6,6); c.BackgroundTransparency = 0.3
             c.BorderSizePixel = 0; c.Position = UDim2.new(0,PAD,0,y)
             c.Size = UDim2.new(1,-PAD*2,0,90)
             Instance.new("UICorner", c).CornerRadius = UDim.new(0,9)
             local s = Instance.new("UIStroke", c)
             s.Color = Color3.fromRGB(100,20,20); s.Thickness = 1; s.Transparency = 0.5
-
-            -- Ícone
             local ifrm = Instance.new("Frame", c)
             ifrm.BackgroundColor3 = Color3.fromRGB(35,10,10); ifrm.BorderSizePixel = 0
             ifrm.Position = UDim2.new(0,10,0,12); ifrm.Size = UDim2.new(0,40,0,40)
             Instance.new("UICorner", ifrm).CornerRadius = UDim.new(0,8)
             local il = Instance.new("TextLabel", ifrm)
-            il.Text = g.icon or "🎮"; il.Font = Enum.Font.GothamBold; il.TextSize = 20
+            il.Text = g.icon; il.Font = Enum.Font.GothamBold; il.TextSize = 20
             il.BackgroundTransparency = 1; il.Size = UDim2.new(1,0,1,0)
-
-            -- Nome
             local nl = Instance.new("TextLabel", c)
             nl.Text = g.name; nl.Font = Enum.Font.GothamBold; nl.TextSize = 13
             nl.TextColor3 = Color3.fromRGB(255,255,255)
             nl.TextXAlignment = Enum.TextXAlignment.Left; nl.BackgroundTransparency = 1
             nl.Position = UDim2.new(0,60,0,10); nl.Size = UDim2.new(1,-150,0,16)
-
-            -- Indicador "JOGO ATUAL"
             if currentGame and currentGame.id == g.id then
                 local cur = Instance.new("TextLabel", c)
                 cur.Text = "● JOGO ATUAL"; cur.Font = Enum.Font.GothamBold
@@ -904,8 +720,6 @@ local function renderGames(filter)
                 cur.BackgroundTransparency = 1
                 cur.Position = UDim2.new(0,60,0,28); cur.Size = UDim2.new(0,100,0,14)
             end
-
-            -- Descrição
             local dl = Instance.new("TextLabel", c)
             dl.Text = g.desc or ""; dl.Font = Enum.Font.Gotham; dl.TextSize = 10
             dl.TextColor3 = Color3.fromRGB(160,160,160)
@@ -913,8 +727,6 @@ local function renderGames(filter)
             dl.BackgroundTransparency = 1
             dl.Position = UDim2.new(0,60,0,(currentGame and currentGame.id == g.id) and 44 or 30)
             dl.Size = UDim2.new(1,-80,0,30)
-
-            -- Botão EXECUTAR
             local eb = Instance.new("TextButton", c)
             eb.Font = Enum.Font.GothamBold; eb.Text = "▶ EXECUTAR"
             eb.TextSize = 10; eb.TextColor3 = Color3.fromRGB(255,255,255)
@@ -923,20 +735,14 @@ local function renderGames(filter)
             eb.AnchorPoint = Vector2.new(1,0)
             eb.Position = UDim2.new(1,-10,0,10); eb.Size = UDim2.new(0,84,0,24)
             Instance.new("UICorner", eb).CornerRadius = UDim.new(0,6)
-
-            -- Estado do script
             local sl = Instance.new("TextLabel", c)
             sl.Text = ""; sl.Font = Enum.Font.GothamMedium; sl.TextSize = 9
             sl.TextColor3 = Color3.fromRGB(120,220,120)
             sl.TextXAlignment = Enum.TextXAlignment.Right; sl.BackgroundTransparency = 1
             sl.AnchorPoint = Vector2.new(1,0)
             sl.Position = UDim2.new(1,-10,0,42); sl.Size = UDim2.new(0,140,0,14)
-
-            -- Hover
             eb.MouseEnter:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(180,40,40)}) end)
             eb.MouseLeave:Connect(function() tween(eb, 0.12, {BackgroundColor3 = Color3.fromRGB(140,25,25)}) end)
-
-            -- Clique executar
             local running = false
             eb.MouseButton1Click:Connect(function()
                 if running then
@@ -947,25 +753,22 @@ local function renderGames(filter)
                 eb.Text = "⏳..."
                 sl.Text = "Carregando..."
                 sl.TextColor3 = Color3.fromRGB(220,200,80)
-
-                local ok = GameModule.execute(g, function(msg, kind)
+                GameModule.execute(g, function(msg, kind)
                     sl.Text = msg
                     sl.TextColor3 = kind == "success" and Color3.fromRGB(120,220,120)
                         or (kind == "error" and Color3.fromRGB(220,80,80) or Color3.fromRGB(220,200,80))
                 end)
-
                 task.wait(0.8)
                 eb.Text = "▶ EXECUTAR"
                 running = false
             end)
-
             table.insert(cards, c)
             y = y + 98
             found = found + 1
         end
     end
     if found == 0 then
-        local nr = Instance.new("TextLabel", tabJogos)
+        local nr = Instance.new("TextLabel", tJogos)
         nr.Text = "🔍 Nenhum jogo encontrado."
         nr.Font = Enum.Font.Gotham; nr.TextSize = 12
         nr.TextColor3 = Color3.fromRGB(160,160,160); nr.BackgroundTransparency = 1
@@ -973,53 +776,40 @@ local function renderGames(filter)
         table.insert(cards, nr)
     end
 end
-
 searchInput:GetPropertyChangedSignal("Text"):Connect(function() renderGames(searchInput.Text) end)
 renderGames("")
 
 -- ══════════════════════════════════════════════════════════
 -- ABA 3: STATUS
 -- ══════════════════════════════════════════════════════════
-local tabStatus = createTabContent("Status")
-local sc = C.card(tabStatus, 8, 215)
-
+local tStatus = createTabContent("Status")
+local sc = C.card(tStatus, 8, 215)
 local stT = Instance.new("TextLabel", sc)
 stT.Text = "STATUS DO SISTEMA"; stT.Font = Enum.Font.GothamBold
 stT.TextSize = 13; stT.TextColor3 = Color3.fromRGB(255,255,255)
 stT.BackgroundTransparency = 1
 stT.Position = UDim2.new(0,14,0,10); stT.Size = UDim2.new(1,-28,0,18)
 stT.TextXAlignment = Enum.TextXAlignment.Left
-
 local sln = Instance.new("Frame", sc)
 sln.BackgroundColor3 = Color3.fromRGB(140,25,25); sln.BackgroundTransparency = 0.5
 sln.BorderSizePixel = 0
 sln.Position = UDim2.new(0,14,0,30); sln.Size = UDim2.new(1,-28,0,1)
-
-local statusRows = {}
-local rowY = 40
-local defs = {
-    {k="executor", l="Executor"},
-    {k="game",     l="Jogo"},
-    {k="player",   l="Player"},
-    {k="fps",      l="FPS"},
-    {k="ping",     l="Ping"},
-    {k="players",  l="Jogadores"},
-    {k="place",    l="PlaceId"},
-    {k="job",      l="JobId"},
-}
-for _, d in ipairs(defs) do
+local statusRows, rowY = {}, 40
+for _, d in ipairs({
+    {k="executor", l="Executor"},{k="game", l="Jogo"},{k="player", l="Player"},
+    {k="fps", l="FPS"},{k="ping", l="Ping"},{k="players", l="Jogadores"},
+    {k="place", l="PlaceId"},{k="job", l="JobId"},
+}) do
     local b = Instance.new("TextLabel", sc)
     b.Text = "●"; b.Font = Enum.Font.GothamBold; b.TextSize = 11
     b.TextColor3 = Color3.fromRGB(80,220,80); b.BackgroundTransparency = 1
     b.Position = UDim2.new(0,14,0,rowY); b.Size = UDim2.new(0,14,0,16)
     b.TextXAlignment = Enum.TextXAlignment.Left
-
     local lb = Instance.new("TextLabel", sc)
     lb.Text = d.l..":"; lb.Font = Enum.Font.Gotham; lb.TextSize = 11
     lb.TextColor3 = Color3.fromRGB(170,170,170); lb.BackgroundTransparency = 1
     lb.Position = UDim2.new(0,30,0,rowY); lb.Size = UDim2.new(0,90,0,16)
     lb.TextXAlignment = Enum.TextXAlignment.Left
-
     local v = Instance.new("TextLabel", sc)
     v.Text = "—"; v.Font = Enum.Font.GothamMedium; v.TextSize = 11
     v.TextColor3 = Color3.fromRGB(230,230,230); v.BackgroundTransparency = 1
@@ -1029,8 +819,6 @@ for _, d in ipairs(defs) do
     statusRows[d.k] = v
     rowY = rowY + 20
 end
-
--- Loop de status otimizado (1s)
 task.spawn(function()
     local fc, fs = 0, tick()
     addConn("fpsC", RunService.RenderStepped:Connect(function() fc = fc + 1 end))
@@ -1056,30 +844,136 @@ task.spawn(function()
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 4: FUNÇÕES (Movimentos + Visual + Misc)
+-- ABA 4: MOVIMENTOS
 -- ══════════════════════════════════════════════════════════
-local tFun = createTabContent("Funções")
-local fy = 8
-fy = C.section(tFun, "Movimentos", fy)
-C.toggle(tFun, "Noclip", fy, false, function(s) State.noclip=s end); fy = fy + BTN_H + GAP
-C.toggle(tFun, "Infinite Jump", fy, false, function(s) State.infJump=s end); fy = fy + BTN_H + GAP
-C.slider(tFun, "WalkSpeed", 0, 500, 16, fy, function(v)
-    State.walkSpeed=v
-    local h=getHum(); if h then h.WalkSpeed=v end
-end); fy = fy + 44 + GAP
-C.slider(tFun, "JumpPower", 0, 500, 50, fy, function(v)
-    State.jumpPower=v
-    local h=getHum(); if h then h.JumpPower=v h.UseJumpPower=true end
-end); fy = fy + 44 + GAP
-C.button(tFun, "Fly (FlyGuiV3)", fy, function()
+local tMov = createTabContent("Movimentos")
+local y = 8
+y = C.section(tMov, "Básicos", y)
+C.toggle(tMov, "Noclip", y, false, function(s) State.noclip=s end); y = y + BTN_H + GAP
+C.toggle(tMov, "Infinite Jump", y, false, function(s) State.infJump=s end); y = y + BTN_H + GAP
+C.slider(tMov, "WalkSpeed", 0, 500, 16, y, function(v)
+    State.walkSpeed=v; local h=getHum(); if h then h.WalkSpeed=v end
+end); y = y + 42 + GAP
+C.slider(tMov, "JumpPower", 0, 500, 50, y, function(v)
+    State.jumpPower=v; local h=getHum(); if h then h.JumpPower=v h.UseJumpPower=true end
+end); y = y + 42 + GAP
+y = C.section(tMov, "Fly / Extras", y)
+C.button(tMov, "Fly (FlyGuiV3)", y, function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
-end); fy = fy + BTN_H + GAP
-C.button(tFun, "Reset Character", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tMov, "Infinite Yield (Admin)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end); y = y + BTN_H + GAP
+y = C.section(tMov, "Ações", y)
+C.button(tMov, "Reset Character", y, function()
     local h=getHum(); if h then h.Health=0 end
-end); fy = fy + BTN_H + GAP
+end); y = y + BTN_H + GAP
+C.button(tMov, "Sit", y, function() local h=getHum(); if h then h.Sit=true end end); y = y + BTN_H + GAP
+C.button(tMov, "Jump (Force)", y, function()
+    local h=getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+end); y = y + BTN_H + GAP
+C.button(tMov, "Dance", y, function()
+    local h=getHum(); if h then h:ChangeState(Enum.HumanoidStateType.Landed) end
+end); y = y + BTN_H + GAP
+C.button(tMov, "Teleport to Spawn", y, function()
+    local sp = workspace:FindFirstChildOfClass("SpawnLocation")
+    if sp then tp(sp.Position + Vector3.new(0,5,0)) end
+end); y = y + BTN_H + GAP
+C.toggle(tMov, "Vehicle Fly", y, false, function(s)
+    if s then
+        local seat = getChar() and getChar():FindFirstChildOfClass("VehicleSeat")
+        if seat then
+            local bv = Instance.new("BodyVelocity", seat)
+            bv.MaxForce = Vector3.new(1e5,1e5,1e5)
+            bv.Velocity = Vector3.new(0,50,0)
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tMov, "Reset Stats", y, function()
+    local h = getHum()
+    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
+end)
 
-fy = C.section(tFun, "Visual", fy)
-C.toggle(tFun, "Fullbright", fy, false, function(s)
+-- ══════════════════════════════════════════════════════════
+-- ABA 5: COMBATE
+-- ══════════════════════════════════════════════════════════
+local tCom = createTabContent("Combate")
+y = 8
+y = C.section(tCom, "Aim", y)
+C.toggle(tCom, "Aimbot (Universal)", y, false, function(s)
+    if s then loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))() end
+end); y = y + BTN_H + GAP
+C.toggle(tCom, "Silent Aim", y, false, function(s)
+    if s then loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))() end
+end); y = y + BTN_H + GAP
+C.toggle(tCom, "Triggerbot", y, false, nil); y = y + BTN_H + GAP
+y = C.section(tCom, "Ataques", y)
+C.button(tCom, "Kill All (Touch)", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and getHRP() then
+                firetouchinterest(getHRP(), hrp, 0)
+                firetouchinterest(getHRP(), hrp, 1)
+            end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tCom, "Kill Aura (Instant)", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if h then h.Health = 0 end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tCom, "Damage All (500)", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if h then h:TakeDamage(500) end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tCom, "Fling Nearest", y, function()
+    local c, d = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and getHRP() then
+                local dd = (hrp.Position - getHRP().Position).Magnitude
+                if dd < d then c, d = p, dd end
+            end
+        end
+    end
+    if c and getHRP() then getHRP().CFrame = c.Character.HumanoidRootPart.CFrame end
+end); y = y + BTN_H + GAP
+y = C.section(tCom, "Estado", y)
+C.toggle(tCom, "Godmode", y, false, function(s) State.godmode=s end); y = y + BTN_H + GAP
+C.toggle(tCom, "Anti-Fling", y, false, function(s) State.antiFling=s end); y = y + BTN_H + GAP
+C.toggle(tCom, "Anti-AFK", y, false, function(s) State.antiAFK=s end); y = y + BTN_H + GAP
+C.toggle(tCom, "Anti-Void", y, false, function(s) State.antiVoid=s end); y = y + BTN_H + GAP
+C.button(tCom, "Heal Self (Full)", y, function()
+    local h = getHum(); if h then h.Health = h.MaxHealth end
+end); y = y + BTN_H + GAP
+C.button(tCom, "Rage Mode (AirHub)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 6: VISUAL
+-- ══════════════════════════════════════════════════════════
+local tVis = createTabContent("Visual")
+y = 8
+y = C.section(tVis, "ESP / Chams", y)
+C.toggle(tVis, "ESP Box (Universal)", y, false, function(s)
+    if s then loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))() end
+end); y = y + BTN_H + GAP
+C.button(tVis, "AirHub V2 (ESP + Aimbot)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end); y = y + BTN_H + GAP
+y = C.section(tVis, "Iluminação", y)
+C.toggle(tVis, "Fullbright", y, false, function(s)
     if s then
         Lighting.Ambient = Color3.fromRGB(178,178,178)
         Lighting.OutdoorAmbient = Color3.fromRGB(178,178,178)
@@ -1089,105 +983,154 @@ C.toggle(tFun, "Fullbright", fy, false, function(s)
         Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
         Lighting.Brightness = 1
     end
-end); fy = fy + BTN_H + GAP
-C.toggle(tFun, "Remove Fog", fy, false, function(s)
+end); y = y + BTN_H + GAP
+C.toggle(tVis, "Remove Fog", y, false, function(s)
     if s then Lighting.FogEnd = 100000 Lighting.FogStart = 0
     else Lighting.FogEnd = 1000 Lighting.FogStart = 0 end
-end); fy = fy + BTN_H + GAP
-C.slider(tFun, "Field of View", 1, 120, 70, fy, function(v)
-    State.fov = v
-    workspace.CurrentCamera.FieldOfView = v
-end); fy = fy + 44 + GAP
-
-fy = C.section(tFun, "Misc", fy)
-C.toggle(tFun, "Anti-AFK", fy, false, function(s) State.antiAFK = s end); fy = fy + BTN_H + GAP
-C.toggle(tFun, "Godmode", fy, false, function(s)
-    State.godmode = s
-    if s then
-        local h = getHum()
-        if h then h.MaxHealth = math.huge h.Health = math.huge end
+end); y = y + BTN_H + GAP
+C.slider(tVis, "Field of View", 1, 120, 70, y, function(v)
+    State.fov = v; workspace.CurrentCamera.FieldOfView = v
+end); y = y + 42 + GAP
+y = C.section(tVis, "Efeitos", y)
+C.button(tVis, "Bloom ON", y, function()
+    local b = Instance.new("BloomEffect", Lighting)
+    b.Intensity = 1; b.Size = 24
+end); y = y + BTN_H + GAP
+C.button(tVis, "Color Correct (Vivid)", y, function()
+    local c = Instance.new("ColorCorrectionEffect", Lighting)
+    c.Saturation = 0.5; c.Contrast = 0.3
+end); y = y + BTN_H + GAP
+C.button(tVis, "Remove Post Effects", y, function()
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") then v:Destroy() end
     end
-end); fy = fy + BTN_H + GAP
-C.button(tFun, "Server Hop", fy, function()
-    local ok, servers = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
-    end)
-    if ok and servers and servers.data then
-        for _, s in ipairs(servers.data) do
-            if s.playing < s.maxPlayers and s.id ~= game.JobId then
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, s.id, LP)
-                break
-            end
-        end
+end); y = y + BTN_H + GAP
+C.button(tVis, "Remove Textures", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("Decal") or v:IsA("Texture") then v.Transparency = 1 end
     end
-end); fy = fy + BTN_H + GAP
-C.button(tFun, "Rejoin Server", fy, function()
-    TeleportService:Teleport(game.PlaceId, LP)
-end); fy = fy + BTN_H + GAP
-
-fy = C.section(tFun, "Configurações", fy)
-C.button(tFun, "Unload Menu", fy, function()
-    cleanConns()
-    ScreenGui:Destroy()
-    ToastGui:Destroy()
-end); fy = fy + BTN_H + GAP
-C.button(tFun, "Reset WalkSpeed (16)", fy, function()
-    State.walkSpeed = 16
-    local h = getHum(); if h then h.WalkSpeed = 16 end
+end); y = y + BTN_H + GAP
+C.button(tVis, "Restore Textures", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("Decal") or v:IsA("Texture") then v.Transparency = 0 end
+    end
+end); y = y + BTN_H + GAP
+C.button(tVis, "Remove Blur", y, function()
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("BlurEffect") then v:Destroy() end
+    end
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 5: PLAYERS
+-- ABA 7: JOGADOR
 -- ══════════════════════════════════════════════════════════
-local tPly = createTabContent("Players")
-fy = 8
-fy = C.section(tPly, "Lista de Jogadores", fy)
-
-local playerList = Instance.new("Frame", tPly)
-playerList.BackgroundColor3 = Color3.fromRGB(18,6,6); playerList.BackgroundTransparency = 0.3
-playerList.BorderSizePixel = 0
-playerList.Position = UDim2.new(0,PAD,0,fy); playerList.Size = UDim2.new(1,-PAD*2,0,200)
-Instance.new("UICorner", playerList).CornerRadius = UDim.new(0,8)
-
-local plLayout = Instance.new("UIListLayout", playerList)
-plLayout.Padding = UDim.new(0,4); plLayout.SortOrder = Enum.SortOrder.Name
-plLayout.Parent = playerList
-
-local function renderPlayers()
-    for _, c in ipairs(playerList:GetChildren()) do
-        if c:IsA("TextButton") then c:Destroy() end
-    end
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then
-            local pb = Instance.new("TextButton", playerList)
-            pb.Text = "  "..p.Name
-            pb.Font = Enum.Font.Gotham; pb.TextSize = 12
-            pb.TextColor3 = Color3.fromRGB(220,220,220)
-            pb.BackgroundColor3 = Color3.fromRGB(25,8,8); pb.BackgroundTransparency = 0.4
-            pb.BorderSizePixel = 0; pb.Size = UDim2.new(1,0,0,30)
-            pb.AutoButtonColor = false; pb.TextXAlignment = Enum.TextXAlignment.Left
-            Instance.new("UICorner", pb).CornerRadius = UDim.new(0,5)
-
-            pb.MouseButton1Click:Connect(function()
-                local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
-                if hrp and getHRP() then
-                    getHRP().CFrame = hrp.CFrame + Vector3.new(0,0,3)
-                    showToast("▶ Teleportado para "..p.Name, "success")
-                else
-                    showToast("⚠ Jogador sem personagem", "warning")
-                end
-            end)
+local tJog = createTabContent("Jogador")
+y = 8
+y = C.section(tJog, "Aparência", y)
+C.button(tJog, "Become Invisible", y, function()
+    local ch = getChar()
+    if ch then for _, p in ipairs(ch:GetDescendants()) do
+        if p:IsA("BasePart") then p.Transparency = 1 end
+    end end
+end); y = y + BTN_H + GAP
+C.button(tJog, "Become Visible", y, function()
+    local ch = getChar()
+    if ch then for _, p in ipairs(ch:GetDescendants()) do
+        if p:IsA("BasePart") then p.Transparency = 0 end
+    end end
+end); y = y + BTN_H + GAP
+C.button(tJog, "Rainbow Character", y, function()
+    task.spawn(function()
+        while task.wait(0.15) do
+            local ch = getChar()
+            if ch then for _, p in ipairs(ch:GetDescendants()) do
+                if p:IsA("BasePart") then p.Color = Color3.fromHSV(tick()%1, 1, 1) end
+            end end
         end
+    end)
+end); y = y + BTN_H + GAP
+y = C.section(tJog, "Time / Equipe", y)
+C.button(tJog, "Change Team (Random)", y, function()
+    local t = game:GetService("Teams"):GetTeams()
+    if #t > 0 then LP.Team = t[math.random(1,#t)] end
+end); y = y + BTN_H + GAP
+y = C.section(tJog, "Saúde", y)
+C.button(tJog, "Heal Self (Full)", y, function()
+    local h = getHum(); if h then h.Health = h.MaxHealth end
+end); y = y + BTN_H + GAP
+C.button(tJog, "Reset Stats", y, function()
+    local h = getHum()
+    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
+end); y = y + BTN_H + GAP
+y = C.section(tJog, "Anti", y)
+C.toggle(tJog, "Anti-AFK", y, false, function(s) State.antiAFK = s end); y = y + BTN_H + GAP
+C.toggle(tJog, "Anti-Void", y, false, function(s) State.antiVoid = s end); y = y + BTN_H + GAP
+C.toggle(tJog, "Anti-Fling", y, false, function(s) State.antiFling = s end); y = y + BTN_H + GAP
+y = C.section(tJog, "Posição", y)
+C.button(tJog, "Save Position", y, function()
+    local h = getHRP()
+    if h then getgenv().AKZ_Saved = h.CFrame end
+    showToast("✓ Posição salva", "success")
+end); y = y + BTN_H + GAP
+C.button(tJog, "Load Position", y, function()
+    if getgenv().AKZ_Saved then tp(getgenv().AKZ_Saved.Position)
+        showToast("✓ Posição carregada", "success")
+    else showToast("⚠ Nenhuma posição salva", "warning") end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 8: MUNDO
+-- ══════════════════════════════════════════════════════════
+local tMun = createTabContent("Mundo")
+y = 8
+y = C.section(tMun, "Ambiente", y)
+C.slider(tMun, "Gravity", 0, 500, 196, y, function(v)
+    State.gravity = v; workspace.Gravity = v
+end); y = y + 42 + GAP
+C.slider(tMun, "Time of Day", 0, 24, 14, y, function(v)
+    Lighting.ClockTime = v
+end); y = y + 42 + GAP
+y = C.section(tMun, "Iluminação", y)
+C.button(tMun, "Fullbright World", y, function()
+    Lighting.Ambient = Color3.fromRGB(255,255,255)
+    Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+    Lighting.Brightness = 5
+end); y = y + BTN_H + GAP
+C.button(tMun, "Reset Lighting", y, function()
+    Lighting.Ambient = Color3.fromRGB(70,70,70)
+    Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
+    Lighting.Brightness = 1; Lighting.ClockTime = 14
+end); y = y + BTN_H + GAP
+C.button(tMun, "Add Fog", y, function() Lighting.FogEnd = 100 end); y = y + BTN_H + GAP
+C.button(tMun, "Remove Fog", y, function() Lighting.FogEnd = 100000 end); y = y + BTN_H + GAP
+y = C.section(tMun, "Gravidade", y)
+C.toggle(tMun, "Low Gravity (Moon)", y, false, function(s)
+    workspace.Gravity = s and 20 or 196.2
+end); y = y + BTN_H + GAP
+C.toggle(tMun, "Freeze Time", y, false, nil); y = y + BTN_H + GAP
+y = C.section(tMun, "Limpeza", y)
+C.button(tMun, "Delete Map Parts", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and v.Anchored then v:Destroy() end
     end
-end
+end); y = y + BTN_H + GAP
+C.button(tMun, "Remove Effects", y, function()
+    for _, v in ipairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") then v:Destroy() end
+    end
+end)
 
-renderPlayers()
-Players.PlayerAdded:Connect(function() task.wait(0.5) renderPlayers() end)
-Players.PlayerRemoving:Connect(function() task.wait(0.1) renderPlayers() end)
-
-fy = fy + 210
-fy = C.section(tPly, "Ações", fy)
-C.button(tPly, "Bring All to Me", fy, function()
+-- ══════════════════════════════════════════════════════════
+-- ABA 9: DIVERSÃO
+-- ══════════════════════════════════════════════════════════
+local tDiv = createTabContent("Diversão")
+y = 8
+y = C.section(tDiv, "Emotes", y)
+C.button(tDiv, "All Emotes", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+end); y = y + BTN_H + GAP
+y = C.section(tDiv, "Interações", y)
+C.button(tDiv, "Bring All to Me", y, function()
     local m = getHRP()
     if m then
         for _, p in ipairs(Players:GetPlayers()) do
@@ -1197,128 +1140,270 @@ C.button(tPly, "Bring All to Me", fy, function()
             end
         end
     end
-end); fy = fy + BTN_H + GAP
-C.button(tPly, "Fling All", fy, function()
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and p.Character then
-            local h = p.Character:FindFirstChildOfClass("Humanoid")
-            if h then h:ChangeState(Enum.HumanoidStateType.Physics) end
-        end
-    end
-end); fy = fy + BTN_H + GAP
-C.button(tPly, "Freeze All", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Freeze All", y, function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             if hrp then hrp.Anchored = true end
         end
     end
-end); fy = fy + BTN_H + GAP
-C.button(tPly, "Unfreeze All", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Unfreeze All", y, function()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP and p.Character then
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
             if hrp then hrp.Anchored = false end
         end
     end
-end)
-
--- ══════════════════════════════════════════════════════════
--- ABA 6: LOCAL PLAYER
--- ══════════════════════════════════════════════════════════
-local tLoc = createTabContent("LocalPlayer")
-fy = 8
-fy = C.section(tLoc, "Aparência", fy)
-C.button(tLoc, "Become Invisible", fy, function()
-    local ch = getChar()
-    if ch then for _, p in ipairs(ch:GetDescendants()) do
-        if p:IsA("BasePart") then p.Transparency = 1 end
-    end end
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Become Visible", fy, function()
-    local ch = getChar()
-    if ch then for _, p in ipairs(ch:GetDescendants()) do
-        if p:IsA("BasePart") then p.Transparency = 0 end
-    end end
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Rainbow Character", fy, function()
-    task.spawn(function()
-        while task.wait(0.15) do
-            local ch = getChar()
-            if ch then for _, p in ipairs(ch:GetDescendants()) do
-                if p:IsA("BasePart") then p.Color = Color3.fromHSV(tick()%1, 1, 1) end
-            end end
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Fling All", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local h = p.Character:FindFirstChildOfClass("Humanoid")
+            if h then h:ChangeState(Enum.HumanoidStateType.Physics) end
         end
-    end)
-end); fy = fy + BTN_H + GAP
-
-fy = C.section(tLoc, "Saúde", fy)
-C.button(tLoc, "Heal Self (Full)", fy, function()
-    local h = getHum(); if h then h.Health = h.MaxHealth end
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Reset Stats", fy, function()
-    local h = getHum()
-    if h then h.WalkSpeed=16 h.JumpPower=50 h.Health=h.MaxHealth end
-end); fy = fy + BTN_H + GAP
-
-fy = C.section(tLoc, "Time / Equipe", fy)
-C.button(tLoc, "Change Team (Random)", fy, function()
-    local t = game:GetService("Teams"):GetTeams()
-    if #t > 0 then LP.Team = t[math.random(1,#t)] end
-end); fy = fy + BTN_H + GAP
-
-fy = C.section(tLoc, "Teleportes", fy)
-C.button(tLoc, "Teleport to Spawn", fy, function()
-    local sp = workspace:FindFirstChildOfClass("SpawnLocation")
-    if sp then tp(sp.Position + Vector3.new(0,5,0)) end
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Void Teleport", fy, function()
-    tp(Vector3.new(0,-500,0))
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Teleport Up (+50)", fy, function()
-    local h = getHRP()
-    if h then h.CFrame = h.CFrame + Vector3.new(0,50,0) end
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Save Position", fy, function()
-    local h = getHRP()
-    if h then getgenv().AKZ_SavedPos = h.CFrame end
-    showToast("✓ Posição salva", "success")
-end); fy = fy + BTN_H + GAP
-C.button(tLoc, "Load Position", fy, function()
-    if getgenv().AKZ_SavedPos then
-        tp(getgenv().AKZ_SavedPos.Position)
-        showToast("✓ Posição carregada", "success")
-    else
-        showToast("⚠ Nenhuma posição salva", "warning")
+    end
+end); y = y + BTN_H + GAP
+y = C.section(tDiv, "Efeitos", y)
+C.button(tDiv, "Explode All", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local e = Instance.new("Explosion", workspace)
+                e.Position = hrp.Position; e.BlastRadius = 5
+            end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Fake Lag (Local)", y, function()
+    for _ = 1, 30 do
+        local p = Instance.new("Part", workspace)
+        p.Size = Vector3.new(100,100,100); p.Transparency = 1
+        p.Anchored = true; p.CanCollide = false
+    end
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Clear Fake Parts", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("Part") and v.Transparency == 1
+        and v.Size == Vector3.new(100,100,100) then v:Destroy() end
+    end
+end); y = y + BTN_H + GAP
+C.button(tDiv, "Teleport to Random Player", y, function()
+    local o = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            table.insert(o, p)
+        end
+    end
+    if #o > 0 and getHRP() then
+        local t = o[math.random(1,#o)]
+        getHRP().CFrame = t.Character.HumanoidRootPart.CFrame
     end
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 7: MISC (Mundo + Chat + Utilidades)
+-- ABA 10: ADMIN
 -- ══════════════════════════════════════════════════════════
-local tMisc = createTabContent("Misc")
-fy = 8
-fy = C.section(tMisc, "Mundo", fy)
-C.slider(tMisc, "Gravity", 0, 500, 196, fy, function(v)
-    State.gravity = v; workspace.Gravity = v
-end); fy = fy + 44 + GAP
-C.slider(tMisc, "Time of Day", 0, 24, 14, fy, function(v)
-    Lighting.ClockTime = v
-end); fy = fy + 44 + GAP
-C.button(tMisc, "Fullbright World", fy, function()
-    Lighting.Ambient = Color3.fromRGB(255,255,255)
-    Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
-    Lighting.Brightness = 5
-end); fy = fy + BTN_H + GAP
-C.button(tMisc, "Reset Lighting", fy, function()
-    Lighting.Ambient = Color3.fromRGB(70,70,70)
-    Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
-    Lighting.Brightness = 1; Lighting.ClockTime = 14
-end); fy = fy + BTN_H + GAP
+local tAdm = createTabContent("Admin")
+y = 8
+y = C.section(tAdm, "Admins", y)
+C.button(tAdm, "Infinite Yield", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Nameless Admin", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Fates Admin", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/fatesc/fates-admin/main/main.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "PasteWare v2", y, function()
+    getgenv().bypass_adonis = true
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/FakeAngles/PasteWare-v2/refs/heads/main/PasteWare.lua"))()
+end); y = y + BTN_H + GAP
+y = C.section(tAdm, "Hubs", y)
+C.button(tAdm, "Kagu Hub (100+ jogos)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Kaguya11/KaguHubRework/main/Scripts/Loader.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "ZaZa Hub", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Berkcan61/ZaZa-Hub/refs/heads/main/ZaZa.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "AirHub V2", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Space Hub", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/onesoftworks/SpaceHub/main/SpaceHub.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Zephyr Universal", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Dragonfire-RGB/Zephyr-Universal/main/Zephyr"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Pastefy Universal Hub", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/KercX/PastefyScripts/main/scripts/PastefyUniversalHub.lua"))()
+end); y = y + BTN_H + GAP
+y = C.section(tAdm, "Debug", y)
+C.button(tAdm, "Dex Explorer (via IY)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Remote Spy (via Nameless)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tAdm, "Adonis Bypass", y, function()
+    getgenv().bypass_adonis = true
+    showToast("✓ Bypass Adonis ativado", "success")
+end)
 
-fy = C.section(tMisc, "Chat", fy)
+-- ══════════════════════════════════════════════════════════
+-- ABA 11: TELEPORTES
+-- ══════════════════════════════════════════════════════════
+local tTp = createTabContent("Teleportes")
+y = 8
+y = C.section(tTp, "Locais", y)
+C.button(tTp, "Teleport to Spawn", y, function()
+    local sp = workspace:FindFirstChildOfClass("SpawnLocation")
+    if sp then tp(sp.Position + Vector3.new(0,5,0)) end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport Up (+50)", y, function()
+    local h = getHRP(); if h then h.CFrame = h.CFrame + Vector3.new(0,50,0) end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport Down (-50)", y, function()
+    local h = getHRP(); if h then h.CFrame = h.CFrame - Vector3.new(0,50,0) end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport to Camera", y, function()
+    tp(workspace.CurrentCamera.CFrame.Position)
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport to Mouse", y, function()
+    local m = LP:GetMouse()
+    if m.Hit then tp(m.Hit.Position + Vector3.new(0,3,0)) end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Void Teleport", y, function() tp(Vector3.new(0,-500,0)) end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport to Highest", y, function()
+    local hi = -math.huge
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and v.Position.Y > hi then hi = v.Position.Y end
+    end
+    tp(Vector3.new(0, hi+10, 0))
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport to Lowest", y, function()
+    local lo = math.huge
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") and v.Position.Y < lo then lo = v.Position.Y end
+    end
+    tp(Vector3.new(0, lo+10, 0))
+end); y = y + BTN_H + GAP
+y = C.section(tTp, "Players", y)
+C.button(tTp, "Teleport to Nearest", y, function()
+    local c, d = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and getHRP() then
+            local dd = (p.Character.HumanoidRootPart.Position - getHRP().Position).Magnitude
+            if dd < d then c, d = p, dd end
+        end
+    end
+    if c and getHRP() then getHRP().CFrame = c.Character.HumanoidRootPart.CFrame end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Teleport All to Me", y, function()
+    local m = getHRP()
+    if m then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then hrp.CFrame = m.CFrame + Vector3.new(3,0,0) end
+            end
+        end
+    end
+end); y = y + BTN_H + GAP
+y = C.section(tTp, "Memória", y)
+C.button(tTp, "Save Position (Slot)", y, function()
+    local h = getHRP(); if h then getgenv().AKZ_Saved = h.CFrame end
+    showToast("✓ Salvo", "success")
+end); y = y + BTN_H + GAP
+C.button(tTp, "Load Position (Slot)", y, function()
+    if getgenv().AKZ_Saved then tp(getgenv().AKZ_Saved.Position) end
+end); y = y + BTN_H + GAP
+C.button(tTp, "Copy Position", y, function()
+    local h = getHRP()
+    if h and setclipboard then
+        setclipboard(tostring(h.Position))
+        showToast("✓ Copiado", "success")
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 12: SERVIDOR
+-- ══════════════════════════════════════════════════════════
+local tSrv = createTabContent("Servidor")
+y = 8
+y = C.section(tSrv, "Conexão", y)
+C.button(tSrv, "Rejoin Server", y, function()
+    TeleportService:Teleport(game.PlaceId, LP)
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Server Hop (Low)", y, function()
+    local ok, s = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
+    end)
+    if ok and s and s.data then
+        for _, v in ipairs(s.data) do
+            if v.playing < v.maxPlayers and v.id ~= game.JobId then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, v.id, LP)
+                break
+            end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Server Hop (Full)", y, function()
+    local ok, s = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/"..game.PlaceId.."/servers/Public?limit=100"))
+    end)
+    if ok and s and s.data then
+        local b, mx = nil, 0
+        for _, v in ipairs(s.data) do
+            if v.playing > mx and v.id ~= game.JobId then b, mx = v, v.playing end
+        end
+        if b then TeleportService:TeleportToPlaceInstance(game.PlaceId, b.id, LP) end
+    end
+end); y = y + BTN_H + GAP
+y = C.section(tSrv, "Info", y)
+C.button(tSrv, "Copy Job ID", y, function()
+    if setclipboard then
+        setclipboard(game.JobId)
+        showToast("✓ Copiado", "success")
+    end
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Print Server Info", y, function()
+    print("Place:", game.PlaceId, "Job:", game.JobId)
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Print All Players", y, function()
+    for _, p in ipairs(Players:GetPlayers()) do print(p.Name, p.DisplayName) end
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Player Count", y, function()
+    showToast("Players: "..#Players:GetPlayers().."/"..Players.MaxPlayers, "info")
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Print All Teams", y, function()
+    for _, t in ipairs(game:GetService("Teams"):GetTeams()) do print(t.Name) end
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Server Stats", y, function()
+    showToast("FPS: "..math.floor(1/RunService.RenderStepped:Wait()).." | Ping: "..math.floor(LP:GetNetworkPing()*1000).."ms", "info")
+end); y = y + BTN_H + GAP
+y = C.section(tSrv, "Sair", y)
+C.button(tSrv, "Kick Self (Leave)", y, function()
+    LP:Kick("Saiu pelo AKZ Universal")
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Disconnect", y, function()
+    game:Shutdown()
+end); y = y + BTN_H + GAP
+C.button(tSrv, "Print Chat/Place Info", y, function()
+    print("Place:", game.PlaceId, "Players:", #Players:GetPlayers())
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 13: CHAT
+-- ══════════════════════════════════════════════════════════
+local tCh = createTabContent("Chat")
+y = 8
 local spamOn = false
-C.toggle(tMisc, "Chat Spam", fy, false, function(s)
+y = C.section(tCh, "Spam", y)
+C.toggle(tCh, "Chat Spam", y, false, function(s)
     spamOn = s
     if s then
         task.spawn(function()
@@ -1328,79 +1413,334 @@ C.toggle(tMisc, "Chat Spam", fy, false, function(s)
             end
         end)
     end
-end); fy = fy + BTN_H + GAP
-C.slider(tMisc, "Spam Speed (s)", 0.1, 5, 1, fy, function(v) State.spamSpeed = v end); fy = fy + 44 + GAP
-C.button(tMisc, "Say 'Hello World'", fy, function() chat("Hello World") end); fy = fy + BTN_H + GAP
-C.button(tMisc, "Say 'GG'", fy, function() chat("GG") end); fy = fy + BTN_H + GAP
+end); y = y + BTN_H + GAP
+C.slider(tCh, "Spam Speed (s)", 0.1, 5, 1, y, function(v) State.spamSpeed = v end); y = y + 42 + GAP
+y = C.section(tCh, "Mensagens", y)
+C.button(tCh, "Say 'Hello World'", y, function() chat("Hello World") end); y = y + BTN_H + GAP
+C.button(tCh, "Say 'GG'", y, function() chat("GG") end); y = y + BTN_H + GAP
+C.button(tCh, "Say 'AKZ on top'", y, function() chat("AKZ on top") end); y = y + BTN_H + GAP
+C.button(tCh, "Clear Chat", y, function()
+    for _ = 1, 30 do chat("") end
+end); y = y + BTN_H + GAP
+C.button(tCh, "Fake System Message", y, function()
+    local g = Instance.new("ScreenGui", LP.PlayerGui)
+    local l = Instance.new("TextLabel", g)
+    l.Text = "[Servidor] AKZ Universal ativado"
+    l.Size = UDim2.new(0,300,0,30)
+    l.Position = UDim2.new(0.5,-150,0,100)
+    l.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    l.TextColor3 = Color3.fromRGB(255,255,255)
+    task.delay(5, function() g:Destroy() end)
+end); y = y + BTN_H + GAP
+C.button(tCh, "Emote Spam", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tCh, "Chat Mimic (Nearest)", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/UnknownAMD/Chat-Mimicker-V1/main/ChatMimic.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tCh, "Bypass Filter", y, function() end); y = y + BTN_H + GAP
+C.button(tCh, "Copy Last Message", y, function() end); y = y + BTN_H + GAP
+C.button(tCh, "Print Chat Log", y, function() end); y = y + BTN_H + GAP
+C.button(tCh, "Set Spam Message", y, function()
+    showToast("No console: State.spamMsg = 'texto'", "info")
+end)
 
-fy = C.section(tMisc, "Utilidades", fy)
-C.button(tMisc, "Copy Position", fy, function()
-    local h = getHRP()
-    if h and setclipboard then
-        setclipboard(tostring(h.Position))
-        showToast("✓ Posição copiada", "success")
+-- ══════════════════════════════════════════════════════════
+-- ABA 14: CÂMERA
+-- ══════════════════════════════════════════════════════════
+local tCam = createTabContent("Câmera")
+y = 8
+y = C.section(tCam, "FOV", y)
+C.button(tCam, "Zoom In (-10)", y, function()
+    workspace.CurrentCamera.FieldOfView = math.max(1, workspace.CurrentCamera.FieldOfView - 10)
+end); y = y + BTN_H + GAP
+C.button(tCam, "Zoom Out (+10)", y, function()
+    workspace.CurrentCamera.FieldOfView = math.min(120, workspace.CurrentCamera.FieldOfView + 10)
+end); y = y + BTN_H + GAP
+C.button(tCam, "Reset FOV (70)", y, function()
+    workspace.CurrentCamera.FieldOfView = 70
+end); y = y + BTN_H + GAP
+C.button(tCam, "FOV 120", y, function()
+    workspace.CurrentCamera.FieldOfView = 120
+end); y = y + BTN_H + GAP
+C.button(tCam, "FOV 1", y, function()
+    workspace.CurrentCamera.FieldOfView = 1
+end); y = y + BTN_H + GAP
+y = C.section(tCam, "Modo", y)
+C.button(tCam, "First Person", y, function()
+    LP.CameraMode = Enum.CameraMode.LockFirstPerson
+end); y = y + BTN_H + GAP
+C.button(tCam, "Third Person", y, function()
+    LP.CameraMode = Enum.CameraMode.Classic
+end); y = y + BTN_H + GAP
+C.button(tCam, "Reset Camera", y, function()
+    workspace.CurrentCamera.CameraSubject = getHum()
+end); y = y + BTN_H + GAP
+C.button(tCam, "Lock to Torso", y, function()
+    local ch = getChar()
+    local torso = ch and (ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso"))
+    if torso then workspace.CurrentCamera.CameraSubject = torso end
+end); y = y + BTN_H + GAP
+C.button(tCam, "Spectate Player", y, function() end); y = y + BTN_H + GAP
+C.button(tCam, "Camera Shake", y, function() end); y = y + BTN_H + GAP
+C.toggle(tCam, "Invert Camera", y, false, nil); y = y + BTN_H + GAP
+C.button(tCam, "Free Cam", y, function() end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 15: PROTEÇÃO
+-- ══════════════════════════════════════════════════════════
+local tPro = createTabContent("Proteção")
+y = 8
+y = C.section(tPro, "Anti", y)
+C.toggle(tPro, "Anti-Kick", y, false, function(s)
+    if s then
+        local mt = getrawmetatable and getrawmetatable(game)
+        if mt then
+            local old = mt.__namecall
+            setreadonly(mt, false)
+            mt.__namecall = newcclosure(function(self, ...)
+                if getnamecallmethod() == "Kick" then return nil end
+                return old(self, ...)
+            end)
+            setreadonly(mt, true)
+        end
     end
-end); fy = fy + BTN_H + GAP
-C.button(tMisc, "Ping (ms)", fy, function()
+end); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-Fling", y, false, function(s) State.antiFling=s end); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-Void", y, false, function(s) State.antiVoid=s end); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-AFK", y, false, function(s) State.antiAFK=s end); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-Teleport", y, false, nil); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-Invisible", y, false, nil); y = y + BTN_H + GAP
+C.toggle(tPro, "Anti-God", y, false, nil); y = y + BTN_H + GAP
+C.toggle(tPro, "Safe Mode", y, false, nil); y = y + BTN_H + GAP
+C.toggle(tPro, "Stealth Mode", y, false, nil); y = y + BTN_H + GAP
+y = C.section(tPro, "Limpeza", y)
+C.button(tPro, "Remove All Flingers", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BodyVelocity") and v.Name ~= "AKZFly" then v:Destroy() end
+    end
+end); y = y + BTN_H + GAP
+C.button(tPro, "Clear Explosions", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("Explosion") then v:Destroy() end
+    end
+end); y = y + BTN_H + GAP
+C.button(tPro, "Reset Physics", y, function()
+    local h = getHRP()
+    if h then
+        for _, v in ipairs(h:GetChildren()) do
+            if v:IsA("BodyMover") or v:IsA("BodyVelocity") or v:IsA("BodyGyro") then v:Destroy() end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tPro, "Unlock All Parts", y, function()
+    for _, v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("BasePart") then v.Anchored = false end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 16: UTILIDADES
+-- ══════════════════════════════════════════════════════════
+local tUti = createTabContent("Utilidades")
+y = 8
+y = C.section(tUti, "Informações", y)
+C.button(tUti, "Copy Position", y, function()
+    local h = getHRP()
+    if h and setclipboard then setclipboard(tostring(h.Position)) end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Copy Rotation", y, function()
+    local h = getHRP()
+    if h and setclipboard then setclipboard(tostring(h.Orientation)) end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Ping (ms)", y, function()
     showToast("Ping: "..math.floor(LP:GetNetworkPing()*1000).." ms", "info")
-end); fy = fy + BTN_H + GAP
-C.button(tMisc, "Memory Usage", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tUti, "Memory Usage", y, function()
     showToast("Memory: "..math.floor(collectgarbage("count")/1024).." MB", "info")
-end); fy = fy + BTN_H + GAP
-C.button(tMisc, "Clear Console", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tUti, "Print Character Info", y, function()
+    local ch = getChar()
+    if ch then
+        for _, v in ipairs(ch:GetDescendants()) do
+            if v:IsA("BasePart") then print(v.Name, v.Position) end
+        end
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Print Workspace Stats", y, function()
+    print("Parts:", #workspace:GetDescendants())
+end); y = y + BTN_H + GAP
+y = C.section(tUti, "Debug", y)
+C.button(tUti, "Print Services", y, function()
+    for _, s in ipairs(game:GetChildren()) do
+        if s:IsA("Service") then print(s.ClassName) end
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Dump ReplicatedStorage", y, function()
+    for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+        print(v:GetFullName())
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Find RemoteEvents", y, function()
+    for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+        if v:IsA("RemoteEvent") then print(v.Name) end
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Find RemoteFunctions", y, function()
+    for _, v in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+        if v:IsA("RemoteFunction") then print(v.Name) end
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "List Executor Functions", y, function()
+    for _, f in ipairs({"getrawmetatable","setreadonly","newcclosure","hookfunction","getgenv","getgc","getsenv"}) do
+        print(f, type(rawget(getfenv(), f)))
+    end
+end); y = y + BTN_H + GAP
+C.button(tUti, "Clear Console", y, function()
     print("\n\n\n\n\n\n\n\n\n")
 end)
 
 -- ══════════════════════════════════════════════════════════
--- ABA 8: CONFIGURAÇÕES
+-- ABA 17: SCRIPTS
+-- ══════════════════════════════════════════════════════════
+local tScr = createTabContent("Scripts")
+y = 8
+y = C.section(tScr, "Hubs Universais", y)
+C.button(tScr, "Infinite Yield", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "Nameless Admin", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/ltseverydayyou/Nameless-Admin/main/Source.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "PasteWare v2", y, function()
+    getgenv().bypass_adonis = true
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/FakeAngles/PasteWare-v2/refs/heads/main/PasteWare.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "AirHub V2", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Exunys/AirHub-V2/main/src/Main.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "Kagu Hub", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Kaguya11/KaguHubRework/main/Scripts/Loader.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "ZaZa Hub", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Berkcan61/ZaZa-Hub/refs/heads/main/ZaZa.lua"))()
+end); y = y + BTN_H + GAP
+y = C.section(tScr, "Utilitários", y)
+C.button(tScr, "Sp3arParvus", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/JakeHukari/Sp3arParvus/refs/heads/main/Sp3arParvus.lua", true))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "Universal ESP", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/zzerexx/scripts/main/UniversalEsp.lua", "UniversalEsp"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "Universal Aimbot", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/zzerexx/scripts/main/UniversalAimbot.lua", "UniversalAimbot"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "FlyGuiV3", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/XNEOFF/FlyGuiV3/main/FlyGuiV3.txt"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "RideAndSlide", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/synteriax/rideandslide/main/rideandslide.lua"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "Zephyr Universal", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/Dragonfire-RGB/Zephyr-Universal/main/Zephyr"))()
+end); y = y + BTN_H + GAP
+C.button(tScr, "All Emotes", y, function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"))()
+end)
+
+-- ══════════════════════════════════════════════════════════
+-- ABA 18: CONFIG
 -- ══════════════════════════════════════════════════════════
 local tCfg = createTabContent("Config")
-fy = 8
-fy = C.section(tCfg, "Reset", fy)
-C.button(tCfg, "Reset WalkSpeed (16)", fy, function()
+y = 8
+y = C.section(tCfg, "Reset", y)
+C.button(tCfg, "Reset WalkSpeed (16)", y, function()
     local h = getHum(); if h then h.WalkSpeed = 16 end
     State.walkSpeed = 16
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Reset JumpPower (50)", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reset JumpPower (50)", y, function()
     local h = getHum()
     if h then h.JumpPower = 50 h.UseJumpPower = true end
     State.jumpPower = 50
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Reset Gravity (196)", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reset Gravity (196)", y, function()
     workspace.Gravity = 196.2
     State.gravity = 196.2
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Reset FOV (70)", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reset FOV (70)", y, function()
     workspace.CurrentCamera.FieldOfView = 70
     State.fov = 70
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Reset Lighting", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reset Lighting", y, function()
     Lighting.Ambient = Color3.fromRGB(70,70,70)
     Lighting.OutdoorAmbient = Color3.fromRGB(70,70,70)
     Lighting.Brightness = 1; Lighting.ClockTime = 14
-end); fy = fy + BTN_H + GAP
-
-fy = C.section(tCfg, "Interface", fy)
-C.button(tCfg, "Toggle UI", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reset All Config", y, function()
+    for k, v in pairs(State) do
+        if type(v) == "boolean" then State[k] = false end
+    end
+end); y = y + BTN_H + GAP
+y = C.section(tCfg, "Interface", y)
+C.button(tCfg, "Toggle UI", y, function()
     Home.Visible = not Home.Visible
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Minimize Menu", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Minimize Menu", y, function()
     Home.Visible = false
-end); fy = fy + BTN_H + GAP
-C.button(tCfg, "Print State", fy, function()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Print State", y, function()
     for k, v in pairs(State) do print(k, v) end
-    showToast("✓ Estado impresso no console", "info")
-end); fy = fy + BTN_H + GAP
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Set WalkSpeed 100", y, function()
+    State.walkSpeed = 100
+    local h = getHum(); if h then h.WalkSpeed = 100 end
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Set WalkSpeed 500", y, function()
+    State.walkSpeed = 500
+    local h = getHum(); if h then h.WalkSpeed = 500 end
+end); y = y + BTN_H + GAP
+y = C.section(tCfg, "Sistema", y)
+C.button(tCfg, "Unload Menu", y, function()
+    cleanConns()
+    ScreenGui:Destroy()
+    ToastGui:Destroy()
+end); y = y + BTN_H + GAP
+C.button(tCfg, "Reload (Execute novamente)", y, function()
+    showToast("Execute o script novamente para recarregar", "info")
+end)
 
-fy = C.section(tCfg, "Sistema", fy)
-C.button(tCfg, "Unload Menu", fy, function()
+-- ══════════════════════════════════════════════════════════
+-- ABA 19: SOBRE
+-- ══════════════════════════════════════════════════════════
+local tSob = createTabContent("Sobre")
+y = 8
+y = C.section(tSob, "Info", y)
+C.button(tSob, "AKZ Universal — by: angel / akira", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Versão PRO PREMIUM v7", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "19 abas • 250+ features", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "13 jogos keyless integrados", y, function() end); y = y + BTN_H + GAP
+y = C.section(tSob, "Créditos Open Source", y)
+C.button(tSob, "Infinite Yield — Edge", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "AirHub V2 — Exunys", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Universal ESP/Aimbot — zzerexx", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "FlyGuiV3 — XNEOFF", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Sp3arParvus — JakeHukari", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "KaguHub — Kaguya11", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "ZaZa Hub — Berkcan61", y, function() end); y = y + BTN_H + GAP
+C.button(tSob, "Discord: discord.gg/kc7myVSq3", y, function()
+    if setclipboard then
+        setclipboard("https://discord.gg/kc7myVSq3")
+        showToast("✓ Discord copiado!", "success")
+    end
+end); y = y + BTN_H + GAP
+C.button(tSob, "Unload Menu", y, function()
     cleanConns()
     ScreenGui:Destroy()
     ToastGui:Destroy()
 end)
 
 -- ══════════════════════════════════════════════════════════
--- LOOPS GLOBAIS (limpos e rastreáveis)
+-- LOOPS GLOBAIS
 -- ══════════════════════════════════════════════════════════
 addConn("noclip", RunService.Stepped:Connect(function()
     if State.noclip and LP.Character then
@@ -1447,22 +1787,18 @@ task.spawn(function()
 end)
 
 -- ══════════════════════════════════════════════════════════
--- REGISTRO DE ABAS (ordem profissional)
+-- REGISTRAR 19 ABAS
 -- ══════════════════════════════════════════════════════════
 local TAB_ORDER = {
-    {"Principal","🏠"},
-    {"Jogos","🎮"},
-    {"Status","⚙"},
-    {"Funções","🛠"},
-    {"Players","🎯"},
-    {"LocalPlayer","👤"},
-    {"Misc","🌐"},
-    {"Config","⚙"},
+    {"Principal","🏠"},{"Jogos","🎮"},{"Status","📊"},
+    {"Movimentos","🏃"},{"Combate","⚔"},{"Visual","👁"},
+    {"Jogador","🧍"},{"Mundo","🌍"},{"Diversão","🎉"},
+    {"Admin","🛡"},{"Teleportes","📍"},{"Servidor","🖥"},
+    {"Chat","💬"},{"Câmera","🎥"},{"Proteção","🔒"},
+    {"Utilidades","🔧"},{"Scripts","📦"},{"Config","⚙"},
+    {"Sobre","ℹ"},
 }
-
-for i, d in ipairs(TAB_ORDER) do
-    createTabBtn(d[1], d[2], i)
-end
+for i, d in ipairs(TAB_ORDER) do createTabBtn(d[1], d[2], i) end
 for name, d in pairs(TabBtns) do
     d.button.MouseButton1Click:Connect(function() selectTab(name) end)
 end
@@ -1480,19 +1816,16 @@ Act.Position = UDim2.new(0,14,0.28,0)
 Act.Size = UDim2.new(0,58,0,58)
 Act.ClipsDescendants = true; Act.Active = true; Act.ZIndex = 10
 Instance.new("UICorner", Act).CornerRadius = UDim.new(1,0)
-
 local LI = Instance.new("ImageLabel", Act)
 LI.Image = LOGO_ID; LI.ScaleType = Enum.ScaleType.Crop
 LI.BackgroundTransparency = 1; LI.Size = UDim2.new(1,0,1,0)
 LI.ZIndex = 2; LI.Active = false
-
 local LS = Instance.new("UIStroke", Act)
 LS.Color = Color3.fromRGB(200,30,30); LS.Thickness = 2
-
 makeDraggable(Act, nil, function()
     Home.Visible = not Home.Visible
     if Home.Visible then showToast("Menu aberto", "info") end
 end)
 
-print("[AKZ HUB PREMIUM v6] Carregado! 8 abas — by: angel / akira")
-showToast("✓ AKZ Hub carregado!", "success")
+print("[AKZ HUB PREMIUM v7] Carregado! 19 abas — by: angel / akira")
+showToast("✓ AKZ Hub carregado! 19 abas", "success")
