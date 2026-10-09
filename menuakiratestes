@@ -1,6 +1,7 @@
 -- ======================================================================== --
--- GRAVADOR DE ROTA PARA O DRIP AUTO PARKOUR
--- Menu flutuante + Gravação de Animações (correr, pular, etc)
+-- GRAVADOR DE ROTA - VERSÃO STEALTH
+-- Menu flutuante + Gravação/Reprodução de Animações
+-- Usa AlignPosition/LinearVelocity em vez de BodyForce/CFrame direto
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -52,7 +53,6 @@ local MainStroke = Instance.new("UIStroke", MainFrame)
 MainStroke.Color = Color3.fromRGB(0, 170, 0)
 MainStroke.Thickness = 1
 
--- Barra de título arrastável
 local TitleBar = Instance.new("Frame", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
 TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
@@ -93,7 +93,6 @@ StatusLabel.Text = "Status: Parado"
 StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 StatusLabel.TextSize = 11
 
--- Botão Gravar / Parar
 local RecordBtn = Instance.new("TextButton", MainFrame)
 RecordBtn.Size = UDim2.new(1, -20, 0, 32)
 RecordBtn.Position = UDim2.new(0, 10, 0, 65)
@@ -106,7 +105,6 @@ RecordBtn.BorderSizePixel = 0
 local BtnCorner = Instance.new("UICorner", RecordBtn)
 BtnCorner.CornerRadius = UDim.new(0, 6)
 
--- Botão Testar Rota
 local TestBtn = Instance.new("TextButton", MainFrame)
 TestBtn.Size = UDim2.new(1, -20, 0, 32)
 TestBtn.Position = UDim2.new(0, 10, 0, 103)
@@ -119,7 +117,6 @@ TestBtn.BorderSizePixel = 0
 local TestCorner = Instance.new("UICorner", TestBtn)
 TestCorner.CornerRadius = UDim.new(0, 6)
 
--- Botão Copiar
 local CopyBtn = Instance.new("TextButton", MainFrame)
 CopyBtn.Size = UDim2.new(1, -20, 0, 32)
 CopyBtn.Position = UDim2.new(0, 10, 0, 141)
@@ -177,7 +174,7 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- ===== DRAG DO MENU (TITLEBAR) =====
+-- ===== DRAG DO MENU =====
 local menuDragging = false
 local menuDragStart, menuStartPos
 
@@ -206,7 +203,6 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- ===== ABRIR/FECHAR MENU =====
 local function toggleMenu()
     MainFrame.Visible = not MainFrame.Visible
     if MainFrame.Visible then
@@ -244,7 +240,7 @@ CloseBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ======================================================================== --
--- LÓGICA DE GRAVAÇÃO / REPRODUÇÃO COM ANIMAÇÕES
+-- LÓGICA DE GRAVAÇÃO / REPRODUÇÃO
 -- ======================================================================== --
 
 local recordedData = {}
@@ -252,12 +248,13 @@ local isRecording = false
 local recordingConnection = nil
 local playbackConnection = nil
 local startTime = 0
-local antigravidade = nil
 local originalCollides = {}
 
--- Cache de animações: guarda AnimationTracks já carregadas para reuso
+-- Instâncias stealth (para limpar depois)
+local stealthInstances = {}
+
 local animationCache = {}
-local activeTracks = {}  -- [AnimationId] = AnimationTrack (durante playback)
+local activeTracks = {}
 
 local function getOrLoadTrack(animator, animationId)
     if animationCache[animationId] and animationCache[animationId].Parent == animator then
@@ -275,6 +272,13 @@ local function getOrLoadTrack(animator, animationId)
     return nil
 end
 
+local function clearStealth()
+    for _, obj in ipairs(stealthInstances) do
+        pcall(function() obj:Destroy() end)
+    end
+    stealthInstances = {}
+end
+
 local function stopPlayback()
     if playbackConnection then
         playbackConnection:Disconnect()
@@ -282,18 +286,15 @@ local function stopPlayback()
     end
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChild("Humanoid")
-    if antigravidade then
-        antigravidade:Destroy()
-        antigravidade = nil
-    end
-    if hum then
-        hum.AutoRotate = true
-    end
-    -- Para todas as animações tocadas pelo playback
+    if hum then hum.AutoRotate = true end
+
+    clearStealth()
+
     for _, track in pairs(activeTracks) do
         pcall(function() track:Stop(0.1) end)
     end
     activeTracks = {}
+
     for parte, status in pairs(originalCollides) do
         if parte and parte.Parent then
             parte.CanCollide = status
@@ -306,33 +307,32 @@ end
 RecordBtn.MouseButton1Click:Connect(function()
     if playbackConnection then stopPlayback() end
     isRecording = not isRecording
-    
+
     if isRecording then
         recordedData = {}
         startTime = os.clock()
         RecordBtn.Text = "PARAR GRAVAÇÃO"
         RecordBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
         StatusLabel.Text = "Status: Gravando..."
-        
+
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         local hum = char and char:FindFirstChild("Humanoid")
-        
-        if not hrp or not hum then 
+
+        if not hrp or not hum then
             isRecording = false
             RecordBtn.Text = "INICIAR GRAVAÇÃO"
             RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
             StatusLabel.Text = "Status: Sem personagem!"
-            return 
+            return
         end
-        
+
         recordingConnection = RunService.Heartbeat:Connect(function()
             local currentTime = os.clock() - startTime
             local cf = hrp.CFrame
             local vel = hrp.AssemblyLinearVelocity
             local state = hum:GetState()
-            
-            -- Captura das animações ativas
+
             local anims = {}
             local animator = hum:FindFirstChildOfClass("Animator")
             if animator then
@@ -347,7 +347,7 @@ RecordBtn.MouseButton1Click:Connect(function()
                     end
                 end
             end
-            
+
             table.insert(recordedData, {
                 Time = currentTime,
                 CF = {cf:GetComponents()},
@@ -367,7 +367,7 @@ RecordBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ===== REPRODUÇÃO =====
+-- ===== REPRODUÇÃO (STEALTH) =====
 TestBtn.MouseButton1Click:Connect(function()
     if isRecording then
         StatusLabel.Text = "Pare a gravação antes de testar!"
@@ -377,42 +377,64 @@ TestBtn.MouseButton1Click:Connect(function()
         StatusLabel.Text = "Nenhuma rota gravada!"
         return
     end
-    
+
     if playbackConnection then
         stopPlayback()
         StatusLabel.Text = "Status: Teste cancelado."
         return
     end
 
-    StatusLabel.Text = "Status: Reproduzindo teste..."
+    StatusLabel.Text = "Status: Reproduzindo (stealth)..."
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
     if not hrp or not hum then return end
 
-    -- Posiciona no início da rota
+    -- Move pro início da rota
     local startCF = CFrame.new(unpack(recordedData[1].CF))
     hum.WalkSpeed = 22
     hum:MoveTo(startCF.Position)
+    task.wait(0.6)
 
-    local reached = false
-    local conn
-    conn = hum.MoveToFinished:Connect(function()
-        reached = true
-        if conn then conn:Disconnect() end
-    end)
-
-    local timeout = tick() + 4
-    while not reached and tick() < timeout do
-        task.wait(0.1)
-    end
-    if conn then conn:Disconnect() end
-
-    -- Prepara personagem para playback
     hum.AutoRotate = false
-    antigravidade = Instance.new("BodyForce", hrp)
-    antigravidade.Force = Vector3.new(0, 0, 0)
 
+    -- ===== STEALTH: AlignPosition puxa pro alvo, LinearVelocity zera gravidade =====
+    local attChar = Instance.new("Attachment", hrp)
+    local attTarget = Instance.new("Attachment")
+    attTarget.WorldPosition = hrp.Position
+
+    -- Attachment do alvo fica no Terrain (menos suspeito que no char)
+    attTarget.Parent = workspace.Terrain
+
+    local alignPos = Instance.new("AlignPosition")
+    alignPos.Attachment0 = attChar
+    alignPos.Attachment1 = attTarget
+    alignPos.MaxForce = math.huge
+    alignPos.Responsiveness = 30
+    alignPos.ApplyAtCenterOfMass = false
+    alignPos.Parent = hrp
+
+    local alignOrient = Instance.new("AlignOrientation")
+    alignOrient.Attachment0 = attChar
+    alignOrient.Mode = Enum.OrientationAlignmentMode.OneAttachment
+    alignOrient.MaxTorque = math.huge
+    alignOrient.Responsiveness = 20
+    alignOrient.Parent = hrp
+
+    local lv = Instance.new("LinearVelocity")
+    lv.Attachment0 = attChar
+    lv.MaxForce = math.huge
+    lv.VectorVelocity = Vector3.zero
+    lv.RelativeTo = Enum.ActuatorRelativeTo.World
+    lv.Parent = hrp
+
+    table.insert(stealthInstances, attChar)
+    table.insert(stealthInstances, attTarget)
+    table.insert(stealthInstances, alignPos)
+    table.insert(stealthInstances, alignOrient)
+    table.insert(stealthInstances, lv)
+
+    -- Desliga colisão
     for _, parte in ipairs(char:GetChildren()) do
         if parte:IsA("BasePart") then
             originalCollides[parte] = parte.CanCollide
@@ -421,56 +443,45 @@ TestBtn.MouseButton1Click:Connect(function()
     end
 
     local animator = hum:FindFirstChildOfClass("Animator")
-    if not animator then
-        animator = Instance.new("Animator", hum)
-    end
+    if not animator then animator = Instance.new("Animator", hum) end
 
-    -- Pausa o Animator padrão para que ele não sobrescreva as animações
-    -- (não dá pra "pausar" diretamente, então só vamos tocar por cima)
     local pstartTime = os.clock()
     local totalPoints = #recordedData
     local currentIndex = 1
     activeTracks = {}
 
+    -- Rate-limit: escreve a cada 2 frames
+    local frameCount = 0
+    local frameSkip = 2
+
     playbackConnection = RunService.Heartbeat:Connect(function()
+        frameCount += 1
+        if frameCount % frameSkip ~= 0 then return end
+
         local elapsedTime = os.clock() - pstartTime
         while currentIndex < totalPoints and elapsedTime >= recordedData[currentIndex + 1].Time do
-            currentIndex = currentIndex + 1
+            currentIndex += 1
         end
         if currentIndex >= totalPoints then
             stopPlayback()
             StatusLabel.Text = "Status: Teste concluído!"
             return
         end
-        
+
         local p0 = recordedData[currentIndex]
         local p1 = recordedData[currentIndex + 1]
-        local alpha = (p1.Time - p0.Time > 0) and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
-        
-        local cf0 = CFrame.new(unpack(p0.CF))
-        local cf1 = CFrame.new(unpack(p1.CF))
-        hrp.CFrame = cf0:Lerp(cf1, alpha)
 
-        -- Força anti-gravidade proporcional à massa
-        local totalMass = 0
-        for _, parte in ipairs(char:GetChildren()) do
-            if parte:IsA("BasePart") then
-                totalMass = totalMass + parte:GetMass()
-            end
-        end
-        if antigravidade and antigravidade.Parent then
-            antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
-        end
-        if p1.Velocity then
-            hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
-        end
-        if p0.State then
-            pcall(function()
-                hum:ChangeState(p0.State)
-            end)
+        -- ===== Movimento via Attachments (não CFrame direto) =====
+        local targetCF = CFrame.new(unpack(p1.CF))
+        attTarget.WorldPosition = attTarget.WorldPosition:Lerp(targetCF.Position, 0.4)
+        attTarget.WorldCFrame = CFrame.new(attTarget.WorldPosition) * (targetCF - targetCF.Position)
+
+        -- Anula gravidade
+        if lv and lv.Parent then
+            lv.VectorVelocity = Vector3.zero
         end
 
-        -- ============ SINCRONIZAÇÃO DE ANIMAÇÕES ============
+        -- Sincroniza animações
         if p1.Animations then
             local wanted = {}
             for _, animData in ipairs(p1.Animations) do
@@ -489,12 +500,9 @@ TestBtn.MouseButton1Click:Connect(function()
                 end
                 local t = activeTracks[animData.Id]
                 if t then
-                    pcall(function()
-                        t:AdjustSpeed(animData.Speed)
-                    end)
+                    pcall(function() t:AdjustSpeed(animData.Speed) end)
                 end
             end
-            -- Para animações que NÃO estão mais ativas
             for id, track in pairs(activeTracks) do
                 if not wanted[id] then
                     pcall(function() track:Stop(0.1) end)
@@ -511,13 +519,13 @@ CopyBtn.MouseButton1Click:Connect(function()
         StatusLabel.Text = "Status: Nada gravado ainda!"
         return
     end
-    
+
     local result = "return {\n"
     for _, node in ipairs(recordedData) do
         local cfStr = table.concat(node.CF, ", ")
         local velStr = table.concat(node.Velocity, ", ")
         local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
-        
+
         local animStr = ""
         if node.Animations and #node.Animations > 0 then
             local parts = {}
@@ -531,14 +539,14 @@ CopyBtn.MouseButton1Click:Connect(function()
         else
             animStr = ", Animations = {}"
         end
-        
+
         result = result .. string.format(
             "    {Time = %.3f, CF = {%s}, Velocity = {%s}, State = Enum.HumanoidStateType.%s%s},\n",
             node.Time, cfStr, velStr, stateName, animStr
         )
     end
     result = result .. "}"
-    
+
     if setclipboard then
         setclipboard(result)
         StatusLabel.Text = "Status: Copiado com sucesso!"
@@ -548,7 +556,6 @@ CopyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Limpeza ao morrer
 LocalPlayer.CharacterAdded:Connect(function()
     stopPlayback()
     animationCache = {}
