@@ -1,1402 +1,1744 @@
+-- RouteHub v1.0.0
 --[[
-  AKZ ROTAS v2 — Gravar / Parar / Renomear / Excluir / Playback (Luau + Rayfield)
-  + LER JOGO: diagnóstico do que o cliente enxerga (animação de andar, correr, botões, remotes...)
-  O diagnóstico alimenta o gravador (detecta correr, animação personalizada, botões da tela).
+    ROUTE HUB — Hub de gravação e replay de rotas para Roblox (Luau)
+    UI própria (Instance.new), sem bibliotecas externas.
+    Cole no executor e execute. APIs opcionais do executor são detectadas via
+    pcall; se não existirem, o script degrada sem quebrar.
 ]]
+
+--[[ === SEÇÃO 1: AMBIENTE, SERVIÇOS E DETECÇÃO DE API === ]]
+local genv
+do
+    local ok, g = pcall(function() return getgenv() end)
+    genv = (ok and type(g) == "table") and g or _G
+end
+
+-- Limpa execução anterior (evita GUI/hook duplicado ao re-executar)
+if type(genv.RouteHubCleanup) == "function" then
+    pcall(genv.RouteHubCleanup)
+end
+
+local VERSION = "1.0.0"
+local APP_NAME = "ROUTE HUB"
+local DATA_FILE = "RouteHub_Data.json"
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
-local PPS = game:GetService("ProximityPromptService")
-local CAS = game:GetService("ContextActionService")
-local MPS = game:GetService("MarketplaceService")
-local RSt = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
 local GuiService = game:GetService("GuiService")
-local LP = Players.LocalPlayer
+local PPS = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ReplicatedFirst = game:GetService("ReplicatedFirst")
 
-local genv = (getgenv and getgenv()) or _G
-if genv.AKZR_CLEANUP then pcall(genv.AKZR_CLEANUP) end
+local CoreGui = nil
+pcall(function() CoreGui = game:GetService("CoreGui") end)
+local VIM = nil -- VirtualInputManager (pode não existir)
+pcall(function() VIM = game:GetService("VirtualInputManager") end)
 
-local okR, Rayfield = pcall(function()
-	return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-end)
-if not okR or not Rayfield then
-	warn("[AKZ ROTAS] Não foi possível carregar o Rayfield.")
-	return
-end
+local LocalPlayer = Players.LocalPlayer
 
------------------------------------------------------------------- CONFIG / UTIL
-local CFG = {
-	version = 2, folder = "AKZ_Rotas",
-	sampleInterval = 0.10, moveThreshold = 0.6, rotThreshold = 6, idleInterval = 1.0,
-	maxEvents = 20000, maxBytes = 4000000,
+-- APIs opcionais do executor (nil quando ausentes)
+local API = {
+    writefile = writefile,
+    readfile = readfile,
+    isfile = isfile,
+    delfile = delfile,
+    hookmetamethod = hookmetamethod,
+    getnamecallmethod = getnamecallmethod,
+    newcclosure = newcclosure,
+    fireproximityprompt = fireproximityprompt,
+    firetouchinterest = firetouchinterest,
+    fireclickdetector = fireclickdetector,
+    getconnections = getconnections,
+    gethui = gethui,
 }
-local alive = true
-local globalConns = {}
-local function r2(x) return math.floor(x * 100 + 0.5) / 100 end
-local function r1(x) return math.floor(x * 10 + 0.5) / 10 end
-local function fmt(t) t = math.max(t or 0, 0) return string.format("%02d:%04.1f", math.floor(t / 60), t % 60) end
-local function getChar()
-	local c = LP.Character
-	if not c then return end
-	return c:FindFirstChildOfClass("Humanoid"), c:FindFirstChild("HumanoidRootPart"), c
-end
-local function yawOf(hrp) local _, y = hrp.CFrame:ToOrientation() return r1(math.deg(y)) end
-local function angDiff(a, b) return ((a - b + 180) % 360) - 180 end
-local function keyOf(name)
-	local ok, v = pcall(function() return Enum.KeyCode[name] end)
-	return ok and v or nil
-end
-local UI = {}
-local function N(title, content, dur)
-	pcall(function() Rayfield:Notify({ Title = title, Content = content, Duration = dur or 3 }) end)
+
+local function cam() return workspace.CurrentCamera end
+
+--[[ === SEÇÃO 2: PALETA, CONFIGURAÇÕES E ESTADO GLOBAL === ]]
+local C = {
+    bg = Color3.fromRGB(18, 18, 24),
+    panel = Color3.fromRGB(26, 26, 34),
+    panel2 = Color3.fromRGB(34, 34, 46),
+    accent = Color3.fromRGB(124, 58, 237),
+    accent2 = Color3.fromRGB(34, 211, 238),
+    success = Color3.fromRGB(34, 197, 94),
+    danger = Color3.fromRGB(239, 68, 68),
+    dangerDark = Color3.fromRGB(153, 27, 27),
+    text = Color3.fromRGB(237, 237, 245),
+    muted = Color3.fromRGB(150, 150, 170),
+    stroke = Color3.fromRGB(124, 58, 237),
+}
+
+local Defaults = {
+    speedMultiplier = 1.0,
+    loopReplay = false,
+    cameraSampleRateMs = 50,
+    moveSampleRateMs = 30,
+    autoRename = true,
+    theme = "dark-neon",
+    actionDelayMs = 0,
+    blur = false,
+}
+local S = {}
+for k, v in pairs(Defaults) do S[k] = v end
+
+local Data = { routes = {}, settings = S }
+local Conns = {} -- conexões globais do hub (limpas no Cleanup)
+local function track(conn) Conns[#Conns + 1] = conn return conn end
+
+local State = { mode = "idle" } -- idle | rec | replay
+
+--[[ === SEÇÃO 3: UTILITÁRIOS === ]]
+local function r3(n) return math.floor(n * 1000 + 0.5) / 1000 end
+local function r4(n) return math.floor(n * 10000 + 0.5) / 10000 end
+
+local function fmtTime(ms)
+    local s = math.floor((ms or 0) / 1000)
+    return string.format("%02d:%02d", math.floor(s / 60), s % 60)
 end
 
------------------------------------------------------------------- COMPAT
-local Compat = {}
-do
-	local okV, vim = pcall(function() return game:GetService("VirtualInputManager") end)
-	Compat.VIM = okV and vim or nil
-	Compat.vim = Compat.VIM ~= nil
-	Compat.fs = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
-	Compat.folder = type(makefolder) == "function" and type(isfolder) == "function"
-	Compat.prompt = type(fireproximityprompt) == "function"
-	Compat.click = type(fireclickdetector) == "function"
-	Compat.sig = type(firesignal) == "function" or type(getconnections) == "function"
-	Compat.clip = type(setclipboard) == "function"
-end
-function Compat.report()
-	local function y(b) return b and "SIM" or "NÃO" end
-	return {
-		"Arquivos (salvar de verdade): " .. y(Compat.fs),
-		"Teclas/cliques virtuais (VirtualInputManager): " .. y(Compat.vim),
-		"fireproximityprompt: " .. y(Compat.prompt),
-		"fireclickdetector: " .. y(Compat.click),
-		"firesignal/getconnections: " .. y(Compat.sig),
-		"Área de transferência: " .. y(Compat.clip),
-	}
+local function fmtDate(ts)
+    local ok, s = pcall(os.date, "%d/%m %H:%M", ts)
+    return ok and s or "--/-- --:--"
 end
 
------------------------------------------------------------------- REGISTRY
-local Registry = { types = {} }
-for k, label in pairs({ move = "Movimento", jump = "Salto", state = "Estado", anim = "Animação", input = "Tecla",
-	gui = "Botão", prompt = "Prompt", click = "Clique", tool = "Ferramenta", attr = "Atributo" }) do
-	Registry.types[k] = label
+local function getChar() return LocalPlayer.Character end
+local function getHum()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChildOfClass("Humanoid")
 end
-function Registry.validate(e)
-	if type(e) ~= "table" or type(e.t) ~= "number" or e.t < 0 or type(e.k) ~= "string" then return false end
-	if not Registry.types[e.k] then return false end
-	if e.d ~= nil and type(e.d) ~= "table" then return false end
-	if e.p ~= nil and (type(e.p) ~= "table" or #e.p ~= 3) then return false end
-	if e.k == "move" and not e.p then return false end
-	return true
+local function getRoot()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
 end
 
------------------------------------------------------------------- REFS
-local function makeRef(inst)
-	if not inst then return nil end
-	local path, cur = {}, inst
-	while cur and cur ~= game and cur ~= workspace do
-		table.insert(path, 1, cur.Name)
-		cur = cur.Parent
-	end
-	local base = inst:IsA("BasePart") and inst or inst:FindFirstAncestorWhichIsA("BasePart")
-	local pos
-	if base then pos = { r2(base.Position.X), r2(base.Position.Y), r2(base.Position.Z) } end
-	return { path = path, cls = inst.ClassName, name = inst.Name, pos = pos, root = (cur == workspace) and "w" or "g" }
-end
-local function resolveRef(ref)
-	if type(ref) ~= "table" or type(ref.path) ~= "table" then return nil end
-	local cur = ref.root == "w" and workspace or game
-	for _, n in ipairs(ref.path) do
-		cur = cur and cur:FindFirstChild(n)
-		if not cur then break end
-	end
-	if cur and cur.ClassName == ref.cls then return cur end
-	local pg = LP:FindFirstChildOfClass("PlayerGui")
-	local rootSearch = (ref.root == "g" and pg) or workspace
-	local best, bd
-	for _, d in ipairs(rootSearch:GetDescendants()) do
-		if d.Name == ref.name and d.ClassName == ref.cls then
-			local dist = 0
-			if ref.pos then
-				local bp = d:IsA("BasePart") and d or d:FindFirstAncestorWhichIsA("BasePart")
-				if bp then dist = (bp.Position - Vector3.new(ref.pos[1], ref.pos[2], ref.pos[3])).Magnitude end
-			end
-			if not bd or dist < bd then best, bd = d, dist end
-		end
-	end
-	return best
+-- Caminho de uma instância como lista de nomes a partir de game
+local function instPath(inst)
+    local p, cur = {}, inst
+    while cur and cur ~= game do
+        table.insert(p, 1, cur.Name)
+        cur = cur.Parent
+    end
+    return p
 end
 
-local function isShown(gui)
-	if not gui:IsA("GuiObject") then return false end
-	if gui.AbsoluteSize.X <= 0 or gui.AbsoluteSize.Y <= 0 then return false end
-	local cur = gui
-	while cur and cur ~= game do
-		if cur:IsA("GuiObject") and not cur.Visible then return false end
-		if cur:IsA("ScreenGui") and not cur.Enabled then return false end
-		cur = cur.Parent
-	end
-	return true
-end
-local function guiCenter(btn)
-	local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
-	local inset = (sg and not sg.IgnoreGuiInset) and GuiService:GetGuiInset().Y or 0
-	local c = btn.AbsolutePosition + btn.AbsoluteSize / 2
-	return c.X, c.Y + inset
-end
-local function fireSig(sig, ...)
-	if type(firesignal) == "function" then
-		if pcall(firesignal, sig, ...) then return true end
-	end
-	if type(getconnections) == "function" then
-		local ok, conns = pcall(getconnections, sig)
-		if ok and type(conns) == "table" then
-			for _, c in ipairs(conns) do pcall(function() c:Fire(...) end) end
-			return #conns > 0
-		end
-	end
-	return false
+local function resolvePath(p)
+    if type(p) ~= "table" or #p == 0 then return nil end
+    local cur = game
+    for _, name in ipairs(p) do
+        local nxt = cur:FindFirstChild(name)
+        if not nxt then cur = nil break end
+        cur = nxt
+    end
+    if cur then return cur end
+    -- Fallback: busca pelo nome final dentro do Workspace
+    local ok, found = pcall(function() return workspace:FindFirstChild(p[#p], true) end)
+    return ok and found or nil
 end
 
------------------------------------------------------------------- ADAPTERS
-local Adapters = {}
-function Adapters.can(e)
-	local k, d = e.k, e.d or {}
-	if k == "move" or k == "jump" or k == "tool" then return "ok" end
-	if k == "state" or k == "attr" then return "info" end
-	if k == "anim" then return d.rp and "ok" or "info" end
-	if k == "input" then return (Compat.vim and keyOf(d.key)) and "ok" or "na" end
-	if k == "gui" then return (Compat.vim or Compat.sig) and "ok" or "na" end
-	if k == "prompt" then
-		if d.ph == "trigger" then return Compat.prompt and "ok" or "na" end
-		return "info"
-	end
-	if k == "click" then return Compat.click and "ok" or "na" end
-	return "na"
+-- Serialização JSON-friendly de argumentos de Remote
+local function ser(v, depth)
+    depth = depth or 0
+    local t = typeof(v)
+    if t == "number" then
+        if v ~= v or v == math.huge or v == -math.huge then return 0 end
+        return v
+    elseif t == "string" or t == "boolean" then
+        return v
+    elseif t == "Vector3" then
+        return { __t = "V3", x = v.X, y = v.Y, z = v.Z }
+    elseif t == "Vector2" then
+        return { __t = "V2", x = v.X, y = v.Y }
+    elseif t == "CFrame" then
+        return { __t = "CF", c = { v:GetComponents() } }
+    elseif t == "Color3" then
+        return { __t = "C3", r = v.R, g = v.G, b = v.B }
+    elseif t == "Instance" then
+        return { __t = "I", p = instPath(v) }
+    elseif t == "EnumItem" then
+        return { __t = "E", e = tostring(v) }
+    elseif t == "table" then
+        if depth > 4 then return { __t = "N" } end
+        local arr, map = {}, {}
+        for i, val in ipairs(v) do arr[i] = ser(val, depth + 1) end
+        for k, val in pairs(v) do
+            if type(k) == "string" then map[k] = ser(val, depth + 1) end
+        end
+        return { __t = "T", arr = arr, map = map }
+    end
+    return { __t = "N" } -- nil, function, userdata etc.
 end
 
-function Adapters.run(e, ctx)
-	local d, k, hum, o = e.d or {}, e.k, ctx.hum, ctx.opts
-	if (k == "input" or k == "gui") and d.sp and not o.sprint then return "info" end
-	if k == "jump" then
-		if d.ph == "start" then
-			hum.Jump = true
-			pcall(function() hum:ChangeState(Enum.HumanoidStateType.Jumping) end)
-			return "ok"
-		end
-		return "info"
-	elseif k == "anim" then
-		if not d.rp or not o.anims then return "info" end
-		if d.ph == "start" then
-			if not ctx.animator then return "fail", "Animator ausente" end
-			for _, t in ipairs(ctx.animator:GetPlayingAnimationTracks()) do
-				if t.Animation and t.Animation.AnimationId == d.id then return "info" end -- jogo já toca
-			end
-			local a = Instance.new("Animation")
-			a.AnimationId = d.id
-			local okA, tr = pcall(function() return ctx.animator:LoadAnimation(a) end)
-			if not okA or not tr then return "fail", "animação inacessível" end
-			pcall(function()
-				tr.Priority = Enum.AnimationPriority[d.pri] or Enum.AnimationPriority.Action
-				tr.Looped = d.loop and true or false
-				tr:Play(0.1, 1, (d.sp or 1) * ctx.speed)
-			end)
-			ctx.tracks[d.id] = tr
-			return "ok"
-		end
-		local tr = ctx.tracks[d.id]
-		if tr then pcall(function() tr:Stop(0.1) end) ctx.tracks[d.id] = nil end
-		return "ok"
-	elseif k == "input" then
-		local kc = keyOf(d.key)
-		if not (Compat.vim and kc) then return "fail", "teclas indisponíveis" end
-		local okV = pcall(function() Compat.VIM:SendKeyEvent(d.ph == "down", kc, false, game) end)
-		return okV and "ok" or "fail", "falha ao enviar tecla"
-	elseif k == "gui" then
-		local btn = resolveRef(d.ref)
-		if not btn or not btn:IsA("GuiButton") then return "fail", "botão não encontrado: " .. tostring(d.ref and d.ref.name) end
-		if not isShown(btn) then return "fail", "botão não está visível: " .. btn.Name end
-		if Compat.vim then
-			local x, y = guiCenter(btn)
-			local okV = pcall(function() Compat.VIM:SendMouseButtonEvent(x, y, 0, d.ph == "down", game, 0) end)
-			return okV and "ok" or "fail", "falha ao clicar no botão"
-		end
-		if d.ph == "down" then fireSig(btn.MouseButton1Down)
-		else
-			fireSig(btn.MouseButton1Up)
-			fireSig(btn.MouseButton1Click)
-			fireSig(btn.Activated)
-		end
-		return "ok"
-	elseif k == "prompt" then
-		if d.ph ~= "trigger" then return "info" end
-		if not Compat.prompt then return "fail", "fireproximityprompt indisponível" end
-		local p = resolveRef(d.ref)
-		if not p then return "fail", "objeto não encontrado: " .. tostring(d.ref and d.ref.name) end
-		return pcall(fireproximityprompt, p) and "ok" or "fail", "falha no prompt"
-	elseif k == "click" then
-		if not Compat.click then return "fail", "fireclickdetector indisponível" end
-		local cd = resolveRef(d.ref)
-		if not cd then return "fail", "objeto não encontrado: " .. tostring(d.ref and d.ref.name) end
-		return pcall(fireclickdetector, cd) and "ok" or "fail", "falha no clique"
-	elseif k == "tool" then
-		if d.ph == "equip" then
-			local bp = LP:FindFirstChildOfClass("Backpack")
-			local tool = (bp and bp:FindFirstChild(d.name)) or ctx.char:FindFirstChild(d.name)
-			if not tool then return "fail", "ferramenta não encontrada: " .. tostring(d.name) end
-			pcall(function() hum:EquipTool(tool) end)
-			return "ok"
-		elseif d.ph == "unequip" then
-			pcall(function() hum:UnequipTools() end)
-			return "ok"
-		elseif d.ph == "use" then
-			local tool = ctx.char:FindFirstChild(d.name)
-			if not (tool and tool:IsA("Tool")) then return "fail", "ferramenta não equipada: " .. tostring(d.name) end
-			pcall(function() tool:Activate() end)
-			return "ok"
-		end
-		return "info"
-	end
-	return "info"
+local function deser(v)
+    if type(v) ~= "table" then return v end
+    local t = v.__t
+    if t == "N" then return nil
+    elseif t == "V3" then return Vector3.new(v.x, v.y, v.z)
+    elseif t == "V2" then return Vector2.new(v.x, v.y)
+    elseif t == "CF" then return CFrame.new(unpack(v.c))
+    elseif t == "C3" then return Color3.new(v.r, v.g, v.b)
+    elseif t == "I" then return resolvePath(v.p)
+    elseif t == "E" then
+        local _, _, en, name = string.find(v.e or "", "Enum%.(%w+)%.(%w+)")
+        local ok, item = pcall(function() return Enum[en][name] end)
+        return ok and item or nil
+    elseif t == "T" then
+        local out = {}
+        for i, val in ipairs(v.arr or {}) do out[i] = deser(val) end
+        for k, val in pairs(v.map or {}) do out[k] = deser(val) end
+        return out
+    end
+    return nil
 end
 
------------------------------------------------------------------- SERIALIZER
-local Serializer = {}
-function Serializer.analyze(ev)
-	local c = { ok = 0, na = 0, info = 0, mov = 0, jump = 0, inter = 0, sprintEv = 0 }
-	for _, e in ipairs(ev) do
-		local st = Adapters.can(e)
-		c[st] += 1
-		if e.k == "move" then c.mov += 1 elseif e.k == "jump" then c.jump += 1
-		elseif e.k ~= "anim" and e.k ~= "state" and e.k ~= "attr" then c.inter += 1 end
-		if e.d and e.d.sp then c.sprintEv += 1 end
-	end
-	return c
+--[[ === SEÇÃO 4: PERSISTÊNCIA === ]]
+local function encode(v)
+    local ok, r = pcall(HttpService.JSONEncode, HttpService, v)
+    return ok and r or nil
 end
-function Serializer.cleanEvents(ev)
-	local out, dropped = {}, 0
-	if type(ev) ~= "table" then return out, 0 end
-	for _, e in ipairs(ev) do
-		if Registry.validate(e) and #out < CFG.maxEvents then out[#out + 1] = e else dropped += 1 end
-	end
-	table.sort(out, function(a, b)
-		if a.t ~= b.t then return a.t < b.t end
-		return (a.n or 0) < (b.n or 0)
-	end)
-	return out, dropped
-end
-function Serializer.buildMeta(id, name, s, dur, partial)
-	local c = Serializer.analyze(s.events)
-	local run = (s.wsMax and s.wsMin and s.wsMin > 0 and s.wsMax >= s.wsMin * 1.2) or c.sprintEv > 0
-	return {
-		id = id, name = name, created = os.time(), dur = r2(dur), n = #s.events,
-		moves = c.mov, jumps = c.jump, inter = c.inter, ok = c.ok, na = c.na,
-		run = run and true or false, wsMin = s.wsMin and r1(s.wsMin), wsMax = s.wsMax and r1(s.wsMax),
-		loco = s.customLoco and "personalizada" or "padrão", partial = partial, place = game.PlaceId, v = CFG.version,
-	}
-end
-function Serializer.migrate(data)
-	if type(data) ~= "table" then return nil end
-	if data.v == nil then data.v = 1 end
-	if data.v > CFG.version then return nil, "arquivo de versão mais nova" end
-	return data -- v1 → v2: eventos compatíveis (novos tipos são opcionais)
-end
-function Serializer.encode(t)
-	local ok, s = pcall(HttpService.JSONEncode, HttpService, t)
-	if not ok then return nil, "falha ao codificar" end
-	if #s > CFG.maxBytes then return nil, "rota excede o limite de tamanho" end
-	return s
-end
-function Serializer.decode(s)
-	local ok, t = pcall(HttpService.JSONDecode, HttpService, s)
-	if not ok or type(t) ~= "table" then return nil, "arquivo corrompido" end
-	return t
+local function decode(s)
+    local ok, r = pcall(HttpService.JSONDecode, HttpService, s)
+    if ok then return r end
+    return nil
 end
 
------------------------------------------------------------------- STORAGE
-local mem = genv.AKZR_MEM or { files = {} }
-genv.AKZR_MEM = mem
-local Storage = { persistent = Compat.fs }
-if Compat.fs and Compat.folder then
-	pcall(function() if not isfolder(CFG.folder) then makefolder(CFG.folder) end end)
-end
-local function fpath(n) return CFG.folder .. "/" .. n end
-function Storage.write(name, str)
-	if Compat.fs then
-		local ok, err = pcall(writefile, fpath(name), str)
-		if not ok then return false, "erro ao gravar: " .. tostring(err) end
-		return true
-	end
-	mem.files[name] = str
-	return true
-end
-function Storage.read(name)
-	if Compat.fs then
-		local ok, has = pcall(isfile, fpath(name))
-		if not ok or not has then return nil end
-		local ok2, s = pcall(readfile, fpath(name))
-		return ok2 and s or nil
-	end
-	return mem.files[name]
-end
-function Storage.delete(name)
-	if Compat.fs then
-		if type(delfile) == "function" then pcall(delfile, fpath(name)) end
-	else
-		mem.files[name] = nil
-	end
+local function sanitize(n) return (tostring(n):gsub("[^%w_%-]", "_")) end
+local function routeFile(route) return "RouteHub_" .. sanitize(route.name) .. ".json" end
+
+local function saveAll()
+    Data.settings = S
+    genv.RouteHubData = Data -- persistência em memória (getgenv)
+    if API.writefile then -- fallback: sem writefile, só memória
+        local js = encode(Data)
+        if js then pcall(API.writefile, DATA_FILE, js) end
+    end
 end
 
------------------------------------------------------------------- HISTORY
-local History = { list = {}, byId = {}, cache = nil }
-local function newId()
-	local id
-	repeat
-		local ok, g = pcall(HttpService.GenerateGUID, HttpService, false)
-		id = ok and g:gsub("[^%w]", ""):sub(1, 10) or (tostring(os.time()) .. math.random(100, 999))
-	until not History.byId[id]
-	return id
-end
-local function sanitizeName(s)
-	s = tostring(s or ""):gsub("%c", ""):gsub("^%s+", ""):gsub("%s+$", "")
-	return s:sub(1, 40)
-end
-function History.save()
-	local old = Storage.read("index.json")
-	if old then Storage.write("index.bak.json", old) end
-	local s, err = Serializer.encode({ v = CFG.version, routes = History.list })
-	if not s then return false, err end
-	return Storage.write("index.json", s)
-end
-function History.load()
-	History.list, History.byId = {}, {}
-	local function tryRead(name)
-		local raw = Storage.read(name)
-		if not raw then return nil end
-		local data = Serializer.decode(raw)
-		return data and Serializer.migrate(data)
-	end
-	local data = tryRead("index.json") or tryRead("index.bak.json")
-	if not data or type(data.routes) ~= "table" then return end
-	for _, m in ipairs(data.routes) do
-		if type(m) == "table" and type(m.id) == "string" and type(m.name) == "string"
-			and type(m.dur) == "number" and not History.byId[m.id] then
-			m.n = tonumber(m.n) or 0
-			History.list[#History.list + 1] = m
-			History.byId[m.id] = m
-		end
-	end
-end
-function History.nextName()
-	local mx = 0
-	for _, m in ipairs(History.list) do
-		local n = tonumber(m.name:match("^Rota (%d+)$"))
-		if n and n > mx then mx = n end
-	end
-	return string.format("Rota %03d", mx + 1)
-end
-function History.add(session, dur, partial)
-	local id = newId()
-	local meta = Serializer.buildMeta(id, History.nextName(), session, dur, partial)
-	local body, err = Serializer.encode({ v = CFG.version, id = id, ev = session.events })
-	if not body then return nil, err end
-	local ok, werr = Storage.write("route_" .. id .. ".json", body)
-	if not ok then return nil, werr end
-	History.list[#History.list + 1] = meta
-	History.byId[id] = meta
-	local sok, serr = History.save()
-	if not sok then return meta, "rota salva, mas o índice falhou: " .. tostring(serr) end
-	return meta
-end
-function History.getEvents(id)
-	if History.cache and History.cache.id == id then return History.cache.ev end
-	local raw = Storage.read("route_" .. id .. ".json")
-	if not raw then return nil, "arquivo da rota não encontrado" end
-	local data, err = Serializer.decode(raw)
-	if not data then return nil, err end
-	local md, merr = Serializer.migrate(data)
-	if not md then return nil, merr end
-	if md.id ~= id then return nil, "identificador inconsistente" end
-	local ev = Serializer.cleanEvents(md.ev)
-	if #ev == 0 then return nil, "rota vazia ou corrompida" end
-	local meta = History.byId[id]
-	if meta then
-		local c = Serializer.analyze(ev)
-		meta.ok, meta.na, meta.n = c.ok, c.na, #ev
-	end
-	History.cache = { id = id, ev = ev }
-	return ev
-end
-function History.rename(id, name)
-	local m = History.byId[id]
-	if not m then return false, "rota inexistente" end
-	name = sanitizeName(name)
-	if name == "" then return false, "nome vazio" end
-	m.name = name
-	return History.save()
-end
-function History.delete(id)
-	if not History.byId[id] then return false, "rota inexistente" end
-	for i, x in ipairs(History.list) do if x.id == id then table.remove(History.list, i) break end end
-	History.byId[id] = nil
-	if History.cache and History.cache.id == id then History.cache = nil end
-	Storage.delete("route_" .. id .. ".json")
-	return History.save()
-end
-function History.duplicate(id)
-	local m = History.byId[id]
-	if not m then return nil, "rota inexistente" end
-	local ev, err = History.getEvents(id)
-	if not ev then return nil, err end
-	local nid = newId()
-	local body, e2 = Serializer.encode({ v = CFG.version, id = nid, ev = ev })
-	if not body then return nil, e2 end
-	local ok, werr = Storage.write("route_" .. nid .. ".json", body)
-	if not ok then return nil, werr end
-	local copy = {}
-	for k, v in pairs(m) do copy[k] = v end
-	copy.id, copy.name, copy.created = nid, sanitizeName(m.name .. " (cópia)"), os.time()
-	History.list[#History.list + 1] = copy
-	History.byId[nid] = copy
-	History.save()
-	return copy
-end
-function History.sorted()
-	local out = {}
-	for _, m in ipairs(History.list) do out[#out + 1] = m end
-	table.sort(out, function(a, b) return a.created > b.created end)
-	return out
-end
-local function statusOf(m)
-	if m.partial then return "incompleta" end
-	if (m.na or 0) > 0 then return "com eventos não reproduzíveis" end
-	return "disponível"
-end
-local function compatPct(m)
-	local t = (m.ok or 0) + (m.na or 0)
-	return t == 0 and 100 or math.floor((m.ok or 0) / t * 100)
+local function saveRouteFile(route)
+    if not API.writefile then return end
+    local js = encode(route)
+    if js then pcall(API.writefile, routeFile(route), js) end
 end
 
------------------------------------------------------------------- LER JOGO (diagnóstico)
-local Scan = { profile = nil, sections = {}, order = {}, summary = "Toque em LER JOGO para diagnosticar.", running = false }
-local SPRINT_PAT = { "sprint", "run", "dash", "correr", "corrida", "shift", "rapido", "rápido" }
-local function isSprintName(s)
-	s = string.lower(tostring(s or ""))
-	for _, p in ipairs(SPRINT_PAT) do if s:find(p, 1, true) then return true end end
-	return false
-end
-local SLOTS = { "idle", "walk", "run", "jump", "fall", "climb", "swim", "swimidle", "toolnone", "sit" }
-
-function Scan.run(full)
-	local P = { sprintKeys = {}, sprintGui = {}, sprintAttrs = {}, customLoco = false, hasSprint = false }
-	local secs, order = {}, {}
-	local function sec(name, lines) secs[name] = lines order[#order + 1] = name end
-	local yn = 0
-	local function y() yn += 1 if full and yn % 800 == 0 then task.wait() end end
-
-	-- Jogo
-	local pname = "?"
-	pcall(function() pname = MPS:GetProductInfo(game.PlaceId).Name end)
-	sec("Jogo", {
-		"Nome: " .. tostring(pname), "PlaceId: " .. game.PlaceId, "GameId: " .. game.GameId,
-		string.format("Toque: %s • Teclado: %s • Controle: %s", tostring(UIS.TouchEnabled), tostring(UIS.KeyboardEnabled), tostring(UIS.GamepadEnabled)),
-		"Gravidade: " .. workspace.Gravity, "Streaming: " .. tostring(workspace.StreamingEnabled),
-		"Jogadores: " .. #Players:GetPlayers(),
-	})
-
-	-- Personagem + animação de andar
-	local hum, _, char = getChar()
-	local L = {}
-	if hum then
-		L[#L + 1] = "Rig: " .. hum.RigType.Name
-		L[#L + 1] = "WalkSpeed: " .. r1(hum.WalkSpeed)
-		L[#L + 1] = hum.UseJumpPower and ("JumpPower: " .. hum.JumpPower) or ("JumpHeight: " .. hum.JumpHeight)
-		L[#L + 1] = "HipHeight: " .. r2(hum.HipHeight) .. " • AutoRotate: " .. tostring(hum.AutoRotate)
-		local animate = char:FindFirstChild("Animate")
-		if animate then
-			P.animate = true
-			L[#L + 1] = "Script Animate: SIM"
-			for _, slot in ipairs(SLOTS) do
-				local f = animate:FindFirstChild(slot)
-				if f then
-					local ids = {}
-					for _, a in ipairs(f:GetChildren()) do
-						if a:IsA("Animation") then ids[#ids + 1] = (a.AnimationId:gsub("%D", "")) end
-					end
-					L[#L + 1] = "  " .. slot .. ": " .. (#ids > 0 and table.concat(ids, ", ") or "-")
-					if slot == "walk" then P.walkAnim = ids[1] end
-					if slot == "run" then P.runAnim = ids[1] end
-				end
-			end
-		else
-			P.customLoco = true
-			L[#L + 1] = "Script Animate: NÃO (andar/animações provavelmente personalizados)"
-		end
-		local animator = hum:FindFirstChildOfClass("Animator")
-		if animator then
-			L[#L + 1] = "Animações tocando agora:"
-			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-				L[#L + 1] = string.format("  %s • %s • %s", tr.Name, (tr.Animation and tr.Animation.AnimationId or ""):gsub("%D", ""), tr.Priority.Name)
-			end
-		end
-	else
-		L[1] = "Personagem indisponível."
-	end
-	sec("Personagem", L)
-
-	-- Correr / sprint
-	local SL = {}
-	local okA, bound = pcall(function() return CAS:GetAllBoundActionInfo() end)
-	SL[#SL + 1] = "Ações vinculadas (ContextActionService):"
-	if okA and type(bound) == "table" then
-		for aname, info in pairs(bound) do
-			local keys = {}
-			for _, it in ipairs(info.inputTypes or {}) do
-				keys[#keys + 1] = (typeof(it) == "EnumItem") and it.Name or tostring(it)
-			end
-			local sp = isSprintName(aname) or isSprintName(info.title)
-			SL[#SL + 1] = (sp and "★ " or "• ") .. tostring(aname) .. " [" .. table.concat(keys, ",") .. "]"
-				.. (info.createTouchButton and " (botão na tela)" or "")
-			if sp then
-				P.hasSprint, P.sprintAction = true, aname
-				for _, it in ipairs(info.inputTypes or {}) do
-					if typeof(it) == "EnumItem" and it.EnumType == Enum.KeyCode then P.sprintKeys[it.Name] = true end
-				end
-			end
-		end
-	end
-	SL[#SL + 1] = "Atributos:"
-	local function attrs(inst, label)
-		if not inst then return end
-		local okT, t = pcall(function() return inst:GetAttributes() end)
-		if okT and type(t) == "table" then
-			for k, v in pairs(t) do
-				SL[#SL + 1] = "  " .. label .. "." .. k .. " = " .. tostring(v)
-				if isSprintName(k) then P.sprintAttrs[#P.sprintAttrs + 1] = label .. "." .. k P.hasSprint = true end
-			end
-		end
-	end
-	attrs(LP, "Player") attrs(char, "Char") attrs(hum, "Humanoid")
-	local BL = {}
-	local pg = LP:FindFirstChildOfClass("PlayerGui")
-	if pg then
-		for _, d in ipairs(pg:GetDescendants()) do
-			y()
-			if d:IsA("GuiButton") then
-				local txt = d:IsA("TextButton") and d.Text or ""
-				local sp = isSprintName(d.Name) or isSprintName(txt)
-				BL[#BL + 1] = string.format("%s%s (%s) em %s%s", sp and "★ " or "• ", d.Name, d.ClassName,
-					d.Parent and d.Parent.Name or "?", txt ~= "" and (' "' .. txt .. '"') or "")
-				if sp then P.sprintGui[d.Name] = true P.hasSprint = true end
-			end
-		end
-	end
-	sec("Correr e controles", SL)
-	sec("Botões da tela", BL)
-
-	if full then
-		-- Animações encontradas
-		local AL, seen = {}, {}
-		local function scanAnim(root, label)
-			if not root then return end
-			for _, d in ipairs(root:GetDescendants()) do
-				y()
-				if d:IsA("Animation") and d.AnimationId ~= "" and not seen[d.AnimationId] then
-					seen[d.AnimationId] = true
-					AL[#AL + 1] = label .. ": " .. d.Name .. " = " .. (d.AnimationId:gsub("%D", ""))
-				end
-			end
-		end
-		scanAnim(char, "Personagem") scanAnim(LP:FindFirstChildOfClass("Backpack"), "Mochila")
-		scanAnim(game:GetService("StarterPack"), "StarterPack") scanAnim(RSt, "ReplicatedStorage")
-		scanAnim(workspace, "Workspace")
-		sec("Animações", AL)
-
-		-- Interações + remotes (uma passada no Workspace)
-		local IL, RL = {}, {}
-		local nPrompt, nClick, nSeat = 0, 0, 0
-		for _, d in ipairs(workspace:GetDescendants()) do
-			y()
-			if d:IsA("ProximityPrompt") then
-				nPrompt += 1
-				if nPrompt <= 40 then
-					IL[#IL + 1] = string.format("Prompt: %s / %s (segurar %.1fs) em %s", d.ObjectText, d.ActionText, d.HoldDuration, d.Parent and d.Parent.Name or "?")
-				end
-			elseif d:IsA("ClickDetector") then
-				nClick += 1
-				if nClick <= 40 then IL[#IL + 1] = "ClickDetector em " .. (d.Parent and d.Parent.Name or "?") end
-			elseif d:IsA("Seat") or d:IsA("VehicleSeat") then
-				nSeat += 1
-			elseif d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
-				RL[#RL + 1] = d.ClassName .. ": " .. d:GetFullName()
-			end
-		end
-		table.insert(IL, 1, string.format("Total: %d prompts • %d click detectors • %d assentos", nPrompt, nClick, nSeat))
-		local tools = {}
-		local bp = LP:FindFirstChildOfClass("Backpack")
-		for _, root in ipairs({ bp, char, game:GetService("StarterPack") }) do
-			if root then for _, t in ipairs(root:GetChildren()) do if t:IsA("Tool") then tools[t.Name] = true end end end
-		end
-		local tl = {}
-		for n in pairs(tools) do tl[#tl + 1] = n end
-		IL[#IL + 1] = "Ferramentas: " .. (#tl > 0 and table.concat(tl, ", ") or "nenhuma")
-		sec("Interações", IL)
-
-		for _, d in ipairs(RSt:GetDescendants()) do
-			y()
-			if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d.ClassName == "UnreliableRemoteEvent" then
-				RL[#RL + 1] = d.ClassName .. ": " .. d:GetFullName()
-			end
-		end
-		table.insert(RL, 1, "Total de remotes visíveis: " .. #RL .. " (só nomes; o servidor não é visível)")
-		sec("Remotes", RL)
-
-		-- Scripts visíveis
-		local CL = {}
-		local function scanScripts(root, label)
-			if not root then return end
-			for _, d in ipairs(root:GetDescendants()) do
-				y()
-				if d:IsA("LocalScript") or d:IsA("ModuleScript") then
-					CL[#CL + 1] = label .. ": " .. d.ClassName .. " " .. d.Name
-				end
-			end
-		end
-		scanScripts(pg, "PlayerGui") scanScripts(LP:FindFirstChild("PlayerScripts"), "PlayerScripts")
-		scanScripts(char, "Personagem")
-		sec("Scripts (nomes)", CL)
-	end
-	sec("Executor", Compat.report())
-
-	-- Resumo
-	local keys = {}
-	for k in pairs(P.sprintKeys) do keys[#keys + 1] = k end
-	local guis = {}
-	for k in pairs(P.sprintGui) do guis[#guis + 1] = k end
-	local sum = {}
-	sum[#sum + 1] = "Animação de andar: " .. (P.customLoco and "PERSONALIZADA (sem Animate) — gravo todas as animações"
-		or ("padrão (Animate)" .. (P.walkAnim and (" • walk " .. P.walkAnim) or "")))
-	if P.hasSprint then
-		sum[#sum + 1] = "Correr: DETECTADO" .. (P.sprintAction and (" • ação " .. tostring(P.sprintAction)) or "")
-			.. (#keys > 0 and (" • teclas " .. table.concat(keys, ",")) or "")
-			.. (#guis > 0 and (" • botões " .. table.concat(guis, ",")) or "")
-			.. (#P.sprintAttrs > 0 and (" • atributos " .. table.concat(P.sprintAttrs, ",")) or "")
-	else
-		sum[#sum + 1] = "Correr: não detectado (mudanças de velocidade ainda são gravadas)"
-	end
-	sum[#sum + 1] = "Controles: " .. (UIS.TouchEnabled and "toque" or "teclado/mouse")
-	if full then
-		sum[#sum + 1] = string.format("Prompts/cliques: %s", (secs["Interações"] and secs["Interações"][1]) or "-")
-	end
-
-	Scan.profile = P
-	if full or #Scan.order == 0 then
-		Scan.sections, Scan.order, Scan.summary = secs, order, table.concat(sum, "\n")
-	end
-	return P, secs, order
+local function deleteRouteFile(route)
+    if not (API.delfile and API.isfile) then return end -- sem delfile: arquivo fica órfão
+    pcall(function()
+        local f = routeFile(route)
+        if API.isfile(f) then API.delfile(f) end
+    end)
 end
 
-function Scan.reportText()
-	local out = { "AKZ ROTAS — diagnóstico do jogo", os.date("%d/%m/%Y %H:%M"), "" }
-	for _, name in ipairs(Scan.order) do
-		out[#out + 1] = "=== " .. name .. " ==="
-		for _, l in ipairs(Scan.sections[name]) do out[#out + 1] = l end
-		out[#out + 1] = ""
-	end
-	return table.concat(out, "\n")
+local function loadAll()
+    local src = genv.RouteHubData
+    if not (type(src) == "table" and type(src.routes) == "table") then
+        src = nil
+        if API.isfile and API.readfile then
+            local ok, exists = pcall(API.isfile, DATA_FILE)
+            if ok and exists then
+                local ok2, raw = pcall(API.readfile, DATA_FILE)
+                if ok2 then
+                    local dec = decode(raw)
+                    if type(dec) == "table" then src = dec end
+                end
+            end
+        end
+    end
+    if src then
+        Data.routes = type(src.routes) == "table" and src.routes or {}
+        if type(src.settings) == "table" then
+            for k, v in pairs(src.settings) do
+                if Defaults[k] ~= nil and type(v) == type(Defaults[k]) then S[k] = v end
+            end
+        end
+    end
 end
 
-function Scan.runAsync()
-	if Scan.running then N("Ler jogo", "Já está lendo...") return end
-	Scan.running = true
-	N("Ler jogo", "Lendo o jogo... pode levar alguns segundos.", 4)
-	task.spawn(function()
-		local ok, err = pcall(Scan.run, true)
-		Scan.running = false
-		if not alive then return end
-		if not ok then N("Erro ao ler jogo", tostring(err), 5) return end
-		local txt = Scan.reportText()
-		local saved = Storage.write("diagnostico_" .. game.PlaceId .. ".txt", txt)
-		if Compat.clip then pcall(setclipboard, txt) end
-		N("Leitura concluída", saved and (Storage.persistent and "Relatório salvo e copiado." or "Relatório na memória.") or "Relatório pronto.", 4)
-		if UI.updateScan then UI.updateScan() end
-	end)
+--[[ === SEÇÃO 5: HELPERS DE UI E TOASTS === ]]
+local UI = { pages = {}, tabs = {} }
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    if props then
+        for k, v in pairs(props) do o[k] = v end
+    end
+    if parent then o.Parent = parent end
+    return o
 end
 
------------------------------------------------------------------- RECORDER
-local Playback
-local Recorder = { active = false, session = nil, conns = {}, errors = 0 }
-local SKIP_KEYS = { W = 1, A = 1, S = 1, D = 1, Up = 1, Down = 1, Left = 1, Right = 1, Space = 1, Unknown = 1 }
-
-local function guard(f)
-	return function(...)
-		if not pcall(f, ...) then Recorder.errors += 1 end
-	end
-end
-local function rconn(c) Recorder.conns[#Recorder.conns + 1] = c end
-
-function Recorder.push(k, d)
-	local s = Recorder.session
-	if not (s and Recorder.active) then return end
-	if #s.events >= CFG.maxEvents then Recorder.stop("limite de eventos", true) return end
-	s.seq += 1
-	local e = { t = r2(os.clock() - s.t0), n = s.seq, k = k, d = d or {} }
-	local _, hrp = getChar()
-	if hrp then
-		e.p = { r2(hrp.Position.X), r2(hrp.Position.Y), r2(hrp.Position.Z) }
-		e.r = yawOf(hrp)
-	end
-	s.events[#s.events + 1] = e
-	return e
+local function corner(o, r)
+    return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o)
 end
 
-local function findDetector(part)
-	local cur, depth = part, 0
-	while cur and cur ~= workspace and depth < 5 do
-		local cd = cur:FindFirstChildOfClass("ClickDetector")
-		if cd then return cd end
-		cur = cur.Parent
-		depth += 1
-	end
-end
-local function buttonAt(pos)
-	local pg = LP:FindFirstChildOfClass("PlayerGui")
-	if not pg then return nil end
-	local inset = GuiService:GetGuiInset().Y
-	for _, yy in ipairs({ pos.Y, pos.Y - inset }) do
-		local okG, objs = pcall(function() return pg:GetGuiObjectsAtPosition(pos.X, yy) end)
-		if okG then
-			for _, o in ipairs(objs) do
-				if o:IsA("GuiButton") and isShown(o) then return o end
-			end
-		end
-	end
+local function stroke(o, color, alpha)
+    return new("UIStroke", {
+        Color = color or C.stroke, Transparency = alpha or 0.7, Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, o)
 end
 
-function Recorder.sample(force)
-	local s = Recorder.session
-	local hum, hrp = getChar()
-	if not (s and hum and hrp) then return end
-	local pos, yaw = hrp.Position, yawOf(hrp)
-	local last = s.last
-	local moved = (not last) or (pos - last.pos).Magnitude >= CFG.moveThreshold
-	local rot = (not last) or math.abs(angDiff(yaw, last.yaw)) >= CFG.rotThreshold
-	local idle = (os.clock() - s.lastT) >= CFG.idleInterval
-	if force or moved or rot or idle then
-		local ws = r2(hum.WalkSpeed)
-		s.baseWs = s.baseWs or ws
-		s.wsMin = s.wsMin and math.min(s.wsMin, ws) or ws
-		s.wsMax = s.wsMax and math.max(s.wsMax, ws) or ws
-		Recorder.push("move", {
-			ws = ws, v = r2(hrp.AssemblyLinearVelocity.Magnitude), st = hum:GetState().Name,
-			run = s.baseWs > 0 and ws >= s.baseWs * 1.2 or false,
-		})
-		s.last = { pos = pos, yaw = yaw }
-		s.lastT = os.clock()
-	end
+local function tween(o, t, props, style, dir)
+    local tw = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
 end
 
-local function bindTool(tool)
-	if not tool:IsA("Tool") then return end
-	rconn(tool.Activated:Connect(guard(function() Recorder.push("tool", { ph = "use", name = tool.Name }) end)))
+local function label(parent, text, size, pos, font, textSize, color, align)
+    return new("TextLabel", {
+        Text = text, Size = size, Position = pos or UDim2.new(),
+        BackgroundTransparency = 1, Font = font or Enum.Font.Gotham,
+        TextSize = textSize or 13, TextColor3 = color or C.text,
+        TextXAlignment = align or Enum.TextXAlignment.Left, BorderSizePixel = 0,
+    }, parent)
 end
 
-function Recorder.bindCharacter(char, prof)
-	local hum = char:FindFirstChildOfClass("Humanoid")
-	if not hum then return end
-	local s = Recorder.session
-	rconn(hum.StateChanged:Connect(guard(function(old, new)
-		Recorder.push("state", { from = old.Name, to = new.Name })
-		local _, hrp = getChar()
-		if new == Enum.HumanoidStateType.Jumping then
-			s.jumpT = os.clock()
-			Recorder.push("jump", { ph = "start", vy = hrp and r2(hrp.AssemblyLinearVelocity.Y) or 0 })
-		elseif new == Enum.HumanoidStateType.Landed then
-			local air = s.jumpT and r2(os.clock() - s.jumpT) or nil
-			s.jumpT = nil
-			Recorder.push("jump", { ph = "land", air = air })
-		end
-	end)))
-	rconn(hum:GetPropertyChangedSignal("WalkSpeed"):Connect(guard(function() Recorder.sample(true) end)))
-	rconn(hum.Died:Connect(guard(function() Recorder.stop("personagem morreu", true) end)))
-	local animator = hum:FindFirstChildOfClass("Animator")
-	if animator then
-		rconn(animator.AnimationPlayed:Connect(guard(function(track)
-			local id = track.Animation and track.Animation.AnimationId or ""
-			local pri = track.Priority.Name
-			local action = (pri == "Action" or pri == "Action2" or pri == "Action3" or pri == "Action4")
-			local rp = id ~= "" and (action or prof.customLoco) or false
-			Recorder.push("anim", { ph = "start", id = id, name = track.Name, pri = pri, sp = r2(track.Speed),
-				loop = track.Looped, rp = rp })
-			local c
-			c = track.Stopped:Connect(function()
-				if c then c:Disconnect() end
-				guard(function() Recorder.push("anim", { ph = "stop", id = id, name = track.Name, rp = rp }) end)()
-			end)
-		end)))
-	end
-	rconn(char.ChildAdded:Connect(guard(function(ch)
-		if ch:IsA("Tool") then Recorder.push("tool", { ph = "equip", name = ch.Name }) end
-	end)))
-	rconn(char.ChildRemoved:Connect(guard(function(ch)
-		if ch:IsA("Tool") then Recorder.push("tool", { ph = "unequip", name = ch.Name }) end
-	end)))
-	for _, t in ipairs(char:GetChildren()) do bindTool(t) end
-	local bp = LP:FindFirstChildOfClass("Backpack")
-	if bp then
-		for _, t in ipairs(bp:GetChildren()) do bindTool(t) end
-		rconn(bp.ChildAdded:Connect(guard(bindTool)))
-	end
-	for _, pair in ipairs({ { LP, "Player" }, { char, "Char" }, { hum, "Humanoid" } }) do
-		local inst, label = pair[1], pair[2]
-		rconn(inst.AttributeChanged:Connect(guard(function(name)
-			local v = inst:GetAttribute(name)
-			if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
-				Recorder.push("attr", { who = label, name = name, val = v, sp = isSprintName(name) or nil })
-			end
-		end)))
-	end
+local function makeButton(parent, text, size, pos, color, textColor)
+    local base = color or C.accent
+    local b = new("TextButton", {
+        Text = text, Font = Enum.Font.GothamBold, TextSize = 14,
+        TextColor3 = textColor or C.text, BackgroundColor3 = base,
+        AutoButtonColor = false, Size = size, Position = pos or UDim2.new(),
+        BorderSizePixel = 0,
+    }, parent)
+    b:SetAttribute("Base", base)
+    corner(b, 8)
+    b.MouseEnter:Connect(function()
+        tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base"):Lerp(Color3.new(1, 1, 1), 0.14) })
+    end)
+    b.MouseLeave:Connect(function()
+        tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base") })
+    end)
+    return b
+end
+
+-- Sistema de toasts (canto inferior direito)
+local Toast = { container = nil }
+function Toast.show(msg, kind)
+    if not Toast.container then return end
+    local col = (kind == "success" and C.success) or (kind == "error" and C.danger) or C.accent
+    local g = new("CanvasGroup", {
+        Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = C.panel,
+        GroupTransparency = 1, BorderSizePixel = 0,
+    }, Toast.container)
+    corner(g, 8)
+    stroke(g, col, 0.4)
+    new("Frame", { Size = UDim2.new(0, 4, 1, 0), BackgroundColor3 = col, BorderSizePixel = 0 }, g)
+    label(g, tostring(msg), UDim2.new(1, -18, 1, 0), UDim2.new(0, 12, 0, 0), Enum.Font.GothamBold, 12, C.text)
+    tween(g, 0.2, { GroupTransparency = 0 })
+    task.delay(2.6, function()
+        if g and g.Parent then
+            local tw = tween(g, 0.3, { GroupTransparency = 1 })
+            tw.Completed:Connect(function() if g then g:Destroy() end end)
+        end
+    end)
+end
+
+--[[ === SEÇÃO 6: MÓDULO DE DIAGNÓSTICO (OCULTO) === ]]
+local Diag = { running = false, report = nil }
+
+local function diagStep(name, fn)
+    local ok, err = pcall(fn)
+    if not ok then warn("[DIAG] Falha ao inspecionar " .. name .. ": " .. tostring(err)) end
+end
+
+function Diag.run()
+    if Diag.running then return end
+    Diag.running = true
+    task.spawn(function()
+        local rep = {}
+        local char, hum = getChar(), getHum()
+
+        diagStep("Character/Animator", function()
+            local animator = hum and hum:FindFirstChildOfClass("Animator")
+            local tracks = animator and animator:GetPlayingAnimationTracks() or {}
+            local animate = char and char:FindFirstChild("Animate")
+            rep.playingTracks = #tracks
+            rep.walkAnim = ((animate and animate:FindFirstChild("walk")) ~= nil) or #tracks > 0
+            print(rep.walkAnim and "[DIAG] Animações de caminhada detectadas: OK"
+                or "[DIAG] Animações de caminhada detectadas: nenhuma")
+        end)
+
+        diagStep("Humanoid (pulo)", function()
+            if not hum then error("Humanoid ausente") end
+            rep.useJumpPower = hum.UseJumpPower
+            rep.jumpPower = hum.JumpPower
+            rep.jumpHeight = hum.JumpHeight
+            rep.walkSpeed = hum.WalkSpeed
+            print("[DIAG] Modo de pulo detectado: OK (" .. (hum.UseJumpPower and "JumpPower" or "JumpHeight") .. ")")
+        end)
+
+        diagStep("sprint", function()
+            local found = 0
+            local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            if pg then
+                for i, o in ipairs(pg:GetDescendants()) do
+                    if o:IsA("GuiButton") then
+                        local s = (o.Name .. " " .. (o:IsA("TextButton") and o.Text or "")):lower()
+                        if s:find("sprint") or s:find("run") or s:find("correr") or s:find("corrida") then
+                            found += 1
+                        end
+                    end
+                    if i % 1500 == 0 then task.wait() end
+                end
+            end
+            local changed = false
+            local base = hum and hum.WalkSpeed or 16
+            local conn
+            if hum then
+                conn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function() changed = true end)
+            end
+            task.wait(3)
+            if conn then conn:Disconnect() end
+            rep.sprintButtons = found
+            rep.sprintByWalkSpeed = changed or base > 16
+            if found > 0 or rep.sprintByWalkSpeed then
+                print("[DIAG] Botão de correr (sprint) detectado: OK")
+            else
+                print("[DIAG] Botão de correr (sprint) detectado: nenhum")
+            end
+        end)
+
+        diagStep("RemoteEvents/Prompts", function()
+            local counts = { RemoteEvent = 0, RemoteFunction = 0, BindableEvent = 0,
+                ProximityPrompt = 0, ClickDetector = 0, TouchTransmitter = 0 }
+            local n = 0
+            for _, root in ipairs({ ReplicatedStorage, ReplicatedFirst, workspace }) do
+                for _, o in ipairs(root:GetDescendants()) do
+                    local cn = o.ClassName
+                    if counts[cn] ~= nil then counts[cn] += 1 end
+                    n += 1
+                    if n % 2000 == 0 then task.wait() end
+                end
+            end
+            rep.remoteEvents = counts.RemoteEvent
+            rep.remoteFunctions = counts.RemoteFunction
+            rep.bindables = counts.BindableEvent
+            rep.prompts = counts.ProximityPrompt
+            rep.clickDetectors = counts.ClickDetector
+            rep.touchInterests = counts.TouchTransmitter
+            print("[DIAG] RemoteEvents de ação detectados: " .. counts.RemoteEvent)
+            print("[DIAG] TouchInterest / ProximityPrompt detectados: " .. (counts.TouchTransmitter + counts.ProximityPrompt))
+        end)
+
+        diagStep("Tools", function()
+            local n = 0
+            local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+            if bp then for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then n += 1 end end end
+            if char then for _, t in ipairs(char:GetChildren()) do if t:IsA("Tool") then n += 1 end end end
+            rep.tools = n
+            print("[DIAG] Tools equipáveis detectadas: " .. n)
+        end)
+
+        diagStep("Toque", function()
+            rep.touchEnabled = UIS.TouchEnabled
+            print("[DIAG] Suporte a toque: " .. (UIS.TouchEnabled and "OK" or "não"))
+        end)
+
+        Diag.report = rep
+        genv.RouteHubDiag = rep -- relatório estruturado usado pelo gravador
+        Diag.running = false
+    end)
+end
+
+--[[ === SEÇÃO 7: MÓDULO DE GRAVAÇÃO === ]]
+local Recorder = {
+    active = false, events = {}, t0 = 0, conns = {}, charConns = {},
+    seen = setmetatable({}, { __mode = "k" }),
+    boundTools = setmetatable({}, { __mode = "k" }),
+    touches = {}, touchLast = {}, downSet = {}, keysDown = {},
+    animSummary = {}, touchId = 0,
+    baseWS = 16, lastWS = 16, runSpeed = 0, lastMD = Vector3.zero,
+    lastMoveMs = 0, lastForceMs = 0, lastCamMs = 0, lastAnimMs = 0, lastCF = nil,
+}
+
+function Recorder.add(typ, data)
+    if not Recorder.active then return nil end
+    local ev = { t = math.floor((os.clock() - Recorder.t0) * 1000), type = typ, data = data }
+    Recorder.events[#Recorder.events + 1] = ev
+    return ev
+end
+
+local function pointerInfo(input)
+    local vp = cam().ViewportSize
+    local inset = GuiService:GetGuiInset()
+    local px, py, sx, sy
+    if input.UserInputType == Enum.UserInputType.Touch then
+        px, py = input.Position.X, input.Position.Y
+        sx, sy = px + inset.X, py + inset.Y
+    else
+        local m = UIS:GetMouseLocation()
+        sx, sy = m.X, m.Y
+        px, py = sx - inset.X, sy - inset.Y
+    end
+    return px, py, sx, sy, vp
+end
+
+-- Retorna o GuiButton do jogo sob o ponteiro, "ours" se for o hub, ou nil
+local function findGuiButton(px, py, sx, sy)
+    local win = UI.main
+    if win and win.Parent and win.Visible then
+        local ap, as = win.AbsolutePosition, win.AbsoluteSize
+        if sx >= ap.X and sx <= ap.X + as.X and sy >= ap.Y and sy <= ap.Y + as.Y then
+            return "ours"
+        end
+    end
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not pg then return nil end
+    for _, pos in ipairs({ Vector2.new(px, py), Vector2.new(sx, sy) }) do
+        local ok, objs = pcall(pg.GetGuiObjectsAtPosition, pg, pos.X, pos.Y)
+        if ok then
+            for _, o in ipairs(objs) do
+                if o:IsA("GuiButton") and o.Visible and not (UI.gui and o:IsDescendantOf(UI.gui)) then
+                    return o
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function Recorder.onInputBegan(input, gpe)
+    local ut = input.UserInputType
+    if ut == Enum.UserInputType.Keyboard then
+        if gpe then return end -- digitando em caixa de texto/chat
+        local kc = input.KeyCode
+        if kc == Enum.KeyCode.D and UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+            and UIS:IsKeyDown(Enum.KeyCode.LeftShift) then return end
+        Recorder.keysDown[kc] = os.clock()
+        Recorder.add("KeyDown", { k = kc.Name, held = true })
+    elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.MouseButton2
+        or ut == Enum.UserInputType.Touch then
+        local px, py, sx, sy, vp = pointerInfo(input)
+        local btn = findGuiButton(px, py, sx, sy)
+        if btn == "ours" then return end
+        if gpe and not btn then return end -- controles nativos (joystick/pulo) não entram
+        local d = { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "down" }
+        if btn then d.btn = instPath(btn) end
+        if ut == Enum.UserInputType.Touch then
+            Recorder.touchId += 1
+            Recorder.touches[input] = Recorder.touchId
+            d.id = Recorder.touchId
+            Recorder.add("Touch", d)
+        else
+            d.b = (ut == Enum.UserInputType.MouseButton1) and 1 or 2
+            Recorder.downSet[ut] = true
+            Recorder.add("Click", d)
+        end
+    elseif ut.Name:find("Gamepad") and input.KeyCode ~= Enum.KeyCode.Thumbstick1
+        and input.KeyCode ~= Enum.KeyCode.Thumbstick2 and input.KeyCode ~= Enum.KeyCode.Unknown then
+        Recorder.keysDown[input.KeyCode] = os.clock()
+        Recorder.add("KeyDown", { k = input.KeyCode.Name, gp = true, held = true })
+    end
+end
+
+function Recorder.onInputEnded(input, gpe)
+    local ut = input.UserInputType
+    if ut == Enum.UserInputType.Keyboard or ut.Name:find("Gamepad") then
+        local kc = input.KeyCode
+        local since = Recorder.keysDown[kc]
+        if since then
+            Recorder.keysDown[kc] = nil
+            Recorder.add("KeyUp", { k = kc.Name, gp = ut ~= Enum.UserInputType.Keyboard or nil,
+                dur = math.floor((os.clock() - since) * 1000) })
+        end
+    elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.MouseButton2 then
+        if Recorder.downSet[ut] then
+            Recorder.downSet[ut] = nil
+            local _, _, sx, sy, vp = pointerInfo(input)
+            Recorder.add("Click", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "up",
+                b = (ut == Enum.UserInputType.MouseButton1) and 1 or 2 })
+        end
+    elseif ut == Enum.UserInputType.Touch then
+        local id = Recorder.touches[input]
+        if id then
+            Recorder.touches[input] = nil
+            Recorder.touchLast[id] = nil
+            local _, _, sx, sy, vp = pointerInfo(input)
+            Recorder.add("Touch", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "up", id = id })
+        end
+    end
+end
+
+function Recorder.onInputChanged(input)
+    if input.UserInputType ~= Enum.UserInputType.Touch then return end
+    local id = Recorder.touches[input]
+    if not id then return end
+    local now = os.clock()
+    if Recorder.touchLast[id] and now - Recorder.touchLast[id] < 0.05 then return end
+    Recorder.touchLast[id] = now
+    local _, _, sx, sy, vp = pointerInfo(input)
+    Recorder.add("Touch", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "move", id = id })
+end
+
+function Recorder.logTrack(track)
+    if Recorder.seen[track] then return end
+    Recorder.seen[track] = true
+    local anim = track.Animation
+    local id = anim and anim.AnimationId or ""
+    local d = { id = id, pr = track.Priority.Name, sp = r3(track.Speed),
+        w = r3(track.WeightTarget), lp = track.Looped, nm = track.Name }
+    local ev = Recorder.add("Animation", d)
+    local s = Recorder.animSummary[id]
+    if not s then
+        Recorder.animSummary[id] = { id = id, t = ev and ev.t or 0, n = 1, pr = d.pr }
+    else
+        s.n += 1
+    end
+end
+
+function Recorder.addConn(list, sig, fn)
+    local c = sig:Connect(fn)
+    list[#list + 1] = c
+    return c
+end
+
+function Recorder.unbindChar()
+    for _, c in ipairs(Recorder.charConns) do pcall(function() c:Disconnect() end) end
+    Recorder.charConns = {}
+end
+
+function Recorder.bindTool(tool)
+    if Recorder.boundTools[tool] then return end
+    Recorder.boundTools[tool] = true
+    local L = Recorder.charConns
+    Recorder.addConn(L, tool.Equipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Equipped" }) end)
+    Recorder.addConn(L, tool.Unequipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Unequipped" }) end)
+    Recorder.addConn(L, tool.Activated, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Activated" }) end)
+end
+
+-- Conecta os hooks do personagem (reconectado automaticamente em respawn)
+function Recorder.bindCharacter(char)
+    Recorder.unbindChar()
+    if not char then return end
+    local hum = char:WaitForChild("Humanoid", 5)
+    local root = char:WaitForChild("HumanoidRootPart", 5)
+    if not hum or not Recorder.active then return end
+    local L = Recorder.charConns
+
+    Recorder.addConn(L, hum.Jumping, function(active)
+        if active then
+            Recorder.add("Jump", { up = hum.UseJumpPower, pw = r3(hum.UseJumpPower and hum.JumpPower or hum.JumpHeight) })
+        end
+    end)
+    Recorder.addConn(L, hum.StateChanged, function(old, new)
+        Recorder.add("StateChange", { s = new.Name, o = old.Name })
+    end)
+    Recorder.addConn(L, hum.Running, function(speed) Recorder.runSpeed = speed end)
+
+    local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+    if animator then
+        Recorder.addConn(L, animator.AnimationPlayed, function(track) Recorder.logTrack(track) end)
+    end
+
+    for _, t in ipairs(char:GetChildren()) do if t:IsA("Tool") then Recorder.bindTool(t) end end
+    Recorder.addConn(L, char.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
+    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then Recorder.bindTool(t) end end
+        Recorder.addConn(L, bp.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
+    end
+
+    if root then
+        local lastTouch = {}
+        Recorder.addConn(L, root.Touched, function(part)
+            if not part:FindFirstChildOfClass("TouchTransmitter") then return end
+            local now = os.clock()
+            if lastTouch[part] and now - lastTouch[part] < 0.5 then return end
+            lastTouch[part] = now
+            Recorder.add("TouchPart", { p = instPath(part) })
+        end)
+    end
+end
+
+-- Amostragem por frame (movimento, câmera e polling de animações)
+function Recorder.sample()
+    if not Recorder.active then return end
+    local nowMs = math.floor((os.clock() - Recorder.t0) * 1000)
+    local hum, root = getHum(), getRoot()
+
+    if hum and nowMs - Recorder.lastMoveMs >= S.moveSampleRateMs then
+        Recorder.lastMoveMs = nowMs
+        local md, ws = hum.MoveDirection, hum.WalkSpeed
+        if (md - Recorder.lastMD).Magnitude > 0.02 or nowMs - Recorder.lastForceMs >= 500 then
+            Recorder.lastMD = md
+            Recorder.lastForceMs = nowMs
+            local d = { d = { r3(md.X), r3(md.Y), r3(md.Z) }, ws = r3(ws),
+                sprint = ws > Recorder.baseWS + 0.5, rs = r3(Recorder.runSpeed or 0),
+                st = hum:GetState().Name }
+            if root then
+                local p = root.Position
+                d.p = { r3(p.X), r3(p.Y), r3(p.Z) }
+            end
+            Recorder.add("Move", d)
+        end
+        if math.abs(ws - Recorder.lastWS) > 0.01 then
+            Recorder.lastWS = ws
+            Recorder.add("Sprint", { ws = r3(ws), on = ws > Recorder.baseWS + 0.5, base = r3(Recorder.baseWS) })
+        end
+    end
+
+    local c = cam()
+    if c and nowMs - Recorder.lastCamMs >= S.cameraSampleRateMs then
+        Recorder.lastCamMs = nowMs
+        local cf, last = c.CFrame, Recorder.lastCF
+        if not last or (cf.Position - last.Position).Magnitude > 0.01
+            or cf.LookVector:Dot(last.LookVector) < 0.99999 then
+            Recorder.lastCF = cf
+            local comps = { cf:GetComponents() }
+            for i = 1, #comps do comps[i] = r4(comps[i]) end
+            Recorder.add("Camera", { c = comps })
+        end
+    end
+
+    if hum and nowMs - Recorder.lastAnimMs >= 500 then
+        Recorder.lastAnimMs = nowMs
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do Recorder.logTrack(tr) end
+        end
+    end
+end
+
+-- Log de RemoteEvent/RemoteFunction chamados pelo jogador (via hook __namecall)
+genv.RouteHubRemoteLogger = nil
+local function remoteLogger(remote, method, args)
+    if not Recorder.active or State.mode == "replay" then return end
+    local ok = pcall(function()
+        if typeof(remote) ~= "Instance" then return end
+        if not (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then return end
+        local list = {}
+        for i = 1, args.n do list[i] = ser(args[i]) end
+        Recorder.add("Remote", { p = instPath(remote), m = method, n = args.n, a = list, nm = remote.Name })
+    end)
+    return ok
+end
+
+local function installRemoteHook()
+    if genv.RouteHubHookInstalled then return true end
+    if not (API.hookmetamethod and API.getnamecallmethod) then return false end
+    local wrap = API.newcclosure or function(f) return f end
+    local old
+    local ok = pcall(function()
+        old = API.hookmetamethod(game, "__namecall", wrap(function(self, ...)
+            local m = API.getnamecallmethod()
+            if m == "FireServer" or m == "InvokeServer" then
+                local lg = genv.RouteHubRemoteLogger
+                if lg then
+                    local args = table.pack(...)
+                    task.defer(lg, self, m, args) -- fora do hook: não altera o namecall original
+                end
+            end
+            return old(self, ...)
+        end))
+    end)
+    if ok then genv.RouteHubHookInstalled = true end
+    return ok
+end
+
+-- Fallback sem hookmetamethod: registra apenas OnClientEvent (informativo, não reproduzível)
+function Recorder.bindRemoteFallback()
+    task.spawn(function()
+        local n = 0
+        for _, o in ipairs(ReplicatedStorage:GetDescendants()) do
+            if o:IsA("RemoteEvent") then
+                Recorder.addConn(Recorder.conns, o.OnClientEvent, function(...)
+                    local args = table.pack(...)
+                    local list = {}
+                    for i = 1, args.n do list[i] = ser(args[i]) end
+                    Recorder.add("Remote", { p = instPath(o), m = "OnClientEvent", dir = "in", n = args.n, a = list, nm = o.Name })
+                end)
+            end
+            n += 1
+            if n % 1500 == 0 then task.wait() end
+        end
+    end)
+end
+
+function Recorder.bindClickDetectors()
+    task.spawn(function()
+        local n = 0
+        local function hook(cd)
+            Recorder.addConn(Recorder.conns, cd.MouseClick, function()
+                Recorder.add("ClickDetector", { p = instPath(cd), ev = "MouseClick" })
+            end)
+        end
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("ClickDetector") then pcall(hook, o) end
+            n += 1
+            if n % 1500 == 0 then task.wait() end
+        end
+        Recorder.addConn(Recorder.conns, workspace.DescendantAdded, function(o)
+            if o:IsA("ClickDetector") then pcall(hook, o) end
+        end)
+    end)
 end
 
 function Recorder.start()
-	if Recorder.active then return false, "já existe gravação ativa" end
-	if Playback.state ~= "idle" then return false, "pare o Playback antes de gravar" end
-	local hum, hrp, char = getChar()
-	if not (hum and hrp) or hum.Health <= 0 then return false, "personagem indisponível" end
-	if not Scan.profile then pcall(Scan.run, false) end
-	local prof = Scan.profile or { sprintKeys = {}, customLoco = false }
-	local s = { t0 = os.clock(), seq = 0, events = {}, lastT = os.clock(), keys = {}, holds = {}, touches = {},
-		customLoco = prof.customLoco }
-	Recorder.session, Recorder.active, Recorder.errors = s, true, 0
-	Recorder.sample(true)
+    if Recorder.active then return end
+    Recorder.events = {}
+    Recorder.animSummary = {}
+    Recorder.seen = setmetatable({}, { __mode = "k" })
+    Recorder.boundTools = setmetatable({}, { __mode = "k" })
+    Recorder.touches, Recorder.touchLast, Recorder.downSet, Recorder.keysDown = {}, {}, {}, {}
+    Recorder.touchId = 0
+    Recorder.t0 = os.clock()
+    Recorder.lastMoveMs, Recorder.lastForceMs, Recorder.lastCamMs, Recorder.lastAnimMs = -1000, -1000, -1000, -1000
+    Recorder.lastCF = nil
+    Recorder.lastMD = Vector3.new(9, 9, 9)
+    local hum = getHum()
+    local ws = hum and hum.WalkSpeed or 16
+    Recorder.baseWS = math.min(ws, 16)
+    Recorder.lastWS = ws
+    Recorder.active = true
 
-	local acc = 0
-	rconn(RunService.Heartbeat:Connect(guard(function(dt)
-		acc += dt
-		if acc < CFG.sampleInterval then return end
-		acc = 0
-		Recorder.sample(false)
-	end)))
-	Recorder.bindCharacter(char, prof)
-	rconn(LP.CharacterRemoving:Connect(guard(function() Recorder.stop("respawn", true) end)))
+    genv.RouteHubRemoteLogger = remoteLogger
+    local hooked = installRemoteHook()
+    if not hooked then Recorder.bindRemoteFallback() end
 
-	local function isSprintKey(key) return prof.sprintKeys[key] or key == "LeftShift" or key == "RightShift" end
-	rconn(UIS.InputBegan:Connect(guard(function(input, gp)
-		if UIS:GetFocusedTextBox() then return end
-		local ut = input.UserInputType
-		if ut == Enum.UserInputType.Keyboard then
-			local key = input.KeyCode.Name
-			if SKIP_KEYS[key] then return end
-			if gp and not isSprintKey(key) then return end
-			s.keys[key] = os.clock()
-			Recorder.push("input", { ph = "down", key = key, sp = isSprintKey(key) or nil })
-		elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.Touch then
-			local btn = buttonAt(input.Position)
-			if btn then
-				s.touches[input] = { ref = makeRef(btn), t = os.clock(), sp = isSprintName(btn.Name) or nil }
-				Recorder.push("gui", { ph = "down", ref = s.touches[input].ref, sp = s.touches[input].sp })
-			elseif not gp then
-				task.defer(guard(function()
-					local target = LP:GetMouse().Target
-					local cd = target and findDetector(target)
-					if cd then Recorder.push("click", { ref = makeRef(cd) }) end
-				end))
-			end
-		end
-	end)))
-	rconn(UIS.InputEnded:Connect(guard(function(input)
-		local ut = input.UserInputType
-		if ut == Enum.UserInputType.Keyboard then
-			local key = input.KeyCode.Name
-			if s.keys[key] then
-				Recorder.push("input", { ph = "up", key = key, held = r2(os.clock() - s.keys[key]), sp = isSprintKey(key) or nil })
-				s.keys[key] = nil
-			end
-		elseif s.touches[input] then
-			local tc = s.touches[input]
-			s.touches[input] = nil
-			Recorder.push("gui", { ph = "up", ref = tc.ref, held = r2(os.clock() - tc.t), sp = tc.sp })
-		end
-	end)))
-	rconn(PPS.PromptButtonHoldBegan:Connect(guard(function(prompt, plr)
-		if plr ~= LP then return end
-		s.holds[prompt] = os.clock()
-		Recorder.push("prompt", { ph = "hold_begin", ref = makeRef(prompt), hold = prompt.HoldDuration })
-	end)))
-	rconn(PPS.PromptButtonHoldEnded:Connect(guard(function(prompt, plr)
-		if plr ~= LP then return end
-		local t0 = s.holds[prompt]
-		s.holds[prompt] = nil
-		Recorder.push("prompt", { ph = "hold_end", ref = makeRef(prompt), held = t0 and r2(os.clock() - t0) or 0 })
-	end)))
-	rconn(PPS.PromptTriggered:Connect(guard(function(prompt, plr)
-		if plr ~= LP then return end
-		Recorder.push("prompt", { ph = "trigger", ref = makeRef(prompt), hold = prompt.HoldDuration,
-			action = prompt.ActionText, obj = prompt.ObjectText })
-	end)))
-	N("Gravação iniciada", prof.customLoco and "Animação personalizada detectada: gravando todas." or "Gravando movimentos e ações.")
-	if UI.onRecState then UI.onRecState() end
-	return true
+    local rep = Diag.report or genv.RouteHubDiag
+    if not (rep and rep.clickDetectors == 0) then Recorder.bindClickDetectors() end
+
+    local L = Recorder.conns
+    Recorder.addConn(L, UIS.InputBegan, Recorder.onInputBegan)
+    Recorder.addConn(L, UIS.InputEnded, Recorder.onInputEnded)
+    Recorder.addConn(L, UIS.InputChanged, Recorder.onInputChanged)
+    Recorder.addConn(L, RunService.RenderStepped, Recorder.sample)
+
+    -- ProximityPrompt: hold / triggered
+    local holds = {}
+    Recorder.addConn(L, PPS.PromptButtonHoldBegan, function(prompt, plr)
+        if plr ~= LocalPlayer then return end
+        holds[prompt] = Recorder.add("PromptHold", { p = instPath(prompt), dur = prompt.HoldDuration, ph = "begin" })
+    end)
+    Recorder.addConn(L, PPS.PromptButtonHoldEnded, function(prompt, plr)
+        if plr ~= LocalPlayer then return end
+        local ev = holds[prompt]
+        holds[prompt] = nil
+        if ev then ev.data.dur = math.max((Recorder.t0 and (math.floor((os.clock() - Recorder.t0) * 1000) - ev.t)) / 1000, 0) end
+    end)
+    Recorder.addConn(L, PPS.PromptTriggered, function(prompt, plr)
+        if plr ~= LocalPlayer then return end
+        Recorder.add("PromptTriggered", { p = instPath(prompt), hd = prompt.HoldDuration })
+    end)
+
+    task.spawn(Recorder.bindCharacter, getChar())
+    return true
 end
 
-function Recorder.finish(reason, interrupted)
-	local s = Recorder.session
-	Recorder.active = false
-	for _, c in ipairs(Recorder.conns) do pcall(function() c:Disconnect() end) end
-	Recorder.conns, Recorder.session = {}, nil
-	if not s then return end
-	local dur = os.clock() - s.t0
-	if #s.events < 2 then
-		N("Gravação descartada", "Poucos eventos para salvar.")
-	else
-		local meta, err = History.add(s, dur, interrupted and reason or nil)
-		if not meta then
-			N("Erro ao salvar", tostring(err), 5)
-		else
-			if err then N("Aviso", tostring(err), 5) end
-			N(interrupted and "Gravação interrompida" or "Rota salva",
-				string.format("%s • %s • %d eventos%s%s", meta.name, fmt(meta.dur), meta.n,
-					meta.run and " • correr detectado" or "", interrupted and (" • " .. reason) or ""), 4)
-			UI.sel = meta.id
-		end
-	end
-	History.cache = nil
-end
-function Recorder.stop(reason, interrupted)
-	if not Recorder.active then return end
-	Recorder.finish(reason or "manual", interrupted)
-	if alive and UI.refresh then UI.refresh() end
-	if alive and UI.onRecState then UI.onRecState() end
-end
-function Recorder.cancel()
-	if not Recorder.active then return end
-	Recorder.active = false
-	for _, c in ipairs(Recorder.conns) do pcall(function() c:Disconnect() end) end
-	Recorder.conns, Recorder.session = {}, nil
-	N("Gravação cancelada", "Dados descartados.")
-	if UI.onRecState then UI.onRecState() end
+function Recorder.stop()
+    if not Recorder.active then return nil end
+    local duration = math.floor((os.clock() - Recorder.t0) * 1000)
+    Recorder.active = false
+    for _, c in ipairs(Recorder.conns) do pcall(function() c:Disconnect() end) end
+    Recorder.conns = {}
+    Recorder.unbindChar()
+    local anims = {}
+    for _, s in pairs(Recorder.animSummary) do anims[#anims + 1] = s end
+    table.sort(anims, function(a, b) return (a.t or 0) < (b.t or 0) end)
+    local okG, guid = pcall(HttpService.GenerateGUID, HttpService, false)
+    local route = {
+        id = okG and guid or tostring(os.time()),
+        name = "Rota_" .. os.time(),
+        created = os.time(),
+        duration = duration,
+        count = #Recorder.events,
+        events = Recorder.events,
+        animations = anims,
+        baseWalkSpeed = Recorder.baseWS,
+        placeId = game.PlaceId,
+    }
+    Recorder.events = {}
+    return route
 end
 
------------------------------------------------------------------- PLAYBACK
-Playback = { state = "idle", speed = 1, startPct = 0, ctx = nil, id = nil, summary = "Nenhuma reprodução ainda." }
-UI.opts = { loop = false, countdown = true, tele = true, sprint = true, anims = true, tol = 8 }
+--[[ === SEÇÃO 8: MÓDULO DE REPLAY === ]]
+local Replay = { running = false, cancel = false, route = nil }
+local RS = { move = Vector3.zero, camTarget = nil, camSet = false, heldKeys = {},
+    pointerDown = {}, btnPos = {}, animCache = {}, recentHold = {}, origWS = nil, origCamType = nil }
+local ReplayAnimPriorities = { Action = true, Action2 = true, Action3 = true, Action4 = true }
+-- Prioridades Core/Idle/Movement não são reaplicadas: o script Animate do jogo já as toca pelo Move.
+local ReplayStates = { Climbing = true, Swimming = true, GettingUp = true } -- estados seguros de reaplicar
+local Exec = {}
 
-local function sampleMove(ctx, t, advance)
-	local m = ctx.moves
-	local n = #m
-	if n == 0 then return nil end
-	local i = ctx.mi
-	while i < n and m[i + 1].t <= t do i += 1 end
-	if advance then ctx.mi = i end
-	local a, b = m[i], m[i + 1]
-	local function P(e) return Vector3.new(e.p[1], e.p[2], e.p[3]) end
-	if t <= a.t or not b then
-		return { pos = P(a), yaw = a.r or 0, ws = a.d.ws or 16, v = a.d.v or 0 }
-	end
-	local f = math.clamp((t - a.t) / math.max(b.t - a.t, 1e-3), 0, 1)
-	local ya, yb = a.r or 0, b.r or 0
-	return { pos = P(a):Lerp(P(b), f), yaw = ya + angDiff(yb, ya) * f, ws = a.d.ws or 16, v = a.d.v or 0 }
-end
-local function snapTo(ctx, tgt)
-	pcall(function() ctx.char:PivotTo(CFrame.new(tgt.pos) * CFrame.Angles(0, math.rad(tgt.yaw), 0)) end)
+local function guiCenterScreen(obj)
+    local ap, as = obj.AbsolutePosition, obj.AbsoluteSize
+    local sg = obj:FindFirstAncestorOfClass("ScreenGui")
+    local inset = (sg and sg.IgnoreGuiInset) and Vector2.zero or GuiService:GetGuiInset()
+    return ap.X + as.X / 2 + inset.X, ap.Y + as.Y / 2 + inset.Y
 end
 
-function Playback.start(id)
-	if Recorder.active then N("Bloqueado", "Pare a gravação antes de reproduzir.") return end
-	if Playback.state ~= "idle" then N("Bloqueado", "Já existe um Playback ativo.") return end
-	local meta = History.byId[id]
-	if not meta then N("Selecione uma rota", "Nenhuma rota selecionada.") return end
-	local ev, err = History.getEvents(id)
-	if not ev then N("Erro ao carregar", tostring(err), 5) return end
-	local hum, hrp, char = getChar()
-	if not (hum and hrp) or hum.Health <= 0 then N("Playback", "Personagem indisponível.") return end
-	local moves = {}
-	for _, e in ipairs(ev) do if e.k == "move" then moves[#moves + 1] = e end end
-	if #moves == 0 then N("Rota inválida", "Sem eventos de movimento.") return end
-	if meta.place and meta.place ~= game.PlaceId then N("Aviso", "Rota gravada em outro jogo.", 4) end
-	local opts = {}
-	for k, v in pairs(UI.opts) do opts[k] = v end
-	local dur = meta.dur
-	local t0 = dur * (Playback.startPct / 100)
-	local ei = 1
-	while ei <= #ev and ev[ei].t < t0 do ei += 1 end
-	local ctx = {
-		ev = ev, ei = ei, moves = moves, mi = 1, t = t0, t0 = t0, dur = dur, hum = hum, char = char, opts = opts,
-		tracks = {}, ok = 0, fail = 0, info = 0, hold = 0, corr = 0, loops = 0, errs = {}, speed = Playback.speed,
-		savedWs = hum.WalkSpeed, animator = hum:FindFirstChildOfClass("Animator"),
-	}
-	local c = Serializer.analyze(ev)
-	if c.na > 0 then N("Compatibilidade", c.na .. " evento(s) incompatíveis serão ignorados.", 4) end
-	local s0 = sampleMove(ctx, t0, true)
-	if s0 and (hrp.Position - s0.pos).Magnitude > opts.tol then
-		if opts.tele then snapTo(ctx, s0) else N("Longe do início", "Vá até o ponto inicial da rota.", 4) end
-	end
-	if opts.countdown then
-		ctx.wait = os.clock() + 3
-		N("Playback", "Começa em 3s • " .. Playback.speed .. "x", 3)
-	end
-	Playback.ctx, Playback.id, Playback.state = ctx, id, "playing"
-	Playback.conn = RunService.Heartbeat:Connect(function(dt)
-		local ok, e = pcall(Playback.step, dt)
-		if not ok then Playback.stop("erro interno") end
-	end)
-	if not opts.countdown then N("Playback iniciado", meta.name .. " • " .. Playback.speed .. "x") end
+local function fireGuiButton(obj)
+    if not API.getconnections then return end -- fallback: sem getconnections, só clique virtual
+    for _, sigName in ipairs({ "MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up" }) do
+        pcall(function()
+            for _, c in ipairs(API.getconnections(obj[sigName])) do c:Fire() end
+        end)
+    end
 end
 
-function Playback.step(dt)
-	local ctx = Playback.ctx
-	if Playback.state ~= "playing" or not ctx then return end
-	local hum, hrp, char = getChar()
-	if not (hum and hrp) or hum.Health <= 0 then Playback.stop("personagem indisponível") return end
-	ctx.hum, ctx.char = hum, char
-	if ctx.wait then
-		if os.clock() < ctx.wait then return end
-		ctx.wait = nil
-	end
-	local sp, tol = ctx.speed, ctx.opts.tol
-	local tgt = sampleMove(ctx, ctx.t, true)
-	if tgt then
-		local flat = Vector3.new(hrp.Position.X - tgt.pos.X, 0, hrp.Position.Z - tgt.pos.Z).Magnitude
-		pcall(function() hum.WalkSpeed = math.max(tgt.ws * sp, 4) end)
-		if flat > tol or ctx.hold > 2 then
-			snapTo(ctx, tgt)
-			ctx.corr += 1
-			ctx.hold = 0
-			if ctx.corr <= 3 then N("Desvio corrigido", string.format("%.0f studs fora da rota.", flat), 2) end
-		elseif flat > 3 and ctx.t < ctx.dur then
-			ctx.hold += dt -- espera o personagem real alcançar
-		else
-			ctx.hold = 0
-			ctx.t += dt * sp
-		end
-		local ahead = sampleMove(ctx, ctx.t + 0.2 * sp, false) or tgt
-		hum:MoveTo(ahead.pos)
-		if flat < 1 and tgt.v < 0.5 and math.abs(angDiff(hrp.Orientation.Y, tgt.yaw)) > 10 then
-			pcall(function() hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, math.rad(tgt.yaw), 0) end)
-		end
-	else
-		ctx.t += dt * sp
-	end
-	local ev = ctx.ev
-	while ctx.ei <= #ev and ev[ctx.ei].t <= ctx.t do
-		local e = ev[ctx.ei]
-		ctx.ei += 1
-		if e.k ~= "move" then
-			local st, msg = Adapters.run(e, ctx)
-			if st == "ok" then ctx.ok += 1
-			elseif st == "info" then ctx.info += 1
-			else
-				ctx.fail += 1
-				if #ctx.errs < 4 then
-					ctx.errs[#ctx.errs + 1] = msg or "falha"
-					N("Não reproduzível", tostring(msg), 3)
-				end
-			end
-		end
-	end
-	if ctx.t >= ctx.dur and ctx.ei > #ev then
-		if ctx.opts.loop then
-			ctx.loops += 1
-			for _, tr in pairs(ctx.tracks) do pcall(function() tr:Stop(0.1) end) end
-			ctx.tracks = {}
-			ctx.t, ctx.mi, ctx.ei, ctx.hold = ctx.t0, 1, 1, 0
-			while ctx.ei <= #ev and ev[ctx.ei].t < ctx.t0 do ctx.ei += 1 end
-			local s0 = sampleMove(ctx, ctx.t0, true)
-			if s0 and ctx.opts.tele then snapTo(ctx, s0) end
-			ctx.wait = os.clock() + 1
-		else
-			Playback.stop("concluído")
-		end
-	end
+local function pointerPos(ev, key)
+    local d = ev.data
+    if d.phase == "down" and d.btn then
+        local obj = resolvePath(d.btn)
+        if obj and obj:IsA("GuiObject") then
+            local x, y = guiCenterScreen(obj)
+            RS.btnPos[key] = { x, y, obj }
+            return x, y, obj
+        end
+    elseif d.phase ~= "down" and RS.btnPos[key] then
+        local p = RS.btnPos[key]
+        return p[1], p[2], p[3]
+    end
+    local vp = cam().ViewportSize
+    return d.x * vp.X, d.y * vp.Y, nil
 end
 
-function Playback.pause()
-	if Playback.state ~= "playing" then return end
-	Playback.state = "paused"
-	local hum, hrp = getChar()
-	if hum and hrp then pcall(function() hum:MoveTo(hrp.Position) end) end
-	N("Playback pausado", fmt(Playback.ctx.t))
-end
-function Playback.resume()
-	if Playback.state ~= "paused" then return end
-	Playback.state = "playing"
-	N("Playback retomado", fmt(Playback.ctx.t))
-end
-function Playback.stop(reason, quiet)
-	if Playback.state == "idle" then return end
-	local ctx = Playback.ctx
-	Playback.state, Playback.ctx = "idle", nil
-	if Playback.conn then Playback.conn:Disconnect() Playback.conn = nil end
-	if ctx then
-		pcall(function()
-			local _, hrp = getChar()
-			ctx.hum.WalkSpeed = ctx.savedWs
-			if hrp then ctx.hum:MoveTo(hrp.Position) end
-		end)
-		for _, tr in pairs(ctx.tracks) do pcall(function() tr:Stop(0.1) end) end
-		Playback.summary = string.format("%s\nExecutadas: %d • Falhas: %d • Informativas: %d\nCorreções de desvio: %d • Voltas: %d",
-			tostring(reason), ctx.ok, ctx.fail, ctx.info, ctx.corr, ctx.loops)
-		if not quiet then
-			N(reason == "concluído" and "Playback concluído" or "Reprodução interrompida",
-				string.format("%s • ok %d • falhas %d", tostring(reason), ctx.ok, ctx.fail), 4)
-		end
-	end
-end
-function Playback.restart()
-	local id = Playback.id or UI.sel
-	Playback.stop("reiniciado", true)
-	if id then Playback.start(id) end
+local function sendPointer(ev, isTouch)
+    local d = ev.data
+    local key = ev.type .. tostring(d.id or d.b or 0)
+    local x, y, obj = pointerPos(ev, key)
+    if d.phase == "up" then RS.btnPos[key] = nil; RS.pointerDown[key] = nil end
+    if not VIM then
+        if obj and d.phase == "down" then fireGuiButton(obj) end -- fallback sem VirtualInputManager
+        return
+    end
+    if d.phase == "down" then RS.pointerDown[key] = { x = x, y = y, touch = isTouch, b = d.b, id = d.id } end
+    if isTouch then
+        local state = (d.phase == "down" and 0) or (d.phase == "move" and 1) or 2
+        local ok = pcall(function() VIM:SendTouchEvent(d.id or 0, state, x, y) end)
+        if ok then return end
+    end
+    if d.phase == "move" then
+        pcall(function() VIM:SendMouseMoveEvent(x, y, game) end)
+        return
+    end
+    pcall(function() VIM:SendMouseButtonEvent(x, y, (d.b or 1) - 1, d.phase == "down", game, 0) end)
 end
 
------------------------------------------------------------------- UI
-History.load()
-if not Storage.persistent then
-	task.defer(function() N("Atenção", "Executor sem arquivos: rotas só ficam na memória desta sessão.", 6) end)
+function Exec.Move(ev)
+    local d = ev.data
+    RS.move = Vector3.new(d.d[1], d.d[2], d.d[3])
+    local hum = getHum()
+    if hum and d.ws and math.abs(hum.WalkSpeed - d.ws) > 0.01 then hum.WalkSpeed = d.ws end
 end
 
-local Window = Rayfield:CreateWindow({
-	Name = "AKZ ROTAS", LoadingTitle = "AKZ ROTAS", LoadingSubtitle = "Gravador + Playback",
-	ConfigurationSaving = { Enabled = false }, Discord = { Enabled = false }, KeySystem = false,
-})
-UI.sel, UI.map, UI.newName, UI.section = nil, {}, "", "Jogo"
-local armed = {}
-local function confirm(key, msg)
-	if armed[key] and os.clock() - armed[key] < 5 then armed[key] = nil return true end
-	armed[key] = os.clock()
-	N("Confirme a ação", msg .. " Toque novamente em 5s.", 4)
-	return false
-end
-local function safe(f)
-	return function(...)
-		local ok, err = pcall(f, ...)
-		if not ok then N("Erro", tostring(err), 5) end
-	end
-end
-local function pick(o) return type(o) == "table" and o[1] or o end
-
--- Aba 1: Gravar (com LER JOGO em destaque)
-local TabRec = Window:CreateTab("Gravar")
-local okLbl = pcall(function()
-	TabRec:CreateLabel("🔴 LER JOGO — diagnóstico do que o jogo expõe (andar, correr, botões, remotes)", nil, Color3.fromRGB(220, 40, 40), true)
-end)
-if not okLbl then TabRec:CreateLabel("🔴 LER JOGO — diagnóstico do jogo") end
-TabRec:CreateButton({ Name = "🔴 LER JOGO", Callback = safe(function() Scan.runAsync() end) })
-local scanPara = TabRec:CreateParagraph({ Title = "Resultado da leitura", Content = Scan.summary })
-TabRec:CreateSection("Gravação")
-local recPara = TabRec:CreateParagraph({ Title = "Estado", Content = "Pronto para gravar." })
-local recBtn
-recBtn = TabRec:CreateButton({ Name = "● Gravar", Callback = safe(function()
-	if Recorder.active then
-		Recorder.stop("manual", false)
-	else
-		local ok, err = Recorder.start()
-		if not ok then N("Não foi possível gravar", tostring(err), 4) end
-	end
-end) })
-TabRec:CreateButton({ Name = "Cancelar gravação (descarta)", Callback = safe(function()
-	if not Recorder.active then N("Cancelar", "Nenhuma gravação ativa.") return end
-	if confirm("cancel", "Descartar a gravação atual?") then Recorder.cancel() end
-end) })
-
--- Aba 2: Rotas
-local TabRoutes = Window:CreateTab("Rotas")
-local countLbl = TabRoutes:CreateLabel("Rotas: 0")
-local routeDD = TabRoutes:CreateDropdown({
-	Name = "Selecione a rota", Options = { "(nenhuma rota)" }, CurrentOption = { "(nenhuma rota)" },
-	MultipleOptions = false, Flag = "akzr_route",
-	Callback = safe(function(o)
-		local id = UI.map[pick(o)]
-		if id then UI.sel = id end
-		UI.details()
-	end),
-})
-local detPara = TabRoutes:CreateParagraph({ Title = "Detalhes", Content = "Grave sua primeira rota na aba Gravar." })
-TabRoutes:CreateButton({ Name = "▶ Reproduzir", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
-	Playback.start(UI.sel)
-end) })
-TabRoutes:CreateInput({ Name = "Novo nome", PlaceholderText = "nome da rota", RemoveTextAfterFocusLost = false,
-	Callback = safe(function(t) UI.newName = t or "" end) })
-TabRoutes:CreateButton({ Name = "Renomear", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
-	local ok, err = History.rename(UI.sel, UI.newName)
-	if ok then N("Rota renomeada", History.byId[UI.sel].name) UI.refresh() else N("Erro ao renomear", tostring(err), 4) end
-end) })
-TabRoutes:CreateButton({ Name = "Duplicar", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
-	local c, err = History.duplicate(UI.sel)
-	if c then UI.sel = c.id N("Rota duplicada", c.name) UI.refresh() else N("Erro ao duplicar", tostring(err), 4) end
-end) })
-TabRoutes:CreateButton({ Name = "Excluir", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
-	if Playback.state ~= "idle" and Playback.id == UI.sel then N("Bloqueado", "Rota em reprodução.") return end
-	local nm = History.byId[UI.sel].name
-	if confirm("del" .. UI.sel, "Excluir " .. nm .. "?") then
-		local ok, err = History.delete(UI.sel)
-		if ok then N("Rota excluída", nm) UI.sel = nil UI.refresh() else N("Erro ao excluir", tostring(err), 4) end
-	end
-end) })
-
--- Aba 3: Playback
-local TabPb = Window:CreateTab("Playback")
-local pbPara = TabPb:CreateParagraph({ Title = "Estado", Content = "Parado." })
-TabPb:CreateDropdown({ Name = "Velocidade", Options = { "0.25x", "0.5x", "0.75x", "1x", "1.5x", "2x", "3x" },
-	CurrentOption = { "1x" }, MultipleOptions = false, Flag = "akzr_speed",
-	Callback = safe(function(o)
-		local v = tonumber((tostring(pick(o)):gsub("x", ""))) or 1
-		Playback.speed = v
-		if Playback.ctx then Playback.ctx.speed = v N("Velocidade", v .. "x") end
-	end) })
-TabPb:CreateSlider({ Name = "Ponto de início", Range = { 0, 95 }, Increment = 5, Suffix = "%", CurrentValue = 0,
-	Flag = "akzr_start", Callback = safe(function(v) Playback.startPct = v end) })
-TabPb:CreateButton({ Name = "▶ Reproduzir selecionada", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha na aba Rotas.") return end
-	Playback.start(UI.sel)
-end) })
-TabPb:CreateButton({ Name = "⏸ Pausar", Callback = safe(function() Playback.pause() end) })
-TabPb:CreateButton({ Name = "⏯ Continuar", Callback = safe(function() Playback.resume() end) })
-TabPb:CreateButton({ Name = "■ Parar", Callback = safe(function() Playback.stop("parado pelo usuário") end) })
-TabPb:CreateButton({ Name = "↺ Reiniciar", Callback = safe(function() Playback.restart() end) })
-TabPb:CreateSection("Opções")
-local function toggle(name, key, default, flag)
-	TabPb:CreateToggle({ Name = name, CurrentValue = default, Flag = flag,
-		Callback = safe(function(v) UI.opts[key] = v end) })
-end
-toggle("Repetir em loop", "loop", false, "akzr_loop")
-toggle("Contagem de 3s antes de começar", "countdown", true, "akzr_cd")
-toggle("Ir ao ponto inicial (teleporte)", "tele", true, "akzr_tele")
-toggle("Reproduzir correr (tecla/botão)", "sprint", true, "akzr_sprint")
-toggle("Reproduzir animações", "anims", true, "akzr_anims")
-TabPb:CreateDropdown({ Name = "Precisão do trajeto", Options = { "Alta (5)", "Normal (8)", "Livre (15)" },
-	CurrentOption = { "Normal (8)" }, MultipleOptions = false, Flag = "akzr_tol",
-	Callback = safe(function(o) UI.opts.tol = tonumber(tostring(pick(o)):match("%((%d+)%)")) or 8 end) })
-local sumPara = TabPb:CreateParagraph({ Title = "Resumo da última reprodução", Content = Playback.summary })
-
--- Aba 4: Jogo (relatório completo)
-local TabGame = Window:CreateTab("Jogo")
-TabGame:CreateButton({ Name = "🔴 LER JOGO (de novo)", Callback = safe(function() Scan.runAsync() end) })
-local secDD = TabGame:CreateDropdown({ Name = "Seção do relatório", Options = { "Jogo" }, CurrentOption = { "Jogo" },
-	MultipleOptions = false, Flag = "akzr_sec", Callback = safe(function(o) UI.section = pick(o) UI.showSection() end) })
-local secPara = TabGame:CreateParagraph({ Title = "Relatório", Content = "Toque em LER JOGO para gerar." })
-TabGame:CreateButton({ Name = "Copiar relatório completo", Callback = safe(function()
-	if #Scan.order == 0 then N("Relatório", "Leia o jogo primeiro.") return end
-	if Compat.clip then pcall(setclipboard, Scan.reportText()) N("Relatório", "Copiado.") else
-		N("Relatório", "Sem área de transferência. Arquivo: " .. CFG.folder .. "/diagnostico_" .. game.PlaceId .. ".txt", 5)
-	end
-end) })
-TabGame:CreateButton({ Name = "Fechar e limpar o menu", Callback = safe(function()
-	if genv.AKZR_CLEANUP then genv.AKZR_CLEANUP() end
-end) })
-
------------------------------------------------------------------- UI LOGIC
-local function cardLabel(m)
-	return string.format("%s • %s • %d ev • %s%s #%s", m.name, fmt(m.dur), m.n or 0,
-		(m.partial and "incompleta") or ((m.na or 0) > 0 and "parcial") or "ok", m.run and " • correr" or "", m.id:sub(1, 3))
-end
-function UI.details()
-	local m = UI.sel and History.byId[UI.sel]
-	if not m then
-		pcall(function() detPara:Set({ Title = "Detalhes", Content = "Nenhuma rota selecionada." }) end)
-		return
-	end
-	History.getEvents(m.id)
-	local runTxt = m.run and string.format("sim (velocidade %s → %s)", tostring(m.wsMin), tostring(m.wsMax)) or "não"
-	local txt = string.format("Nome: %s\nData: %s\nDuração: %s • Eventos: %d\nSaltos: %d • Interações: %d\nCorrer: %s\nAnimação de andar: %s\nCompatibilidade: %d%%\nEstado: %s%s",
-		m.name, os.date("%d/%m/%Y %H:%M", m.created), fmt(m.dur), m.n or 0, m.jumps or 0, m.inter or 0, runTxt,
-		tostring(m.loco or "padrão"), compatPct(m), statusOf(m), m.partial and ("\nMotivo: " .. tostring(m.partial)) or "")
-	pcall(function() detPara:Set({ Title = "Detalhes", Content = txt }) end)
-end
-function UI.refresh()
-	if not alive then return end
-	local items = History.sorted()
-	UI.map = {}
-	local labels, selLabel = {}, nil
-	for _, m in ipairs(items) do
-		local lb = cardLabel(m)
-		UI.map[lb] = m.id
-		labels[#labels + 1] = lb
-		if m.id == UI.sel then selLabel = lb end
-	end
-	pcall(function() countLbl:Set("Rotas: " .. #items) end)
-	if #labels == 0 then labels = { "(nenhuma rota)" } end
-	pcall(function() routeDD:Refresh(labels) end)
-	if not selLabel and UI.sel and not History.byId[UI.sel] then UI.sel = nil end
-	if not selLabel and #items > 0 and not UI.sel then UI.sel = items[1].id selLabel = labels[1] end
-	if selLabel then pcall(function() routeDD:Set({ selLabel }) end) end
-	UI.details()
-end
-function UI.showSection()
-	local lines = Scan.sections[UI.section]
-	if not lines then return end
-	local out = {}
-	for i = 1, math.min(#lines, 45) do out[i] = lines[i] end
-	if #lines > 45 then out[#out + 1] = string.format("... +%d linhas (relatório completo no arquivo/cópia)", #lines - 45) end
-	if #out == 0 then out[1] = "(vazio)" end
-	pcall(function() secPara:Set({ Title = UI.section, Content = table.concat(out, "\n") }) end)
-end
-function UI.updateScan()
-	pcall(function() scanPara:Set({ Title = "Resultado da leitura", Content = Scan.summary }) end)
-	pcall(function() secDD:Refresh(Scan.order) end)
-	UI.section = Scan.order[1] or "Jogo"
-	pcall(function() secDD:Set({ UI.section }) end)
-	UI.showSection()
-end
-function UI.onRecState()
-	pcall(function() recBtn:Set(Recorder.active and "■ Parar" or "● Gravar") end)
+function Exec.Sprint(ev)
+    local hum = getHum()
+    if hum then hum.WalkSpeed = ev.data.ws end
 end
 
-local lastTxt = { rec = "", pb = "", sum = "" }
-task.spawn(function()
-	while alive do
-		task.wait(0.5)
-		local txt
-		if Recorder.active and Recorder.session then
-			local s = Recorder.session
-			local hum = getChar()
-			txt = string.format("● GRAVANDO\nTempo: %s • Eventos: %d\nEstado: %s • Velocidade: %s", fmt(os.clock() - s.t0),
-				#s.events, hum and hum:GetState().Name or "-", hum and tostring(r1(hum.WalkSpeed)) or "-")
-		else
-			txt = "Pronto para gravar."
-		end
-		if txt ~= lastTxt.rec then
-			lastTxt.rec = txt
-			pcall(function() recPara:Set({ Title = "Estado", Content = txt }) end)
-		end
-		local pt
-		local c = Playback.ctx
-		if c then
-			local head = Playback.state == "paused" and "⏸ PAUSADO" or ((c.wait and "⏳ AGUARDANDO") or "▶ REPRODUZINDO")
-			pt = string.format("%s\n%s / %s • %sx\nExecutadas: %d • Falhas: %d", head, fmt(c.t), fmt(c.dur),
-				tostring(Playback.speed), c.ok, c.fail)
-		else
-			pt = "Parado."
-		end
-		if pt ~= lastTxt.pb then
-			lastTxt.pb = pt
-			pcall(function() pbPara:Set({ Title = "Estado", Content = pt }) end)
-		end
-		if Playback.summary ~= lastTxt.sum then
-			lastTxt.sum = Playback.summary
-			pcall(function() sumPara:Set({ Title = "Resumo da última reprodução", Content = Playback.summary }) end)
-		end
-	end
-end)
-
-globalConns[#globalConns + 1] = LP.CharacterRemoving:Connect(function()
-	if Playback.state ~= "idle" then Playback.stop("respawn") end
-end)
-
-genv.AKZR_CLEANUP = function()
-	alive = false
-	pcall(function() Recorder.stop("menu fechado", true) end)
-	pcall(function() Playback.stop("menu fechado", true) end)
-	for _, c in ipairs(globalConns) do pcall(function() c:Disconnect() end) end
-	pcall(function() Rayfield:Destroy() end)
-	genv.AKZR_CLEANUP = nil
+function Exec.Jump(ev)
+    local hum = getHum()
+    if hum then hum.Jump = true end
 end
 
-UI.refresh()
-N("AKZ ROTAS v2", "Dica: toque em LER JOGO antes de gravar.", 4)
+function Exec.Camera(ev)
+    local c = cam()
+    if not c then return end
+    if not RS.camSet then
+        RS.origCamType = c.CameraType
+        c.CameraType = Enum.CameraType.Scriptable
+        RS.camSet = true
+        c.CFrame = CFrame.new(unpack(ev.data.c))
+    end
+    RS.camTarget = CFrame.new(unpack(ev.data.c))
+end
+
+function Exec.KeyDown(ev)
+    if ev.data.gp or not VIM then return end -- sem VirtualInputManager: tecla não reproduzível
+    local kc = Enum.KeyCode[ev.data.k]
+    if not kc then return end
+    RS.heldKeys[ev.data.k] = true
+    VIM:SendKeyEvent(true, kc, false, game)
+end
+
+function Exec.KeyUp(ev)
+    if ev.data.gp or not VIM then return end
+    local kc = Enum.KeyCode[ev.data.k]
+    if not kc then return end
+    RS.heldKeys[ev.data.k] = nil
+    VIM:SendKeyEvent(false, kc, false, game)
+end
+
+function Exec.Click(ev) sendPointer(ev, false) end
+function Exec.Touch(ev) sendPointer(ev, true) end
+
+function Exec.Animation(ev)
+    local d = ev.data
+    if not ReplayAnimPriorities[d.pr] or not d.id or d.id == "" then return end
+    local hum = getHum()
+    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    if not animator then return end
+    local track = RS.animCache[d.id]
+    if not track then
+        local a = Instance.new("Animation")
+        a.AnimationId = d.id
+        track = animator:LoadAnimation(a)
+        RS.animCache[d.id] = track
+    end
+    pcall(function() track.Priority = Enum.AnimationPriority[d.pr] end)
+    track:Stop(0)
+    track:Play(0.1, d.w or 1, d.sp or 1)
+end
+
+function Exec.Remote(ev)
+    local d = ev.data
+    if d.dir == "in" then return end -- evento recebido do servidor: não reproduzível
+    local remote = resolvePath(d.p)
+    if not remote then return end
+    local args = {}
+    for i = 1, d.n or 0 do args[i] = deser(d.a[i]) end
+    if d.m == "InvokeServer" and remote:IsA("RemoteFunction") then
+        task.spawn(function() pcall(function() remote:InvokeServer(unpack(args, 1, d.n or 0)) end) end)
+    elseif remote:IsA("RemoteEvent") then
+        remote:FireServer(unpack(args, 1, d.n or 0))
+    end
+end
+
+function Exec.PromptHold(ev)
+    local prompt = resolvePath(ev.data.p)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    RS.recentHold[prompt] = os.clock()
+    local dur = (ev.data.dur or prompt.HoldDuration) / math.max(S.speedMultiplier, 0.01)
+    task.spawn(function()
+        local ok = pcall(function() prompt:InputHoldBegin() end)
+        if not ok and API.fireproximityprompt then
+            pcall(API.fireproximityprompt, prompt)
+            return
+        end
+        task.wait(math.max(dur, 0.05))
+        pcall(function() prompt:InputHoldEnd() end)
+    end)
+end
+
+function Exec.PromptTriggered(ev)
+    local prompt = resolvePath(ev.data.p)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    local last = RS.recentHold[prompt]
+    if last and os.clock() - last < 2 + prompt.HoldDuration then return end -- o hold já dispara o prompt
+    if API.fireproximityprompt then
+        API.fireproximityprompt(prompt)
+    else
+        prompt:InputHoldBegin() -- fallback sem fireproximityprompt
+        task.wait()
+        prompt:InputHoldEnd()
+    end
+end
+
+function Exec.ClickDetector(ev)
+    local cd = resolvePath(ev.data.p)
+    if cd and API.fireclickdetector then API.fireclickdetector(cd) end -- sem fireclickdetector: ignorado
+end
+
+function Exec.TouchPart(ev)
+    local part, root = resolvePath(ev.data.p), getRoot()
+    if part and root and API.firetouchinterest then
+        API.firetouchinterest(root, part, 0)
+        task.wait()
+        API.firetouchinterest(root, part, 1)
+    end
+end
+
+local function findTool(name)
+    local char = getChar()
+    local t = char and char:FindFirstChild(name)
+    if t and t:IsA("Tool") then return t end
+    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+    t = bp and bp:FindFirstChild(name)
+    if t and t:IsA("Tool") then return t end
+    return nil
+end
+
+function Exec.ToolActivated(ev)
+    local d, hum = ev.data, getHum()
+    if d.ev == "Equipped" then
+        local tool = findTool(d.n)
+        if tool and hum then hum:EquipTool(tool) end
+    elseif d.ev == "Unequipped" then
+        if hum then hum:UnequipTools() end
+    else
+        local tool = findTool(d.n)
+        if tool then tool:Activate() end
+    end
+end
+
+function Exec.StateChange(ev)
+    local hum = getHum()
+    if hum and ReplayStates[ev.data.s] then
+        hum:ChangeState(Enum.HumanoidStateType[ev.data.s])
+    end
+end
+
+local function replayRelease()
+    if VIM then
+        for key in pairs(RS.heldKeys) do
+            pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode[key], false, game) end)
+        end
+        for _, p in pairs(RS.pointerDown) do
+            pcall(function()
+                if p.touch then VIM:SendTouchEvent(p.id or 0, 2, p.x, p.y)
+                else VIM:SendMouseButtonEvent(p.x, p.y, (p.b or 1) - 1, false, game, 0) end
+            end)
+        end
+    end
+    RS.heldKeys, RS.pointerDown, RS.btnPos = {}, {}, {}
+    for _, tr in pairs(RS.animCache) do pcall(function() tr:Stop(0.1) end) end
+    RS.animCache = {}
+    RS.move = Vector3.zero
+    RS.recentHold = {}
+end
+
+local function replayBegin()
+    local hum = getHum()
+    RS.origWS = hum and hum.WalkSpeed
+    RS.camSet, RS.camTarget = false, nil
+    pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
+    RunService:BindToRenderStep("RouteHubReplay", Enum.RenderPriority.Last.Value, function()
+        local h = getHum()
+        if h then pcall(function() h:Move(RS.move, false) end) end
+        if RS.camTarget then
+            local c = cam()
+            if c then c.CFrame = c.CFrame:Lerp(RS.camTarget, 0.6) end
+        end
+    end)
+end
+
+local function replayEnd()
+    pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
+    replayRelease()
+    local hum = getHum()
+    if hum then
+        pcall(function() hum:Move(Vector3.zero, false) end)
+        if RS.origWS then hum.WalkSpeed = RS.origWS end
+    end
+    local c = cam()
+    if c and RS.camSet then
+        c.CameraType = RS.origCamType or Enum.CameraType.Custom
+    end
+    RS.camSet, RS.camTarget = false, nil
+end
+
+-- Uma passada completa pela rota. Retorna true se terminou sem cancelar
+function Replay.pass(events, duration)
+    replayRelease()
+    local idx, startClock, lastUI = 1, os.clock(), 0
+    local errs = 0
+    while not Replay.cancel do
+        local now = (os.clock() - startClock) * S.speedMultiplier * 1000
+        while idx <= #events and events[idx].e.t <= now do
+            local ev = events[idx].e
+            idx += 1
+            local fn = Exec[ev.type]
+            if fn then
+                local ok = pcall(fn, ev)
+                if not ok then errs += 1 end -- erro por evento não interrompe o replay
+            end
+            if S.actionDelayMs > 0 then
+                local w = task.wait(S.actionDelayMs / 1000)
+                startClock += w -- pausa a linha do tempo durante o delay extra
+            end
+        end
+        if os.clock() - lastUI > 0.1 then
+            lastUI = os.clock()
+            UI.setProgress(duration > 0 and math.clamp(now / duration, 0, 1) or 1,
+                string.format("%s / %s", fmtTime(math.min(now, duration)), fmtTime(duration)))
+        end
+        if idx > #events and now >= duration then break end
+        RunService.Heartbeat:Wait()
+    end
+    return not Replay.cancel, errs
+end
+
+function Replay.run(route)
+    if Replay.running or Recorder.active then return end
+    if type(route) ~= "table" or type(route.events) ~= "table" then return end
+    Replay.running, Replay.cancel, Replay.route = true, false, route
+    UI.setMode("replay")
+    UI.showProgress(true)
+    local tStart = os.clock()
+
+    local events = {}
+    for i, e in ipairs(route.events) do events[i] = { i = i, e = e } end
+    table.sort(events, function(a, b)
+        if a.e.t == b.e.t then return a.i < b.i end
+        return a.e.t < b.e.t
+    end)
+    local duration = route.duration or (events[#events] and events[#events].e.t) or 0
+
+    replayBegin()
+    local totalErrs = 0
+    repeat
+        local finished, errs = Replay.pass(events, duration)
+        totalErrs += errs or 0
+        if finished and S.loopReplay and not Replay.cancel then task.wait(0.25) end
+    until Replay.cancel or not S.loopReplay
+    replayEnd()
+
+    warn(string.format("[REPLAY] Finalizado em %.1fs", os.clock() - tStart))
+    if totalErrs > 0 then Toast.show(totalErrs .. " evento(s) falharam no replay", "error") end
+    Replay.running = false
+    UI.showProgress(false)
+    UI.setMode("idle")
+end
+
+function Replay.start(route)
+    if Replay.running then return end
+    if Recorder.active then Toast.show("Pare a gravação antes de reproduzir", "error") return end
+    task.spawn(Replay.run, route)
+end
+
+function Replay.stop()
+    if Replay.running then Replay.cancel = true end
+end
+
+--[[ === SEÇÃO 9: CONSTRUÇÃO DA UI === ]]
+local function makeToggle(parent, text, init, onChange)
+    local row = new("Frame", { Size = UDim2.new(1, -6, 0, 40), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, parent)
+    corner(row, 8)
+    label(row, text, UDim2.new(1, -70, 1, 0), UDim2.new(0, 10, 0, 0), Enum.Font.GothamBold, 12)
+    local sw = new("TextButton", {
+        Text = "", AutoButtonColor = false, Size = UDim2.fromOffset(40, 20),
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+        BackgroundColor3 = init and C.accent or C.panel2, BorderSizePixel = 0,
+    }, row)
+    corner(sw, 10)
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0, 0.5),
+        Position = init and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+        BackgroundColor3 = C.text, BorderSizePixel = 0,
+    }, sw)
+    corner(knob, 8)
+    local value = init
+    sw.Activated:Connect(function()
+        value = not value
+        tween(sw, 0.15, { BackgroundColor3 = value and C.accent or C.panel2 })
+        tween(knob, 0.15, { Position = value and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0) })
+        onChange(value)
+        saveAll()
+    end)
+    return row
+end
+
+local function makeSlider(parent, text, min, max, step, init, fmt, onChange, scroller)
+    local row = new("Frame", { Size = UDim2.new(1, -6, 0, 54), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, parent)
+    corner(row, 8)
+    label(row, text, UDim2.new(0.6, 0, 0, 20), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 12)
+    local valLbl = label(row, "", UDim2.new(0.4, -10, 0, 20), UDim2.new(0.6, 0, 0, 6), Enum.Font.GothamBold, 12,
+        C.accent2, Enum.TextXAlignment.Right)
+    local track_ = new("TextButton", {
+        Text = "", AutoButtonColor = false, Size = UDim2.new(1, -24, 0, 6),
+        Position = UDim2.new(0, 12, 0, 38), BackgroundColor3 = C.bg, BorderSizePixel = 0,
+    }, row)
+    corner(track_, 3)
+    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent, BorderSizePixel = 0 }, track_)
+    corner(fill, 3)
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = C.text, BorderSizePixel = 0, ZIndex = 2,
+    }, track_)
+    corner(knob, 8)
+
+    local function set(v, fire)
+        v = math.clamp(math.floor((v - min) / step + 0.5) * step + min, min, max)
+        local a = (v - min) / (max - min)
+        fill.Size = UDim2.new(a, 0, 1, 0)
+        knob.Position = UDim2.new(a, 0, 0.5, 0)
+        valLbl.Text = fmt(v)
+        if fire then onChange(v) end
+    end
+    set(init, false)
+
+    local dragging = false
+    local function fromInput(input)
+        local a = math.clamp((input.Position.X - track_.AbsolutePosition.X) / math.max(track_.AbsoluteSize.X, 1), 0, 1)
+        set(min + a * (max - min), true)
+    end
+    track_.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            if scroller then scroller.ScrollingEnabled = false end
+            fromInput(input)
+        end
+    end)
+    track(UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            fromInput(input)
+        end
+    end))
+    track(UIS.InputEnded:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = false
+            if scroller then scroller.ScrollingEnabled = true end
+            saveAll()
+        end
+    end))
+    return row
+end
+
+local function applyBlur()
+    pcall(function()
+        local b = Lighting:FindFirstChild("RouteHubBlur")
+        if S.blur and UI.main and UI.main.Visible then
+            if not b then b = Instance.new("BlurEffect") b.Name = "RouteHubBlur" b.Size = 0 b.Parent = Lighting end
+            tween(b, 0.3, { Size = 8 })
+        elseif b then
+            b:Destroy()
+        end
+    end)
+end
+
+function UI.switchTab(name)
+    for n, page in pairs(UI.pages) do page.Visible = (n == name) end
+    for n, btn in pairs(UI.tabs) do
+        local on = (n == name)
+        btn:SetAttribute("Base", on and C.accent or C.panel2)
+        tween(btn, 0.15, { BackgroundColor3 = on and C.accent or C.panel2 })
+    end
+    UI.currentTab = name
+end
+
+function UI.setProgress(frac, text)
+    if UI.progFill then UI.progFill.Size = UDim2.new(frac, 0, 1, 0) end
+    if UI.progLabel and text then UI.progLabel.Text = text end
+end
+
+function UI.showProgress(on)
+    if UI.progHolder then UI.progHolder.Visible = on end
+    if on then UI.setProgress(0, "00:00") end
+end
+
+function UI.setMode(mode)
+    State.mode = mode
+    local b = UI.recBtn
+    if not b then return end
+    if UI.pulse then UI.pulse:Cancel() UI.pulse = nil end
+    local idleSize = UDim2.new(1, 0, 0, 56)
+    if mode == "idle" then
+        b.Text = "● GRAVAR"
+        b:SetAttribute("Base", C.danger)
+        tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
+    elseif mode == "rec" then
+        b.Text = "■ PARAR"
+        b:SetAttribute("Base", C.danger)
+        tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
+        task.delay(0.27, function()
+            if State.mode == "rec" then
+                UI.pulse = TweenService:Create(b, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+                    { BackgroundColor3 = C.dangerDark, Size = UDim2.new(1, -10, 0, 52) })
+                UI.pulse:Play()
+            end
+        end)
+    elseif mode == "replay" then
+        b.Text = "■ PARAR REPLAY"
+        b:SetAttribute("Base", C.accent)
+        tween(b, 0.25, { BackgroundColor3 = C.accent, Size = idleSize })
+    end
+end
+
+function UI.prompt(title, default, callback)
+    if UI.promptFrame then UI.promptFrame:Destroy() end
+    local overlay = new("Frame", {
+        Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.5, ZIndex = 40, BorderSizePixel = 0,
+    }, UI.main)
+    corner(overlay, 12)
+    UI.promptFrame = overlay
+    local box = new("Frame", {
+        Size = UDim2.fromOffset(250, 126), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C.panel, ZIndex = 41, BorderSizePixel = 0,
+    }, overlay)
+    corner(box, 10)
+    stroke(box, C.accent, 0.4)
+    label(box, title, UDim2.new(1, -20, 0, 22), UDim2.new(0, 10, 0, 8), Enum.Font.GothamBold, 13).ZIndex = 42
+    local tb = new("TextBox", {
+        Text = default or "", PlaceholderText = "Nome da rota", ClearTextOnFocus = false,
+        Size = UDim2.new(1, -20, 0, 32), Position = UDim2.new(0, 10, 0, 36),
+        BackgroundColor3 = C.bg, TextColor3 = C.text, PlaceholderColor3 = C.muted,
+        Font = Enum.Font.Gotham, TextSize = 13, ZIndex = 42, BorderSizePixel = 0,
+    }, box)
+    corner(tb, 6)
+    local ok = makeButton(box, "Confirmar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0, 10, 1, -40), C.success)
+    local cancel = makeButton(box, "Cancelar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0.5, 5, 1, -40), C.panel2)
+    ok.ZIndex, cancel.ZIndex = 42, 42
+    local function close() overlay:Destroy() UI.promptFrame = nil end
+    ok.Activated:Connect(function()
+        local txt = tb.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        close()
+        if txt ~= "" then callback(txt) end
+    end)
+    cancel.Activated:Connect(close)
+    tb:CaptureFocus()
+end
+
+function UI.renameRoute(route)
+    UI.prompt("Renomear rota", route.name, function(newName)
+        deleteRouteFile(route)
+        route.name = newName
+        saveAll()
+        saveRouteFile(route)
+        UI.renderHistory()
+        Toast.show("Rota renomeada", "success")
+    end)
+end
+
+function UI.deleteRoute(route)
+    local i = table.find(Data.routes, route)
+    if not i then return end
+    table.remove(Data.routes, i)
+    deleteRouteFile(route)
+    saveAll()
+    UI.renderHistory()
+    Toast.show("Rota excluída", "success")
+end
+
+function UI.playRoute(route)
+    if Recorder.active then Toast.show("Pare a gravação primeiro", "error") return end
+    UI.switchTab("Principal")
+    Replay.start(route)
+end
+
+function UI.renderHistory()
+    local scroll = UI.histScroll
+    if not scroll then return end
+    for _, ch in ipairs(scroll:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    if #Data.routes == 0 then
+        label(scroll, "Nenhuma rota salva.\nGrave uma na aba Principal.", UDim2.new(1, 0, 0, 60), nil,
+            Enum.Font.Gotham, 13, C.muted, Enum.TextXAlignment.Center)
+    end
+    for i = #Data.routes, 1, -1 do
+        local route = Data.routes[i]
+        local item = new("Frame", { Size = UDim2.new(1, -6, 0, 62), BackgroundColor3 = C.panel,
+            BorderSizePixel = 0, LayoutOrder = #Data.routes - i }, scroll)
+        corner(item, 8)
+        stroke(item, C.stroke, 0.8)
+        local nameLbl = label(item, route.name, UDim2.new(1, -112, 0, 22), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 13)
+        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        label(item, string.format("%s • %d ações • %s", fmtTime(route.duration), route.count or #route.events, fmtDate(route.created)),
+            UDim2.new(1, -112, 0, 18), UDim2.new(0, 10, 0, 34), Enum.Font.Gotham, 11, C.muted)
+        local play = makeButton(item, "▶", UDim2.fromOffset(30, 30), UDim2.new(1, -104, 0.5, -15), C.success)
+        local ren = makeButton(item, "✎", UDim2.fromOffset(30, 30), UDim2.new(1, -70, 0.5, -15), C.panel2)
+        local del = makeButton(item, "🗑", UDim2.fromOffset(30, 30), UDim2.new(1, -36, 0.5, -15), C.danger)
+        play.Activated:Connect(function() UI.playRoute(route) end)
+        ren.Activated:Connect(function() UI.renameRoute(route) end)
+        del.Activated:Connect(function() UI.deleteRoute(route) end)
+    end
+    if UI.countLbl then UI.countLbl.Text = "Rotas salvas: " .. #Data.routes end
+end
+
+function UI.revealDiag()
+    if UI.diagBtn and not UI.diagBtn.Visible then
+        UI.diagBtn.Visible = true
+    end
+end
+
+local function startRecording()
+    if Replay.running then Toast.show("Pare o replay antes de gravar", "error") return end
+    Recorder.start()
+    UI.setMode("rec")
+    Toast.show("Gravação iniciada", "success")
+end
+
+local function stopRecording()
+    local route = Recorder.stop()
+    UI.setMode("idle")
+    if not route or route.count == 0 then
+        Toast.show("Nada foi gravado", "error")
+        return
+    end
+    Data.routes[#Data.routes + 1] = route
+    saveAll()
+    saveRouteFile(route)
+    UI.renderHistory()
+    Toast.show("Rota salva: " .. route.name, "success")
+    if not S.autoRename then UI.renameRoute(route) end
+end
+
+function UI.onMainButton()
+    if State.mode == "idle" then startRecording()
+    elseif State.mode == "rec" then stopRecording()
+    elseif State.mode == "replay" then Replay.stop() end
+end
+
+local Cleanup -- definido na seção 11
+
+function UI.build()
+    local gui = new("ScreenGui", {
+        Name = "RouteHub_" .. math.random(1000, 9999), ResetOnSpawn = false,
+        IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
+    })
+    local parent
+    if API.gethui then
+        local ok, h = pcall(API.gethui)
+        if ok and h then parent = h end
+    end
+    parent = parent or CoreGui
+    local okP = pcall(function() gui.Parent = parent end)
+    if not okP or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    UI.gui = gui
+
+    local vp = cam().ViewportSize
+    local W = math.clamp(vp.X - 24, 300, 470)
+    local H = math.clamp(vp.Y - 24, 240, 330)
+    local sideW = (W < 400) and 84 or 104
+
+    -- Sombra + janela principal
+    local main = new("Frame", {
+        Name = "Window", Size = UDim2.fromOffset(W, H), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C.bg, BorderSizePixel = 0,
+        ClipsDescendants = false,
+    }, gui)
+    corner(main, 12)
+    stroke(main, C.stroke, 0.3)
+    new("ImageLabel", {
+        BackgroundTransparency = 1, Image = "rbxassetid://1316045217", ImageColor3 = Color3.new(0, 0, 0),
+        ImageTransparency = 0.5, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(10, 10, 118, 118),
+        Size = UDim2.new(1, 40, 1, 40), Position = UDim2.fromOffset(-20, -14), ZIndex = 0,
+    }, main)
+    UI.main = main
+
+    -- Barra de título
+    local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, main)
+    corner(bar, 12)
+    new("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, bar)
+    label(bar, APP_NAME, UDim2.new(0, 110, 0, 20), UDim2.new(0, 44, 0, 3), Enum.Font.GothamBold, 15)
+    label(bar, "v" .. VERSION, UDim2.new(0, 110, 0, 12), UDim2.new(0, 44, 0, 23), Enum.Font.Gotham, 10, C.muted)
+
+    -- Hotspot invisível (5 toques rápidos revelam o diagnóstico)
+    local hot = new("TextButton", {
+        Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(38, 38), ZIndex = 20, AutoButtonColor = false,
+    }, bar)
+    local taps = {}
+    hot.Activated:Connect(function()
+        local now = os.clock()
+        taps[#taps + 1] = now
+        while #taps > 0 and now - taps[1] > 2.5 do table.remove(taps, 1) end
+        if #taps >= 5 then
+            taps = {}
+            UI.revealDiag()
+        end
+    end)
+
+    local minBtn = makeButton(bar, "–", UDim2.fromOffset(28, 24), UDim2.new(1, -66, 0, 7), C.panel2)
+    local closeBtn = makeButton(bar, "✕", UDim2.fromOffset(28, 24), UDim2.new(1, -34, 0, 7), C.danger)
+
+    -- Arrastar pela barra de título
+    local dragging, dragStart, startPos
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, dragStart, startPos = true, input.Position, main.Position
+        end
+    end)
+    track(UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end))
+    track(UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end))
+
+    -- Conteúdo (sidebar + páginas)
+    local content = new("Frame", { Size = UDim2.new(1, 0, 1, -38), Position = UDim2.new(0, 0, 0, 38), BackgroundTransparency = 1 }, main)
+    UI.content = content
+    local side = new("Frame", { Size = UDim2.new(0, sideW, 1, -16), Position = UDim2.new(0, 8, 0, 8), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, content)
+    corner(side, 10)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, side)
+    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, side)
+
+    local pageArea = new("Frame", {
+        Size = UDim2.new(1, -(sideW + 24), 1, -16), Position = UDim2.new(0, sideW + 16, 0, 8), BackgroundTransparency = 1,
+    }, content)
+
+    local tabNames = { "Principal", "Histórico", "Config" }
+    for i, name in ipairs(tabNames) do
+        local tb = makeButton(side, name, UDim2.new(1, 0, 0, 34), nil, C.panel2)
+        tb.LayoutOrder = i
+        tb.TextSize = 12
+        tb.Activated:Connect(function() UI.switchTab(name) end)
+        UI.tabs[name] = tb
+    end
+    UI.tabs["Principal"]:SetAttribute("Base", C.accent)
+
+    -- === Aba Principal ===
+    local pMain = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, pageArea)
+    UI.pages["Principal"] = pMain
+    local card = new("Frame", { Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, pMain)
+    corner(card, 10)
+    stroke(card, C.stroke, 0.8)
+    UI.statusLbl = label(card, "Pronto", UDim2.new(1, -20, 0, 24), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 14)
+    UI.countLbl = label(card, "Rotas salvas: 0", UDim2.new(1, -20, 0, 18), UDim2.new(0, 10, 0, 32), Enum.Font.Gotham, 11, C.muted)
+
+    local recHolder = new("Frame", { Size = UDim2.new(1, 0, 0, 56), Position = UDim2.new(0, 0, 0, 68), BackgroundTransparency = 1 }, pMain)
+    local rec = makeButton(recHolder, "● GRAVAR", UDim2.new(1, 0, 0, 56), UDim2.new(), C.danger)
+    rec.AnchorPoint = Vector2.new(0.5, 0)
+    rec.Position = UDim2.new(0.5, 0, 0, 0)
+    rec.TextSize = 18
+    rec.Activated:Connect(UI.onMainButton)
+    UI.recBtn = rec
+
+    local prog = new("Frame", { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 0, 134), BackgroundTransparency = 1, Visible = false }, pMain)
+    UI.progHolder = prog
+    local track_ = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = C.panel2, BorderSizePixel = 0 }, prog)
+    corner(track_, 4)
+    UI.progFill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent2, BorderSizePixel = 0 }, track_)
+    corner(UI.progFill, 4)
+    UI.progLabel = label(prog, "00:00", UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 14), Enum.Font.GothamBold, 12, C.muted, Enum.TextXAlignment.Center)
+
+    label(pMain, "Dica: reproduza rotas pela aba Histórico.", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 1, -18),
+        Enum.Font.Gotham, 10, C.muted)
+
+    -- === Aba Histórico ===
+    local hist = new("ScrollingFrame", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = C.accent, CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+    }, pageArea)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, hist)
+    UI.pages["Histórico"] = hist
+    UI.histScroll = hist
+
+    -- === Aba Configurações ===
+    local cfg = new("ScrollingFrame", {
+        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = C.accent, CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
+    }, pageArea)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, cfg)
+    UI.pages["Config"] = cfg
+
+    makeSlider(cfg, "Velocidade do replay", 0.25, 4, 0.25, S.speedMultiplier,
+        function(v) return string.format("%.2fx", v) end, function(v) S.speedMultiplier = v end, cfg)
+    makeToggle(cfg, "Loop de replay", S.loopReplay, function(v) S.loopReplay = v end)
+    makeToggle(cfg, "Renomear automaticamente", S.autoRename, function(v) S.autoRename = v end)
+    makeSlider(cfg, "Delay entre ações", 0, 500, 10, S.actionDelayMs,
+        function(v) return v .. " ms" end, function(v) S.actionDelayMs = v end, cfg)
+    makeSlider(cfg, "Amostragem da câmera", 20, 200, 10, S.cameraSampleRateMs,
+        function(v) return v .. " ms" end, function(v) S.cameraSampleRateMs = v end, cfg)
+    makeSlider(cfg, "Amostragem do movimento", 15, 100, 5, S.moveSampleRateMs,
+        function(v) return v .. " ms" end, function(v) S.moveSampleRateMs = v end, cfg)
+    makeToggle(cfg, "Blur de fundo", S.blur, function(v) S.blur = v applyBlur() end)
+
+    -- Botão de diagnóstico: oculto até o gatilho secreto
+    local diagBtn = makeButton(cfg, "Diagnóstico", UDim2.new(1, -6, 0, 34), nil, C.panel2, C.muted)
+    diagBtn.TextSize = 12
+    diagBtn.Visible = false
+    diagBtn.Activated:Connect(function() Diag.run() end)
+    UI.diagBtn = diagBtn
+
+    -- Toasts
+    local tc = new("Frame", {
+        Size = UDim2.fromOffset(250, 220), AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -12, 1, -12), BackgroundTransparency = 1, ZIndex = 60,
+    }, gui)
+    new("UIListLayout", {
+        Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        HorizontalAlignment = Enum.HorizontalAlignment.Right, SortOrder = Enum.SortOrder.LayoutOrder,
+    }, tc)
+    Toast.container = tc
+
+    -- Minimizar / fechar
+    local minimized = false
+    minBtn.Activated:Connect(function()
+        minimized = not minimized
+        if minimized then
+            content.Visible = false
+            tween(main, 0.2, { Size = UDim2.fromOffset(W, 38) })
+        else
+            tween(main, 0.2, { Size = UDim2.fromOffset(W, H) }).Completed:Connect(function()
+                if not minimized then content.Visible = true end
+            end)
+        end
+    end)
+    closeBtn.Activated:Connect(function()
+        if Recorder.active then stopRecording() end
+        Cleanup()
+    end)
+
+    UI.switchTab("Principal")
+    UI.setMode("idle")
+    UI.renderHistory()
+    applyBlur()
+end
+
+-- Atualização periódica do status ao vivo
+function UI.startStatusLoop()
+    task.spawn(function()
+        while UI.gui and UI.gui.Parent and not UI.dead do
+            if State.mode == "rec" then
+                local ms = math.floor((os.clock() - Recorder.t0) * 1000)
+                UI.statusLbl.Text = string.format("Gravando... %s | %d ações", fmtTime(ms), #Recorder.events)
+                UI.statusLbl.TextColor3 = C.danger
+            elseif State.mode == "replay" then
+                local r = Replay.route
+                UI.statusLbl.Text = "Reproduzindo: " .. (r and r.name or "")
+                UI.statusLbl.TextColor3 = C.accent2
+            else
+                UI.statusLbl.Text = "Pronto"
+                UI.statusLbl.TextColor3 = C.text
+            end
+            task.wait(0.2)
+        end
+    end)
+end
+
+--[[ === SEÇÃO 10: ATALHOS, RESPAWN E LIMPEZA === ]]
+local function bindShortcuts()
+    -- Ctrl+Shift+D: revela o botão de diagnóstico e executa a varredura silenciosa
+    track(UIS.InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == Enum.KeyCode.D and UIS:IsKeyDown(Enum.KeyCode.LeftControl)
+            and UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
+            UI.revealDiag()
+            Diag.run()
+        end
+    end))
+
+    -- Respawn: reconecta os hooks do personagem durante a gravação
+    track(LocalPlayer.CharacterAdded:Connect(function(char)
+        if Recorder.active then
+            task.spawn(Recorder.bindCharacter, char)
+        end
+        if Replay.running then
+            local hum = char:WaitForChild("Humanoid", 5)
+            if hum then RS.origWS = hum.WalkSpeed end
+        end
+    end))
+end
+
+Cleanup = function()
+    UI.dead = true
+    pcall(function() if Recorder.active then Recorder.stop() end end)
+    pcall(function() Replay.cancel = true end)
+    pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
+    for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
+    Conns = {}
+    pcall(function() genv.RouteHubRemoteLogger = nil end) -- o hook permanece inerte sem logger
+    pcall(function()
+        local b = Lighting:FindFirstChild("RouteHubBlur")
+        if b then b:Destroy() end
+    end)
+    pcall(function() if UI.gui then UI.gui:Destroy() end end)
+    genv.RouteHubCleanup = nil
+end
+
+--[[ === SEÇÃO 11: INICIALIZAÇÃO === ]]
+loadAll()
+UI.build()
+UI.startStatusLoop()
+bindShortcuts()
+saveAll()
+genv.RouteHubCleanup = Cleanup
+Toast.show("ROUTE HUB v" .. VERSION .. " carregado", "success")
+print("[RouteHub] v" .. VERSION .. " carregado — " .. #Data.routes .. " rota(s)")
