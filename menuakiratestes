@@ -1,7 +1,7 @@
 --[[
-  AKZ ROTAS v1 — Gravador de Rotas + Playback (Luau / Rayfield)
-  Módulos: EventRegistry, CompatibilityChecker, InteractionAdapters, RouteSerializer,
-           RouteStorage, RouteHistory, Recorder, PlaybackEngine, UIController
+  AKZ ROTAS v2 — Gravar / Parar / Renomear / Excluir / Playback (Luau + Rayfield)
+  + LER JOGO: diagnóstico do que o cliente enxerga (animação de andar, correr, botões, remotes...)
+  O diagnóstico alimenta o gravador (detecta correr, animação personalizada, botões da tela).
 ]]
 
 local Players = game:GetService("Players")
@@ -9,6 +9,10 @@ local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local PPS = game:GetService("ProximityPromptService")
+local CAS = game:GetService("ContextActionService")
+local MPS = game:GetService("MarketplaceService")
+local RSt = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local LP = Players.LocalPlayer
 
 local genv = (getgenv and getgenv()) or _G
@@ -22,25 +26,17 @@ if not okR or not Rayfield then
 	return
 end
 
------------------------------------------------------------------- CONFIG
+------------------------------------------------------------------ CONFIG / UTIL
 local CFG = {
-	version = 1,
-	folder = "AKZ_Rotas",
-	sampleInterval = 0.10, -- s entre amostras de movimento
-	moveThreshold = 0.6,   -- studs
-	rotThreshold = 6,      -- graus
-	idleInterval = 1.0,    -- amostra mínima quando parado
-	maxEvents = 20000,
-	maxBytes = 4000000,
-	tolerance = 8,         -- studs de desvio antes de corrigir
+	version = 2, folder = "AKZ_Rotas",
+	sampleInterval = 0.10, moveThreshold = 0.6, rotThreshold = 6, idleInterval = 1.0,
+	maxEvents = 20000, maxBytes = 4000000,
 }
-
 local alive = true
 local globalConns = {}
 local function r2(x) return math.floor(x * 100 + 0.5) / 100 end
 local function r1(x) return math.floor(x * 10 + 0.5) / 10 end
 local function fmt(t) t = math.max(t or 0, 0) return string.format("%02d:%04.1f", math.floor(t / 60), t % 60) end
-
 local function getChar()
 	local c = LP.Character
 	if not c then return end
@@ -52,7 +48,6 @@ local function keyOf(name)
 	local ok, v = pcall(function() return Enum.KeyCode[name] end)
 	return ok and v or nil
 end
-
 local UI = {}
 local function N(title, content, dur)
 	pcall(function() Rayfield:Notify({ Title = title, Content = content, Duration = dur or 3 }) end)
@@ -63,31 +58,32 @@ local Compat = {}
 do
 	local okV, vim = pcall(function() return game:GetService("VirtualInputManager") end)
 	Compat.VIM = okV and vim or nil
+	Compat.vim = Compat.VIM ~= nil
 	Compat.fs = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 	Compat.folder = type(makefolder) == "function" and type(isfolder) == "function"
 	Compat.prompt = type(fireproximityprompt) == "function"
 	Compat.click = type(fireclickdetector) == "function"
+	Compat.sig = type(firesignal) == "function" or type(getconnections) == "function"
 	Compat.clip = type(setclipboard) == "function"
-	Compat.vim = Compat.VIM ~= nil
 end
 function Compat.report()
 	local function y(b) return b and "SIM" or "NÃO" end
-	return string.format(
-		"Arquivos (persistência real): %s\nProximityPrompt (fireproximityprompt): %s\nClickDetector (fireclickdetector): %s\nTeclas (VirtualInputManager): %s\nÁrea de transferência: %s\n\nSem arquivos, as rotas ficam só na memória (somem ao sair do jogo).",
-		y(Compat.fs), y(Compat.prompt), y(Compat.click), y(Compat.vim), y(Compat.clip))
+	return {
+		"Arquivos (salvar de verdade): " .. y(Compat.fs),
+		"Teclas/cliques virtuais (VirtualInputManager): " .. y(Compat.vim),
+		"fireproximityprompt: " .. y(Compat.prompt),
+		"fireclickdetector: " .. y(Compat.click),
+		"firesignal/getconnections: " .. y(Compat.sig),
+		"Área de transferência: " .. y(Compat.clip),
+	}
 end
 
------------------------------------------------------------------- EVENT REGISTRY
+------------------------------------------------------------------ REGISTRY
 local Registry = { types = {} }
-function Registry.define(k, label, cat) Registry.types[k] = { label = label, cat = cat } end
-Registry.define("move", "Movimento", "mov")
-Registry.define("jump", "Salto", "jump")
-Registry.define("state", "Estado", "state")
-Registry.define("anim", "Animação", "anim")
-Registry.define("input", "Tecla", "inter")
-Registry.define("prompt", "Prompt", "inter")
-Registry.define("click", "Clique", "inter")
-Registry.define("tool", "Ferramenta", "inter")
+for k, label in pairs({ move = "Movimento", jump = "Salto", state = "Estado", anim = "Animação", input = "Tecla",
+	gui = "Botão", prompt = "Prompt", click = "Clique", tool = "Ferramenta", attr = "Atributo" }) do
+	Registry.types[k] = label
+end
 function Registry.validate(e)
 	if type(e) ~= "table" or type(e.t) ~= "number" or e.t < 0 or type(e.k) ~= "string" then return false end
 	if not Registry.types[e.k] then return false end
@@ -97,7 +93,7 @@ function Registry.validate(e)
 	return true
 end
 
------------------------------------------------------------------- OBJECT REFS
+------------------------------------------------------------------ REFS
 local function makeRef(inst)
 	if not inst then return nil end
 	local path, cur = {}, inst
@@ -118,8 +114,10 @@ local function resolveRef(ref)
 		if not cur then break end
 	end
 	if cur and cur.ClassName == ref.cls then return cur end
+	local pg = LP:FindFirstChildOfClass("PlayerGui")
+	local rootSearch = (ref.root == "g" and pg) or workspace
 	local best, bd
-	for _, d in ipairs(workspace:GetDescendants()) do
+	for _, d in ipairs(rootSearch:GetDescendants()) do
 		if d.Name == ref.name and d.ClassName == ref.cls then
 			local dist = 0
 			if ref.pos then
@@ -132,15 +130,46 @@ local function resolveRef(ref)
 	return best
 end
 
+local function isShown(gui)
+	if not gui:IsA("GuiObject") then return false end
+	if gui.AbsoluteSize.X <= 0 or gui.AbsoluteSize.Y <= 0 then return false end
+	local cur = gui
+	while cur and cur ~= game do
+		if cur:IsA("GuiObject") and not cur.Visible then return false end
+		if cur:IsA("ScreenGui") and not cur.Enabled then return false end
+		cur = cur.Parent
+	end
+	return true
+end
+local function guiCenter(btn)
+	local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
+	local inset = (sg and not sg.IgnoreGuiInset) and GuiService:GetGuiInset().Y or 0
+	local c = btn.AbsolutePosition + btn.AbsoluteSize / 2
+	return c.X, c.Y + inset
+end
+local function fireSig(sig, ...)
+	if type(firesignal) == "function" then
+		if pcall(firesignal, sig, ...) then return true end
+	end
+	if type(getconnections) == "function" then
+		local ok, conns = pcall(getconnections, sig)
+		if ok and type(conns) == "table" then
+			for _, c in ipairs(conns) do pcall(function() c:Fire(...) end) end
+			return #conns > 0
+		end
+	end
+	return false
+end
+
 ------------------------------------------------------------------ ADAPTERS
 local Adapters = {}
--- "ok" reproduzível | "info" apenas informativo | "na" não reproduzível neste ambiente
 function Adapters.can(e)
 	local k, d = e.k, e.d or {}
 	if k == "move" or k == "jump" or k == "tool" then return "ok" end
-	if k == "state" then return "info" end
+	if k == "state" or k == "attr" then return "info" end
 	if k == "anim" then return d.rp and "ok" or "info" end
 	if k == "input" then return (Compat.vim and keyOf(d.key)) and "ok" or "na" end
+	if k == "gui" then return (Compat.vim or Compat.sig) and "ok" or "na" end
 	if k == "prompt" then
 		if d.ph == "trigger" then return Compat.prompt and "ok" or "na" end
 		return "info"
@@ -150,8 +179,8 @@ function Adapters.can(e)
 end
 
 function Adapters.run(e, ctx)
-	local d, k = e.d or {}, e.k
-	local hum = ctx.hum
+	local d, k, hum, o = e.d or {}, e.k, ctx.hum, ctx.opts
+	if (k == "input" or k == "gui") and d.sp and not o.sprint then return "info" end
 	if k == "jump" then
 		if d.ph == "start" then
 			hum.Jump = true
@@ -159,12 +188,13 @@ function Adapters.run(e, ctx)
 			return "ok"
 		end
 		return "info"
-	elseif k == "state" then
-		return "info"
 	elseif k == "anim" then
-		if not d.rp then return "info" end
+		if not d.rp or not o.anims then return "info" end
 		if d.ph == "start" then
 			if not ctx.animator then return "fail", "Animator ausente" end
+			for _, t in ipairs(ctx.animator:GetPlayingAnimationTracks()) do
+				if t.Animation and t.Animation.AnimationId == d.id then return "info" end -- jogo já toca
+			end
 			local a = Instance.new("Animation")
 			a.AnimationId = d.id
 			local okA, tr = pcall(function() return ctx.animator:LoadAnimation(a) end)
@@ -176,34 +206,46 @@ function Adapters.run(e, ctx)
 			end)
 			ctx.tracks[d.id] = tr
 			return "ok"
-		else
-			local tr = ctx.tracks[d.id]
-			if tr then pcall(function() tr:Stop(0.1) end) ctx.tracks[d.id] = nil end
-			return "ok"
 		end
+		local tr = ctx.tracks[d.id]
+		if tr then pcall(function() tr:Stop(0.1) end) ctx.tracks[d.id] = nil end
+		return "ok"
 	elseif k == "input" then
 		local kc = keyOf(d.key)
 		if not (Compat.vim and kc) then return "fail", "teclas indisponíveis" end
 		local okV = pcall(function() Compat.VIM:SendKeyEvent(d.ph == "down", kc, false, game) end)
 		return okV and "ok" or "fail", "falha ao enviar tecla"
+	elseif k == "gui" then
+		local btn = resolveRef(d.ref)
+		if not btn or not btn:IsA("GuiButton") then return "fail", "botão não encontrado: " .. tostring(d.ref and d.ref.name) end
+		if not isShown(btn) then return "fail", "botão não está visível: " .. btn.Name end
+		if Compat.vim then
+			local x, y = guiCenter(btn)
+			local okV = pcall(function() Compat.VIM:SendMouseButtonEvent(x, y, 0, d.ph == "down", game, 0) end)
+			return okV and "ok" or "fail", "falha ao clicar no botão"
+		end
+		if d.ph == "down" then fireSig(btn.MouseButton1Down)
+		else
+			fireSig(btn.MouseButton1Up)
+			fireSig(btn.MouseButton1Click)
+			fireSig(btn.Activated)
+		end
+		return "ok"
 	elseif k == "prompt" then
 		if d.ph ~= "trigger" then return "info" end
 		if not Compat.prompt then return "fail", "fireproximityprompt indisponível" end
 		local p = resolveRef(d.ref)
 		if not p then return "fail", "objeto não encontrado: " .. tostring(d.ref and d.ref.name) end
-		local okP = pcall(fireproximityprompt, p)
-		return okP and "ok" or "fail", "falha no prompt"
+		return pcall(fireproximityprompt, p) and "ok" or "fail", "falha no prompt"
 	elseif k == "click" then
 		if not Compat.click then return "fail", "fireclickdetector indisponível" end
 		local cd = resolveRef(d.ref)
 		if not cd then return "fail", "objeto não encontrado: " .. tostring(d.ref and d.ref.name) end
-		local okC = pcall(fireclickdetector, cd)
-		return okC and "ok" or "fail", "falha no clique"
+		return pcall(fireclickdetector, cd) and "ok" or "fail", "falha no clique"
 	elseif k == "tool" then
-		local char = ctx.char
 		if d.ph == "equip" then
 			local bp = LP:FindFirstChildOfClass("Backpack")
-			local tool = (bp and bp:FindFirstChild(d.name)) or char:FindFirstChild(d.name)
+			local tool = (bp and bp:FindFirstChild(d.name)) or ctx.char:FindFirstChild(d.name)
 			if not tool then return "fail", "ferramenta não encontrada: " .. tostring(d.name) end
 			pcall(function() hum:EquipTool(tool) end)
 			return "ok"
@@ -211,25 +253,26 @@ function Adapters.run(e, ctx)
 			pcall(function() hum:UnequipTools() end)
 			return "ok"
 		elseif d.ph == "use" then
-			local tool = char:FindFirstChild(d.name)
+			local tool = ctx.char:FindFirstChild(d.name)
 			if not (tool and tool:IsA("Tool")) then return "fail", "ferramenta não equipada: " .. tostring(d.name) end
 			pcall(function() tool:Activate() end)
 			return "ok"
 		end
 		return "info"
 	end
-	return "fail", "tipo sem adaptador"
+	return "info"
 end
 
 ------------------------------------------------------------------ SERIALIZER
 local Serializer = {}
 function Serializer.analyze(ev)
-	local c = { mov = 0, jump = 0, anim = 0, inter = 0, state = 0, ok = 0, na = 0, info = 0 }
+	local c = { ok = 0, na = 0, info = 0, mov = 0, jump = 0, inter = 0, sprintEv = 0 }
 	for _, e in ipairs(ev) do
-		local ty = Registry.types[e.k]
-		if ty then c[ty.cat] = (c[ty.cat] or 0) + 1 end
 		local st = Adapters.can(e)
-		c[st] = c[st] + 1
+		c[st] += 1
+		if e.k == "move" then c.mov += 1 elseif e.k == "jump" then c.jump += 1
+		elseif e.k ~= "anim" and e.k ~= "state" and e.k ~= "attr" then c.inter += 1 end
+		if e.d and e.d.sp then c.sprintEv += 1 end
 	end
 	return c
 end
@@ -245,19 +288,21 @@ function Serializer.cleanEvents(ev)
 	end)
 	return out, dropped
 end
-function Serializer.buildMeta(id, name, session, dur, partial)
-	local c = Serializer.analyze(session.events)
+function Serializer.buildMeta(id, name, s, dur, partial)
+	local c = Serializer.analyze(s.events)
+	local run = (s.wsMax and s.wsMin and s.wsMin > 0 and s.wsMax >= s.wsMin * 1.2) or c.sprintEv > 0
 	return {
-		id = id, name = name, created = os.time(), dur = r2(dur), n = #session.events,
-		moves = c.mov, jumps = c.jump, anims = c.anim, inter = c.inter,
-		ok = c.ok, na = c.na, partial = partial, place = game.PlaceId, v = CFG.version,
+		id = id, name = name, created = os.time(), dur = r2(dur), n = #s.events,
+		moves = c.mov, jumps = c.jump, inter = c.inter, ok = c.ok, na = c.na,
+		run = run and true or false, wsMin = s.wsMin and r1(s.wsMin), wsMax = s.wsMax and r1(s.wsMax),
+		loco = s.customLoco and "personalizada" or "padrão", partial = partial, place = game.PlaceId, v = CFG.version,
 	}
 end
 function Serializer.migrate(data)
 	if type(data) ~= "table" then return nil end
-	if data.v == nil then data.v = 1 end -- formatos antigos sem versão tratados como v1
-	if data.v > CFG.version then return nil, "versão de arquivo mais nova que o script" end
-	return data
+	if data.v == nil then data.v = 1 end
+	if data.v > CFG.version then return nil, "arquivo de versão mais nova" end
+	return data -- v1 → v2: eventos compatíveis (novos tipos são opcionais)
 end
 function Serializer.encode(t)
 	local ok, s = pcall(HttpService.JSONEncode, HttpService, t)
@@ -282,7 +327,7 @@ local function fpath(n) return CFG.folder .. "/" .. n end
 function Storage.write(name, str)
 	if Compat.fs then
 		local ok, err = pcall(writefile, fpath(name), str)
-		if not ok then return false, "erro ao gravar arquivo: " .. tostring(err) end
+		if not ok then return false, "erro ao gravar: " .. tostring(err) end
 		return true
 	end
 	mem.files[name] = str
@@ -311,19 +356,18 @@ local function newId()
 	local id
 	repeat
 		local ok, g = pcall(HttpService.GenerateGUID, HttpService, false)
-		id = ok and g:gsub("[^%w]", ""):sub(1, 10) or tostring(os.time()) .. math.random(100, 999)
+		id = ok and g:gsub("[^%w]", ""):sub(1, 10) or (tostring(os.time()) .. math.random(100, 999))
 	until not History.byId[id]
 	return id
 end
 local function sanitizeName(s)
-	s = tostring(s or ""):gsub("[%c]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+	s = tostring(s or ""):gsub("%c", ""):gsub("^%s+", ""):gsub("%s+$", "")
 	return s:sub(1, 40)
 end
 function History.save()
 	local old = Storage.read("index.json")
 	if old then Storage.write("index.bak.json", old) end
-	local s, err = Serializer.encode({ v = CFG.version, routes = History.list, cfg = {
-		sampleInterval = CFG.sampleInterval, maxEvents = CFG.maxEvents, tolerance = CFG.tolerance } })
+	local s, err = Serializer.encode({ v = CFG.version, routes = History.list })
 	if not s then return false, err end
 	return Storage.write("index.json", s)
 end
@@ -345,11 +389,6 @@ function History.load()
 			History.byId[m.id] = m
 		end
 	end
-	if type(data.cfg) == "table" then
-		CFG.sampleInterval = tonumber(data.cfg.sampleInterval) or CFG.sampleInterval
-		CFG.maxEvents = tonumber(data.cfg.maxEvents) or CFG.maxEvents
-		CFG.tolerance = tonumber(data.cfg.tolerance) or CFG.tolerance
-	end
 end
 function History.nextName()
 	local mx = 0
@@ -369,7 +408,7 @@ function History.add(session, dur, partial)
 	History.list[#History.list + 1] = meta
 	History.byId[id] = meta
 	local sok, serr = History.save()
-	if not sok then return meta, "rota salva, mas índice falhou: " .. tostring(serr) end
+	if not sok then return meta, "rota salva, mas o índice falhou: " .. tostring(serr) end
 	return meta
 end
 function History.getEvents(id)
@@ -378,18 +417,17 @@ function History.getEvents(id)
 	if not raw then return nil, "arquivo da rota não encontrado" end
 	local data, err = Serializer.decode(raw)
 	if not data then return nil, err end
-	local mdata, merr = Serializer.migrate(data)
-	if not mdata then return nil, merr end
-	if mdata.id ~= id then return nil, "identificador inconsistente" end
-	local ev, dropped = Serializer.cleanEvents(mdata.ev)
+	local md, merr = Serializer.migrate(data)
+	if not md then return nil, merr end
+	if md.id ~= id then return nil, "identificador inconsistente" end
+	local ev = Serializer.cleanEvents(md.ev)
 	if #ev == 0 then return nil, "rota vazia ou corrompida" end
 	local meta = History.byId[id]
 	if meta then
 		local c = Serializer.analyze(ev)
 		meta.ok, meta.na, meta.n = c.ok, c.na, #ev
-		meta.dropped = dropped
 	end
-	History.cache = { id = id, ev = ev } -- cache de 1 rota (controle de memória)
+	History.cache = { id = id, ev = ev }
 	return ev
 end
 function History.rename(id, name)
@@ -401,8 +439,7 @@ function History.rename(id, name)
 	return History.save()
 end
 function History.delete(id)
-	local m = History.byId[id]
-	if not m then return false, "rota inexistente" end
+	if not History.byId[id] then return false, "rota inexistente" end
 	for i, x in ipairs(History.list) do if x.id == id then table.remove(History.list, i) break end end
 	History.byId[id] = nil
 	if History.cache and History.cache.id == id then History.cache = nil end
@@ -427,49 +464,10 @@ function History.duplicate(id)
 	History.save()
 	return copy
 end
-function History.export(id)
-	local m = History.byId[id]
-	local ev, err = History.getEvents(id)
-	if not (m and ev) then return nil, err or "rota inexistente" end
-	local s, e2 = Serializer.encode({ v = CFG.version, meta = m, ev = ev })
-	if not s then return nil, e2 end
-	local fname = "export_" .. id .. ".json"
-	local ok, werr = Storage.write(fname, s)
-	if not ok then return nil, werr end
-	if Compat.clip then pcall(setclipboard, s) end
-	return fname
-end
-function History.import(fname)
-	fname = tostring(fname or ""):gsub("[/\\]", "")
-	if fname == "" then return nil, "informe o nome do arquivo" end
-	local raw = Storage.read(fname)
-	if not raw then return nil, "arquivo não encontrado em " .. CFG.folder end
-	local data, err = Serializer.decode(raw)
-	if not data then return nil, err end
-	local md, merr = Serializer.migrate(data)
-	if not md then return nil, merr end
-	local ev = Serializer.cleanEvents(md.ev)
-	if #ev < 2 then return nil, "arquivo sem eventos válidos" end
-	local dur = ev[#ev].t
-	local session = { events = ev }
-	local nm = type(md.meta) == "table" and sanitizeName(md.meta.name) or ""
-	local meta, aerr = History.add(session, dur, type(md.meta) == "table" and md.meta.partial or nil)
-	if not meta then return nil, aerr end
-	if nm ~= "" then meta.name = nm .. " (importada)" History.save() end
-	return meta
-end
-function History.sorted(query, mode)
-	local out, q = {}, string.lower(query or "")
-	for _, m in ipairs(History.list) do
-		if q == "" or string.find(string.lower(m.name), q, 1, true) then out[#out + 1] = m end
-	end
-	table.sort(out, function(a, b)
-		if mode == "Data (antiga)" then return a.created < b.created
-		elseif mode == "Nome (A-Z)" then return string.lower(a.name) < string.lower(b.name)
-		elseif mode == "Duração (maior)" then return a.dur > b.dur
-		elseif mode == "Duração (menor)" then return a.dur < b.dur end
-		return a.created > b.created
-	end)
+function History.sorted()
+	local out = {}
+	for _, m in ipairs(History.list) do out[#out + 1] = m end
+	table.sort(out, function(a, b) return a.created > b.created end)
 	return out
 end
 local function statusOf(m)
@@ -479,20 +477,263 @@ local function statusOf(m)
 end
 local function compatPct(m)
 	local t = (m.ok or 0) + (m.na or 0)
-	if t == 0 then return 100 end
-	return math.floor((m.ok or 0) / t * 100)
+	return t == 0 and 100 or math.floor((m.ok or 0) / t * 100)
+end
+
+------------------------------------------------------------------ LER JOGO (diagnóstico)
+local Scan = { profile = nil, sections = {}, order = {}, summary = "Toque em LER JOGO para diagnosticar.", running = false }
+local SPRINT_PAT = { "sprint", "run", "dash", "correr", "corrida", "shift", "rapido", "rápido" }
+local function isSprintName(s)
+	s = string.lower(tostring(s or ""))
+	for _, p in ipairs(SPRINT_PAT) do if s:find(p, 1, true) then return true end end
+	return false
+end
+local SLOTS = { "idle", "walk", "run", "jump", "fall", "climb", "swim", "swimidle", "toolnone", "sit" }
+
+function Scan.run(full)
+	local P = { sprintKeys = {}, sprintGui = {}, sprintAttrs = {}, customLoco = false, hasSprint = false }
+	local secs, order = {}, {}
+	local function sec(name, lines) secs[name] = lines order[#order + 1] = name end
+	local yn = 0
+	local function y() yn += 1 if full and yn % 800 == 0 then task.wait() end end
+
+	-- Jogo
+	local pname = "?"
+	pcall(function() pname = MPS:GetProductInfo(game.PlaceId).Name end)
+	sec("Jogo", {
+		"Nome: " .. tostring(pname), "PlaceId: " .. game.PlaceId, "GameId: " .. game.GameId,
+		string.format("Toque: %s • Teclado: %s • Controle: %s", tostring(UIS.TouchEnabled), tostring(UIS.KeyboardEnabled), tostring(UIS.GamepadEnabled)),
+		"Gravidade: " .. workspace.Gravity, "Streaming: " .. tostring(workspace.StreamingEnabled),
+		"Jogadores: " .. #Players:GetPlayers(),
+	})
+
+	-- Personagem + animação de andar
+	local hum, _, char = getChar()
+	local L = {}
+	if hum then
+		L[#L + 1] = "Rig: " .. hum.RigType.Name
+		L[#L + 1] = "WalkSpeed: " .. r1(hum.WalkSpeed)
+		L[#L + 1] = hum.UseJumpPower and ("JumpPower: " .. hum.JumpPower) or ("JumpHeight: " .. hum.JumpHeight)
+		L[#L + 1] = "HipHeight: " .. r2(hum.HipHeight) .. " • AutoRotate: " .. tostring(hum.AutoRotate)
+		local animate = char:FindFirstChild("Animate")
+		if animate then
+			P.animate = true
+			L[#L + 1] = "Script Animate: SIM"
+			for _, slot in ipairs(SLOTS) do
+				local f = animate:FindFirstChild(slot)
+				if f then
+					local ids = {}
+					for _, a in ipairs(f:GetChildren()) do
+						if a:IsA("Animation") then ids[#ids + 1] = (a.AnimationId:gsub("%D", "")) end
+					end
+					L[#L + 1] = "  " .. slot .. ": " .. (#ids > 0 and table.concat(ids, ", ") or "-")
+					if slot == "walk" then P.walkAnim = ids[1] end
+					if slot == "run" then P.runAnim = ids[1] end
+				end
+			end
+		else
+			P.customLoco = true
+			L[#L + 1] = "Script Animate: NÃO (andar/animações provavelmente personalizados)"
+		end
+		local animator = hum:FindFirstChildOfClass("Animator")
+		if animator then
+			L[#L + 1] = "Animações tocando agora:"
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				L[#L + 1] = string.format("  %s • %s • %s", tr.Name, (tr.Animation and tr.Animation.AnimationId or ""):gsub("%D", ""), tr.Priority.Name)
+			end
+		end
+	else
+		L[1] = "Personagem indisponível."
+	end
+	sec("Personagem", L)
+
+	-- Correr / sprint
+	local SL = {}
+	local okA, bound = pcall(function() return CAS:GetAllBoundActionInfo() end)
+	SL[#SL + 1] = "Ações vinculadas (ContextActionService):"
+	if okA and type(bound) == "table" then
+		for aname, info in pairs(bound) do
+			local keys = {}
+			for _, it in ipairs(info.inputTypes or {}) do
+				keys[#keys + 1] = (typeof(it) == "EnumItem") and it.Name or tostring(it)
+			end
+			local sp = isSprintName(aname) or isSprintName(info.title)
+			SL[#SL + 1] = (sp and "★ " or "• ") .. tostring(aname) .. " [" .. table.concat(keys, ",") .. "]"
+				.. (info.createTouchButton and " (botão na tela)" or "")
+			if sp then
+				P.hasSprint, P.sprintAction = true, aname
+				for _, it in ipairs(info.inputTypes or {}) do
+					if typeof(it) == "EnumItem" and it.EnumType == Enum.KeyCode then P.sprintKeys[it.Name] = true end
+				end
+			end
+		end
+	end
+	SL[#SL + 1] = "Atributos:"
+	local function attrs(inst, label)
+		if not inst then return end
+		local okT, t = pcall(function() return inst:GetAttributes() end)
+		if okT and type(t) == "table" then
+			for k, v in pairs(t) do
+				SL[#SL + 1] = "  " .. label .. "." .. k .. " = " .. tostring(v)
+				if isSprintName(k) then P.sprintAttrs[#P.sprintAttrs + 1] = label .. "." .. k P.hasSprint = true end
+			end
+		end
+	end
+	attrs(LP, "Player") attrs(char, "Char") attrs(hum, "Humanoid")
+	local BL = {}
+	local pg = LP:FindFirstChildOfClass("PlayerGui")
+	if pg then
+		for _, d in ipairs(pg:GetDescendants()) do
+			y()
+			if d:IsA("GuiButton") then
+				local txt = d:IsA("TextButton") and d.Text or ""
+				local sp = isSprintName(d.Name) or isSprintName(txt)
+				BL[#BL + 1] = string.format("%s%s (%s) em %s%s", sp and "★ " or "• ", d.Name, d.ClassName,
+					d.Parent and d.Parent.Name or "?", txt ~= "" and (' "' .. txt .. '"') or "")
+				if sp then P.sprintGui[d.Name] = true P.hasSprint = true end
+			end
+		end
+	end
+	sec("Correr e controles", SL)
+	sec("Botões da tela", BL)
+
+	if full then
+		-- Animações encontradas
+		local AL, seen = {}, {}
+		local function scanAnim(root, label)
+			if not root then return end
+			for _, d in ipairs(root:GetDescendants()) do
+				y()
+				if d:IsA("Animation") and d.AnimationId ~= "" and not seen[d.AnimationId] then
+					seen[d.AnimationId] = true
+					AL[#AL + 1] = label .. ": " .. d.Name .. " = " .. (d.AnimationId:gsub("%D", ""))
+				end
+			end
+		end
+		scanAnim(char, "Personagem") scanAnim(LP:FindFirstChildOfClass("Backpack"), "Mochila")
+		scanAnim(game:GetService("StarterPack"), "StarterPack") scanAnim(RSt, "ReplicatedStorage")
+		scanAnim(workspace, "Workspace")
+		sec("Animações", AL)
+
+		-- Interações + remotes (uma passada no Workspace)
+		local IL, RL = {}, {}
+		local nPrompt, nClick, nSeat = 0, 0, 0
+		for _, d in ipairs(workspace:GetDescendants()) do
+			y()
+			if d:IsA("ProximityPrompt") then
+				nPrompt += 1
+				if nPrompt <= 40 then
+					IL[#IL + 1] = string.format("Prompt: %s / %s (segurar %.1fs) em %s", d.ObjectText, d.ActionText, d.HoldDuration, d.Parent and d.Parent.Name or "?")
+				end
+			elseif d:IsA("ClickDetector") then
+				nClick += 1
+				if nClick <= 40 then IL[#IL + 1] = "ClickDetector em " .. (d.Parent and d.Parent.Name or "?") end
+			elseif d:IsA("Seat") or d:IsA("VehicleSeat") then
+				nSeat += 1
+			elseif d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+				RL[#RL + 1] = d.ClassName .. ": " .. d:GetFullName()
+			end
+		end
+		table.insert(IL, 1, string.format("Total: %d prompts • %d click detectors • %d assentos", nPrompt, nClick, nSeat))
+		local tools = {}
+		local bp = LP:FindFirstChildOfClass("Backpack")
+		for _, root in ipairs({ bp, char, game:GetService("StarterPack") }) do
+			if root then for _, t in ipairs(root:GetChildren()) do if t:IsA("Tool") then tools[t.Name] = true end end end
+		end
+		local tl = {}
+		for n in pairs(tools) do tl[#tl + 1] = n end
+		IL[#IL + 1] = "Ferramentas: " .. (#tl > 0 and table.concat(tl, ", ") or "nenhuma")
+		sec("Interações", IL)
+
+		for _, d in ipairs(RSt:GetDescendants()) do
+			y()
+			if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") or d.ClassName == "UnreliableRemoteEvent" then
+				RL[#RL + 1] = d.ClassName .. ": " .. d:GetFullName()
+			end
+		end
+		table.insert(RL, 1, "Total de remotes visíveis: " .. #RL .. " (só nomes; o servidor não é visível)")
+		sec("Remotes", RL)
+
+		-- Scripts visíveis
+		local CL = {}
+		local function scanScripts(root, label)
+			if not root then return end
+			for _, d in ipairs(root:GetDescendants()) do
+				y()
+				if d:IsA("LocalScript") or d:IsA("ModuleScript") then
+					CL[#CL + 1] = label .. ": " .. d.ClassName .. " " .. d.Name
+				end
+			end
+		end
+		scanScripts(pg, "PlayerGui") scanScripts(LP:FindFirstChild("PlayerScripts"), "PlayerScripts")
+		scanScripts(char, "Personagem")
+		sec("Scripts (nomes)", CL)
+	end
+	sec("Executor", Compat.report())
+
+	-- Resumo
+	local keys = {}
+	for k in pairs(P.sprintKeys) do keys[#keys + 1] = k end
+	local guis = {}
+	for k in pairs(P.sprintGui) do guis[#guis + 1] = k end
+	local sum = {}
+	sum[#sum + 1] = "Animação de andar: " .. (P.customLoco and "PERSONALIZADA (sem Animate) — gravo todas as animações"
+		or ("padrão (Animate)" .. (P.walkAnim and (" • walk " .. P.walkAnim) or "")))
+	if P.hasSprint then
+		sum[#sum + 1] = "Correr: DETECTADO" .. (P.sprintAction and (" • ação " .. tostring(P.sprintAction)) or "")
+			.. (#keys > 0 and (" • teclas " .. table.concat(keys, ",")) or "")
+			.. (#guis > 0 and (" • botões " .. table.concat(guis, ",")) or "")
+			.. (#P.sprintAttrs > 0 and (" • atributos " .. table.concat(P.sprintAttrs, ",")) or "")
+	else
+		sum[#sum + 1] = "Correr: não detectado (mudanças de velocidade ainda são gravadas)"
+	end
+	sum[#sum + 1] = "Controles: " .. (UIS.TouchEnabled and "toque" or "teclado/mouse")
+	if full then
+		sum[#sum + 1] = string.format("Prompts/cliques: %s", (secs["Interações"] and secs["Interações"][1]) or "-")
+	end
+
+	Scan.profile = P
+	if full or #Scan.order == 0 then
+		Scan.sections, Scan.order, Scan.summary = secs, order, table.concat(sum, "\n")
+	end
+	return P, secs, order
+end
+
+function Scan.reportText()
+	local out = { "AKZ ROTAS — diagnóstico do jogo", os.date("%d/%m/%Y %H:%M"), "" }
+	for _, name in ipairs(Scan.order) do
+		out[#out + 1] = "=== " .. name .. " ==="
+		for _, l in ipairs(Scan.sections[name]) do out[#out + 1] = l end
+		out[#out + 1] = ""
+	end
+	return table.concat(out, "\n")
+end
+
+function Scan.runAsync()
+	if Scan.running then N("Ler jogo", "Já está lendo...") return end
+	Scan.running = true
+	N("Ler jogo", "Lendo o jogo... pode levar alguns segundos.", 4)
+	task.spawn(function()
+		local ok, err = pcall(Scan.run, true)
+		Scan.running = false
+		if not alive then return end
+		if not ok then N("Erro ao ler jogo", tostring(err), 5) return end
+		local txt = Scan.reportText()
+		local saved = Storage.write("diagnostico_" .. game.PlaceId .. ".txt", txt)
+		if Compat.clip then pcall(setclipboard, txt) end
+		N("Leitura concluída", saved and (Storage.persistent and "Relatório salvo e copiado." or "Relatório na memória.") or "Relatório pronto.", 4)
+		if UI.updateScan then UI.updateScan() end
+	end)
 end
 
 ------------------------------------------------------------------ RECORDER
 local Playback
 local Recorder = { active = false, session = nil, conns = {}, errors = 0 }
-local SKIP_KEYS = { W = 1, A = 1, S = 1, D = 1, Up = 1, Down = 1, Left = 1, Right = 1, Space = 1, Unknown = 1,
-	Thumbstick1 = 1, Thumbstick2 = 1 }
+local SKIP_KEYS = { W = 1, A = 1, S = 1, D = 1, Up = 1, Down = 1, Left = 1, Right = 1, Space = 1, Unknown = 1 }
 
 local function guard(f)
 	return function(...)
-		local ok = pcall(f, ...)
-		if not ok then Recorder.errors += 1 end
+		if not pcall(f, ...) then Recorder.errors += 1 end
 	end
 end
 local function rconn(c) Recorder.conns[#Recorder.conns + 1] = c end
@@ -500,10 +741,7 @@ local function rconn(c) Recorder.conns[#Recorder.conns + 1] = c end
 function Recorder.push(k, d)
 	local s = Recorder.session
 	if not (s and Recorder.active) then return end
-	if #s.events >= CFG.maxEvents then
-		Recorder.stop("limite de eventos", true)
-		return
-	end
+	if #s.events >= CFG.maxEvents then Recorder.stop("limite de eventos", true) return end
 	s.seq += 1
 	local e = { t = r2(os.clock() - s.t0), n = s.seq, k = k, d = d or {} }
 	local _, hrp = getChar()
@@ -524,6 +762,19 @@ local function findDetector(part)
 		depth += 1
 	end
 end
+local function buttonAt(pos)
+	local pg = LP:FindFirstChildOfClass("PlayerGui")
+	if not pg then return nil end
+	local inset = GuiService:GetGuiInset().Y
+	for _, yy in ipairs({ pos.Y, pos.Y - inset }) do
+		local okG, objs = pcall(function() return pg:GetGuiObjectsAtPosition(pos.X, yy) end)
+		if okG then
+			for _, o in ipairs(objs) do
+				if o:IsA("GuiButton") and isShown(o) then return o end
+			end
+		end
+	end
+end
 
 function Recorder.sample(force)
 	local s = Recorder.session
@@ -535,9 +786,13 @@ function Recorder.sample(force)
 	local rot = (not last) or math.abs(angDiff(yaw, last.yaw)) >= CFG.rotThreshold
 	local idle = (os.clock() - s.lastT) >= CFG.idleInterval
 	if force or moved or rot or idle then
+		local ws = r2(hum.WalkSpeed)
+		s.baseWs = s.baseWs or ws
+		s.wsMin = s.wsMin and math.min(s.wsMin, ws) or ws
+		s.wsMax = s.wsMax and math.max(s.wsMax, ws) or ws
 		Recorder.push("move", {
-			ws = r2(hum.WalkSpeed), v = r2(hrp.AssemblyLinearVelocity.Magnitude),
-			st = hum:GetState().Name, air = hum.FloorMaterial == Enum.Material.Air,
+			ws = ws, v = r2(hrp.AssemblyLinearVelocity.Magnitude), st = hum:GetState().Name,
+			run = s.baseWs > 0 and ws >= s.baseWs * 1.2 or false,
 		})
 		s.last = { pos = pos, yaw = yaw }
 		s.lastT = os.clock()
@@ -546,12 +801,10 @@ end
 
 local function bindTool(tool)
 	if not tool:IsA("Tool") then return end
-	rconn(tool.Activated:Connect(guard(function()
-		Recorder.push("tool", { ph = "use", name = tool.Name })
-	end)))
+	rconn(tool.Activated:Connect(guard(function() Recorder.push("tool", { ph = "use", name = tool.Name }) end)))
 end
 
-function Recorder.bindCharacter(char)
+function Recorder.bindCharacter(char, prof)
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	if not hum then return end
 	local s = Recorder.session
@@ -564,19 +817,20 @@ function Recorder.bindCharacter(char)
 		elseif new == Enum.HumanoidStateType.Landed then
 			local air = s.jumpT and r2(os.clock() - s.jumpT) or nil
 			s.jumpT = nil
-			Recorder.push("jump", { ph = "land", air = air }) -- duração no ar é inferida
+			Recorder.push("jump", { ph = "land", air = air })
 		end
 	end)))
+	rconn(hum:GetPropertyChangedSignal("WalkSpeed"):Connect(guard(function() Recorder.sample(true) end)))
 	rconn(hum.Died:Connect(guard(function() Recorder.stop("personagem morreu", true) end)))
 	local animator = hum:FindFirstChildOfClass("Animator")
 	if animator then
 		rconn(animator.AnimationPlayed:Connect(guard(function(track)
 			local id = track.Animation and track.Animation.AnimationId or ""
 			local pri = track.Priority.Name
-			local rp = (pri == "Action" or pri == "Action2" or pri == "Action3" or pri == "Action4")
-				and id ~= "" or false
-			Recorder.push("anim", { ph = "start", id = id, name = track.Name, pri = pri,
-				sp = r2(track.Speed), loop = track.Looped, rp = rp })
+			local action = (pri == "Action" or pri == "Action2" or pri == "Action3" or pri == "Action4")
+			local rp = id ~= "" and (action or prof.customLoco) or false
+			Recorder.push("anim", { ph = "start", id = id, name = track.Name, pri = pri, sp = r2(track.Speed),
+				loop = track.Looped, rp = rp })
 			local c
 			c = track.Stopped:Connect(function()
 				if c then c:Disconnect() end
@@ -596,6 +850,15 @@ function Recorder.bindCharacter(char)
 		for _, t in ipairs(bp:GetChildren()) do bindTool(t) end
 		rconn(bp.ChildAdded:Connect(guard(bindTool)))
 	end
+	for _, pair in ipairs({ { LP, "Player" }, { char, "Char" }, { hum, "Humanoid" } }) do
+		local inst, label = pair[1], pair[2]
+		rconn(inst.AttributeChanged:Connect(guard(function(name)
+			local v = inst:GetAttribute(name)
+			if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
+				Recorder.push("attr", { who = label, name = name, val = v, sp = isSprintName(name) or nil })
+			end
+		end)))
+	end
 end
 
 function Recorder.start()
@@ -603,7 +866,10 @@ function Recorder.start()
 	if Playback.state ~= "idle" then return false, "pare o Playback antes de gravar" end
 	local hum, hrp, char = getChar()
 	if not (hum and hrp) or hum.Health <= 0 then return false, "personagem indisponível" end
-	local s = { t0 = os.clock(), seq = 0, events = {}, lastT = os.clock(), holds = {}, keys = {} }
+	if not Scan.profile then pcall(Scan.run, false) end
+	local prof = Scan.profile or { sprintKeys = {}, customLoco = false }
+	local s = { t0 = os.clock(), seq = 0, events = {}, lastT = os.clock(), keys = {}, holds = {}, touches = {},
+		customLoco = prof.customLoco }
 	Recorder.session, Recorder.active, Recorder.errors = s, true, 0
 	Recorder.sample(true)
 
@@ -614,40 +880,51 @@ function Recorder.start()
 		acc = 0
 		Recorder.sample(false)
 	end)))
-	Recorder.bindCharacter(char)
+	Recorder.bindCharacter(char, prof)
 	rconn(LP.CharacterRemoving:Connect(guard(function() Recorder.stop("respawn", true) end)))
 
+	local function isSprintKey(key) return prof.sprintKeys[key] or key == "LeftShift" or key == "RightShift" end
 	rconn(UIS.InputBegan:Connect(guard(function(input, gp)
-		if gp then return end
-		if input.UserInputType == Enum.UserInputType.Keyboard then
+		if UIS:GetFocusedTextBox() then return end
+		local ut = input.UserInputType
+		if ut == Enum.UserInputType.Keyboard then
 			local key = input.KeyCode.Name
 			if SKIP_KEYS[key] then return end
+			if gp and not isSprintKey(key) then return end
 			s.keys[key] = os.clock()
-			Recorder.push("input", { ph = "down", key = key })
-		elseif input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			task.defer(guard(function()
-				local target = LP:GetMouse().Target
-				local cd = target and findDetector(target)
-				if cd then Recorder.push("click", { ref = makeRef(cd) }) end
-			end))
-		end
-	end)))
-	rconn(UIS.InputEnded:Connect(guard(function(input, gp)
-		if input.UserInputType == Enum.UserInputType.Keyboard then
-			local key = input.KeyCode.Name
-			if s.keys[key] then
-				Recorder.push("input", { ph = "up", key = key, held = r2(os.clock() - s.keys[key]) })
-				s.keys[key] = nil
+			Recorder.push("input", { ph = "down", key = key, sp = isSprintKey(key) or nil })
+		elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.Touch then
+			local btn = buttonAt(input.Position)
+			if btn then
+				s.touches[input] = { ref = makeRef(btn), t = os.clock(), sp = isSprintName(btn.Name) or nil }
+				Recorder.push("gui", { ph = "down", ref = s.touches[input].ref, sp = s.touches[input].sp })
+			elseif not gp then
+				task.defer(guard(function()
+					local target = LP:GetMouse().Target
+					local cd = target and findDetector(target)
+					if cd then Recorder.push("click", { ref = makeRef(cd) }) end
+				end))
 			end
 		end
 	end)))
-
+	rconn(UIS.InputEnded:Connect(guard(function(input)
+		local ut = input.UserInputType
+		if ut == Enum.UserInputType.Keyboard then
+			local key = input.KeyCode.Name
+			if s.keys[key] then
+				Recorder.push("input", { ph = "up", key = key, held = r2(os.clock() - s.keys[key]), sp = isSprintKey(key) or nil })
+				s.keys[key] = nil
+			end
+		elseif s.touches[input] then
+			local tc = s.touches[input]
+			s.touches[input] = nil
+			Recorder.push("gui", { ph = "up", ref = tc.ref, held = r2(os.clock() - tc.t), sp = tc.sp })
+		end
+	end)))
 	rconn(PPS.PromptButtonHoldBegan:Connect(guard(function(prompt, plr)
 		if plr ~= LP then return end
 		s.holds[prompt] = os.clock()
-		Recorder.push("prompt", { ph = "hold_begin", ref = makeRef(prompt), hold = prompt.HoldDuration,
-			action = prompt.ActionText, obj = prompt.ObjectText })
+		Recorder.push("prompt", { ph = "hold_begin", ref = makeRef(prompt), hold = prompt.HoldDuration })
 	end)))
 	rconn(PPS.PromptButtonHoldEnded:Connect(guard(function(prompt, plr)
 		if plr ~= LP then return end
@@ -660,7 +937,7 @@ function Recorder.start()
 		Recorder.push("prompt", { ph = "trigger", ref = makeRef(prompt), hold = prompt.HoldDuration,
 			action = prompt.ActionText, obj = prompt.ObjectText })
 	end)))
-	N("Gravação iniciada", "Capturando movimentos e eventos.")
+	N("Gravação iniciada", prof.customLoco and "Animação personalizada detectada: gravando todas." or "Gravando movimentos e ações.")
 	if UI.onRecState then UI.onRecState() end
 	return true
 end
@@ -669,8 +946,7 @@ function Recorder.finish(reason, interrupted)
 	local s = Recorder.session
 	Recorder.active = false
 	for _, c in ipairs(Recorder.conns) do pcall(function() c:Disconnect() end) end
-	Recorder.conns = {}
-	Recorder.session = nil
+	Recorder.conns, Recorder.session = {}, nil
 	if not s then return end
 	local dur = os.clock() - s.t0
 	if #s.events < 2 then
@@ -681,9 +957,9 @@ function Recorder.finish(reason, interrupted)
 			N("Erro ao salvar", tostring(err), 5)
 		else
 			if err then N("Aviso", tostring(err), 5) end
-			N(interrupted and "Gravação interrompida" or "Gravação finalizada",
-				string.format("%s salva (%s, %d eventos)%s", meta.name, fmt(meta.dur), meta.n,
-					interrupted and (" — " .. reason) or ""), 4)
+			N(interrupted and "Gravação interrompida" or "Rota salva",
+				string.format("%s • %s • %d eventos%s%s", meta.name, fmt(meta.dur), meta.n,
+					meta.run and " • correr detectado" or "", interrupted and (" • " .. reason) or ""), 4)
 			UI.sel = meta.id
 		end
 	end
@@ -706,6 +982,7 @@ end
 
 ------------------------------------------------------------------ PLAYBACK
 Playback = { state = "idle", speed = 1, startPct = 0, ctx = nil, id = nil, summary = "Nenhuma reprodução ainda." }
+UI.opts = { loop = false, countdown = true, tele = true, sprint = true, anims = true, tol = 8 }
 
 local function sampleMove(ctx, t, advance)
 	local m = ctx.moves
@@ -723,13 +1000,8 @@ local function sampleMove(ctx, t, advance)
 	local ya, yb = a.r or 0, b.r or 0
 	return { pos = P(a):Lerp(P(b), f), yaw = ya + angDiff(yb, ya) * f, ws = a.d.ws or 16, v = a.d.v or 0 }
 end
-
 local function snapTo(ctx, tgt)
-	local _, hrp = getChar()
-	if not hrp then return end
-	pcall(function()
-		ctx.char:PivotTo(CFrame.new(tgt.pos) * CFrame.Angles(0, math.rad(tgt.yaw), 0))
-	end)
+	pcall(function() ctx.char:PivotTo(CFrame.new(tgt.pos) * CFrame.Angles(0, math.rad(tgt.yaw), 0)) end)
 end
 
 function Playback.start(id)
@@ -744,25 +1016,34 @@ function Playback.start(id)
 	local moves = {}
 	for _, e in ipairs(ev) do if e.k == "move" then moves[#moves + 1] = e end end
 	if #moves == 0 then N("Rota inválida", "Sem eventos de movimento.") return end
+	if meta.place and meta.place ~= game.PlaceId then N("Aviso", "Rota gravada em outro jogo.", 4) end
+	local opts = {}
+	for k, v in pairs(UI.opts) do opts[k] = v end
 	local dur = meta.dur
 	local t0 = dur * (Playback.startPct / 100)
 	local ei = 1
 	while ei <= #ev and ev[ei].t < t0 do ei += 1 end
 	local ctx = {
-		ev = ev, ei = ei, moves = moves, mi = 1, t = t0, dur = dur, hum = hum, char = char,
-		tracks = {}, ok = 0, fail = 0, info = 0, hold = 0, corr = 0, errs = {}, speed = Playback.speed,
+		ev = ev, ei = ei, moves = moves, mi = 1, t = t0, t0 = t0, dur = dur, hum = hum, char = char, opts = opts,
+		tracks = {}, ok = 0, fail = 0, info = 0, hold = 0, corr = 0, loops = 0, errs = {}, speed = Playback.speed,
 		savedWs = hum.WalkSpeed, animator = hum:FindFirstChildOfClass("Animator"),
 	}
 	local c = Serializer.analyze(ev)
 	if c.na > 0 then N("Compatibilidade", c.na .. " evento(s) incompatíveis serão ignorados.", 4) end
 	local s0 = sampleMove(ctx, t0, true)
-	if s0 and (hrp.Position - s0.pos).Magnitude > CFG.tolerance then snapTo(ctx, s0) end
+	if s0 and (hrp.Position - s0.pos).Magnitude > opts.tol then
+		if opts.tele then snapTo(ctx, s0) else N("Longe do início", "Vá até o ponto inicial da rota.", 4) end
+	end
+	if opts.countdown then
+		ctx.wait = os.clock() + 3
+		N("Playback", "Começa em 3s • " .. Playback.speed .. "x", 3)
+	end
 	Playback.ctx, Playback.id, Playback.state = ctx, id, "playing"
 	Playback.conn = RunService.Heartbeat:Connect(function(dt)
 		local ok, e = pcall(Playback.step, dt)
-		if not ok then Playback.stop("erro interno: " .. tostring(e)) end
+		if not ok then Playback.stop("erro interno") end
 	end)
-	N("Playback iniciado", meta.name .. " • " .. Playback.speed .. "x")
+	if not opts.countdown then N("Playback iniciado", meta.name .. " • " .. Playback.speed .. "x") end
 end
 
 function Playback.step(dt)
@@ -771,18 +1052,22 @@ function Playback.step(dt)
 	local hum, hrp, char = getChar()
 	if not (hum and hrp) or hum.Health <= 0 then Playback.stop("personagem indisponível") return end
 	ctx.hum, ctx.char = hum, char
+	if ctx.wait then
+		if os.clock() < ctx.wait then return end
+		ctx.wait = nil
+	end
+	local sp, tol = ctx.speed, ctx.opts.tol
 	local tgt = sampleMove(ctx, ctx.t, true)
-	local sp = ctx.speed
 	if tgt then
 		local flat = Vector3.new(hrp.Position.X - tgt.pos.X, 0, hrp.Position.Z - tgt.pos.Z).Magnitude
 		pcall(function() hum.WalkSpeed = math.max(tgt.ws * sp, 4) end)
-		if flat > CFG.tolerance or ctx.hold > 2 then
+		if flat > tol or ctx.hold > 2 then
 			snapTo(ctx, tgt)
 			ctx.corr += 1
 			ctx.hold = 0
 			if ctx.corr <= 3 then N("Desvio corrigido", string.format("%.0f studs fora da rota.", flat), 2) end
 		elseif flat > 3 and ctx.t < ctx.dur then
-			ctx.hold += dt -- sincroniza com o estado real: espera o personagem alcançar
+			ctx.hold += dt -- espera o personagem real alcançar
 		else
 			ctx.hold = 0
 			ctx.t += dt * sp
@@ -805,21 +1090,33 @@ function Playback.step(dt)
 			elseif st == "info" then ctx.info += 1
 			else
 				ctx.fail += 1
-				if #ctx.errs < 5 then
+				if #ctx.errs < 4 then
 					ctx.errs[#ctx.errs + 1] = msg or "falha"
 					N("Não reproduzível", tostring(msg), 3)
 				end
 			end
 		end
 	end
-	if ctx.t >= ctx.dur and ctx.ei > #ev then Playback.stop("concluído") end
+	if ctx.t >= ctx.dur and ctx.ei > #ev then
+		if ctx.opts.loop then
+			ctx.loops += 1
+			for _, tr in pairs(ctx.tracks) do pcall(function() tr:Stop(0.1) end) end
+			ctx.tracks = {}
+			ctx.t, ctx.mi, ctx.ei, ctx.hold = ctx.t0, 1, 1, 0
+			while ctx.ei <= #ev and ev[ctx.ei].t < ctx.t0 do ctx.ei += 1 end
+			local s0 = sampleMove(ctx, ctx.t0, true)
+			if s0 and ctx.opts.tele then snapTo(ctx, s0) end
+			ctx.wait = os.clock() + 1
+		else
+			Playback.stop("concluído")
+		end
+	end
 end
 
 function Playback.pause()
 	if Playback.state ~= "playing" then return end
 	Playback.state = "paused"
-	local _, hrp = getChar()
-	local hum = Playback.ctx and Playback.ctx.hum
+	local hum, hrp = getChar()
 	if hum and hrp then pcall(function() hum:MoveTo(hrp.Position) end) end
 	N("Playback pausado", fmt(Playback.ctx.t))
 end
@@ -840,15 +1137,13 @@ function Playback.stop(reason, quiet)
 			if hrp then ctx.hum:MoveTo(hrp.Position) end
 		end)
 		for _, tr in pairs(ctx.tracks) do pcall(function() tr:Stop(0.1) end) end
-		Playback.summary = string.format("%s\nAções executadas: %d\nFalhas/incompatíveis: %d\nApenas informativos: %d\nCorreções de desvio: %d",
-			tostring(reason), ctx.ok, ctx.fail, ctx.info, ctx.corr)
+		Playback.summary = string.format("%s\nExecutadas: %d • Falhas: %d • Informativas: %d\nCorreções de desvio: %d • Voltas: %d",
+			tostring(reason), ctx.ok, ctx.fail, ctx.info, ctx.corr, ctx.loops)
 		if not quiet then
-			local done = reason == "concluído"
-			N(done and "Playback concluído" or "Reprodução interrompida",
+			N(reason == "concluído" and "Playback concluído" or "Reprodução interrompida",
 				string.format("%s • ok %d • falhas %d", tostring(reason), ctx.ok, ctx.fail), 4)
 		end
 	end
-	if alive and UI.onPbState then UI.onPbState() end
 end
 function Playback.restart()
 	local id = Playback.id or UI.sel
@@ -859,22 +1154,14 @@ end
 ------------------------------------------------------------------ UI
 History.load()
 if not Storage.persistent then
-	task.defer(function()
-		N("Atenção", "Executor sem arquivos: rotas só ficam na memória desta sessão.", 6)
-	end)
+	task.defer(function() N("Atenção", "Executor sem arquivos: rotas só ficam na memória desta sessão.", 6) end)
 end
 
 local Window = Rayfield:CreateWindow({
-	Name = "AKZ ROTAS",
-	LoadingTitle = "AKZ ROTAS",
-	LoadingSubtitle = "Gravador de Rotas + Playback",
-	ConfigurationSaving = { Enabled = false },
-	Discord = { Enabled = false },
-	KeySystem = false,
+	Name = "AKZ ROTAS", LoadingTitle = "AKZ ROTAS", LoadingSubtitle = "Gravador + Playback",
+	ConfigurationSaving = { Enabled = false }, Discord = { Enabled = false }, KeySystem = false,
 })
-
-UI.sel, UI.query, UI.sort, UI.map = nil, "", "Data (recente)", {}
-UI.page, UI.filter, UI.newName, UI.importName = 1, "Todos", "", ""
+UI.sel, UI.map, UI.newName, UI.section = nil, {}, "", "Jogo"
 local armed = {}
 local function confirm(key, msg)
 	if armed[key] and os.clock() - armed[key] < 5 then armed[key] = nil return true end
@@ -890,47 +1177,35 @@ local function safe(f)
 end
 local function pick(o) return type(o) == "table" and o[1] or o end
 
--- Aba 1: Gravador
-local TabRec = Window:CreateTab("Gravador")
-TabRec:CreateSection("Controle da gravação")
+-- Aba 1: Gravar (com LER JOGO em destaque)
+local TabRec = Window:CreateTab("Gravar")
+local okLbl = pcall(function()
+	TabRec:CreateLabel("🔴 LER JOGO — diagnóstico do que o jogo expõe (andar, correr, botões, remotes)", nil, Color3.fromRGB(220, 40, 40), true)
+end)
+if not okLbl then TabRec:CreateLabel("🔴 LER JOGO — diagnóstico do jogo") end
+TabRec:CreateButton({ Name = "🔴 LER JOGO", Callback = safe(function() Scan.runAsync() end) })
+local scanPara = TabRec:CreateParagraph({ Title = "Resultado da leitura", Content = Scan.summary })
+TabRec:CreateSection("Gravação")
 local recPara = TabRec:CreateParagraph({ Title = "Estado", Content = "Pronto para gravar." })
 local recBtn
-recBtn = TabRec:CreateButton({
-	Name = "● Gravar",
-	Callback = safe(function()
-		if Recorder.active then
-			Recorder.stop("manual", false)
-		else
-			local ok, err = Recorder.start()
-			if not ok then N("Não foi possível gravar", tostring(err), 4) end
-		end
-	end),
-})
-TabRec:CreateButton({
-	Name = "Cancelar gravação (descarta)",
-	Callback = safe(function()
-		if not Recorder.active then N("Cancelar", "Nenhuma gravação ativa.") return end
-		if confirm("cancel", "Descartar a gravação atual?") then Recorder.cancel() end
-	end),
-})
-TabRec:CreateSection("Como funciona")
-TabRec:CreateParagraph({ Title = "Dica", Content = "Gravar → Parar salva a rota automaticamente no Histórico. Se o personagem morrer ou renascer, a gravação é salva como incompleta." })
+recBtn = TabRec:CreateButton({ Name = "● Gravar", Callback = safe(function()
+	if Recorder.active then
+		Recorder.stop("manual", false)
+	else
+		local ok, err = Recorder.start()
+		if not ok then N("Não foi possível gravar", tostring(err), 4) end
+	end
+end) })
+TabRec:CreateButton({ Name = "Cancelar gravação (descarta)", Callback = safe(function()
+	if not Recorder.active then N("Cancelar", "Nenhuma gravação ativa.") return end
+	if confirm("cancel", "Descartar a gravação atual?") then Recorder.cancel() end
+end) })
 
--- Aba 2: Histórico
-local TabHist = Window:CreateTab("Histórico")
-TabHist:CreateSection("Rotas gravadas")
-local countLbl = TabHist:CreateLabel("Rotas: 0")
-TabHist:CreateInput({
-	Name = "Pesquisar por nome", PlaceholderText = "digite para filtrar", RemoveTextAfterFocusLost = false,
-	Callback = safe(function(t) UI.query = t or "" UI.refresh() end),
-})
-TabHist:CreateDropdown({
-	Name = "Ordenar", Options = { "Data (recente)", "Data (antiga)", "Nome (A-Z)", "Duração (maior)", "Duração (menor)" },
-	CurrentOption = { "Data (recente)" }, MultipleOptions = false, Flag = "akzr_sort",
-	Callback = safe(function(o) UI.sort = pick(o) UI.refresh() end),
-})
-local routeDD = TabHist:CreateDropdown({
-	Name = "Rota (selecione)", Options = { "(nenhuma rota)" }, CurrentOption = { "(nenhuma rota)" },
+-- Aba 2: Rotas
+local TabRoutes = Window:CreateTab("Rotas")
+local countLbl = TabRoutes:CreateLabel("Rotas: 0")
+local routeDD = TabRoutes:CreateDropdown({
+	Name = "Selecione a rota", Options = { "(nenhuma rota)" }, CurrentOption = { "(nenhuma rota)" },
 	MultipleOptions = false, Flag = "akzr_route",
 	Callback = safe(function(o)
 		local id = UI.map[pick(o)]
@@ -938,26 +1213,24 @@ local routeDD = TabHist:CreateDropdown({
 		UI.details()
 	end),
 })
-local detPara = TabHist:CreateParagraph({ Title = "Detalhes da rota", Content = "Grave sua primeira rota na aba Gravador: toque em Gravar, mova o personagem e toque em Parar." })
-TabHist:CreateButton({ Name = "▶ Reproduzir", Callback = safe(function()
+local detPara = TabRoutes:CreateParagraph({ Title = "Detalhes", Content = "Grave sua primeira rota na aba Gravar." })
+TabRoutes:CreateButton({ Name = "▶ Reproduzir", Callback = safe(function()
 	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
 	Playback.start(UI.sel)
 end) })
-TabHist:CreateInput({
-	Name = "Novo nome", PlaceholderText = "nome da rota", RemoveTextAfterFocusLost = false,
-	Callback = safe(function(t) UI.newName = t or "" end),
-})
-TabHist:CreateButton({ Name = "Renomear", Callback = safe(function()
+TabRoutes:CreateInput({ Name = "Novo nome", PlaceholderText = "nome da rota", RemoveTextAfterFocusLost = false,
+	Callback = safe(function(t) UI.newName = t or "" end) })
+TabRoutes:CreateButton({ Name = "Renomear", Callback = safe(function()
 	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
 	local ok, err = History.rename(UI.sel, UI.newName)
 	if ok then N("Rota renomeada", History.byId[UI.sel].name) UI.refresh() else N("Erro ao renomear", tostring(err), 4) end
 end) })
-TabHist:CreateButton({ Name = "Duplicar", Callback = safe(function()
+TabRoutes:CreateButton({ Name = "Duplicar", Callback = safe(function()
 	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
 	local c, err = History.duplicate(UI.sel)
 	if c then UI.sel = c.id N("Rota duplicada", c.name) UI.refresh() else N("Erro ao duplicar", tostring(err), 4) end
 end) })
-TabHist:CreateButton({ Name = "Excluir", Callback = safe(function()
+TabRoutes:CreateButton({ Name = "Excluir", Callback = safe(function()
 	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
 	if Playback.state ~= "idle" and Playback.id == UI.sel then N("Bloqueado", "Rota em reprodução.") return end
 	local nm = History.byId[UI.sel].name
@@ -966,109 +1239,79 @@ TabHist:CreateButton({ Name = "Excluir", Callback = safe(function()
 		if ok then N("Rota excluída", nm) UI.sel = nil UI.refresh() else N("Erro ao excluir", tostring(err), 4) end
 	end
 end) })
-TabHist:CreateSection("Exportar / Importar")
-TabHist:CreateButton({ Name = "Exportar rota selecionada", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha uma rota na lista.") return end
-	local f, err = History.export(UI.sel)
-	if f then N("Rota exportada", f .. (Compat.clip and " (copiada também)" or ""), 5) else N("Erro ao exportar", tostring(err), 4) end
-end) })
-TabHist:CreateInput({
-	Name = "Arquivo para importar", PlaceholderText = "ex: export_abc123.json", RemoveTextAfterFocusLost = false,
-	Callback = safe(function(t) UI.importName = t or "" end),
-})
-TabHist:CreateButton({ Name = "Importar", Callback = safe(function()
-	local m, err = History.import(UI.importName)
-	if m then UI.sel = m.id N("Rota importada", m.name) UI.refresh() else N("Erro ao importar", tostring(err), 4) end
-end) })
 
 -- Aba 3: Playback
 local TabPb = Window:CreateTab("Playback")
-TabPb:CreateSection("Controles")
 local pbPara = TabPb:CreateParagraph({ Title = "Estado", Content = "Parado." })
-TabPb:CreateDropdown({
-	Name = "Velocidade", Options = { "0.25x", "0.5x", "0.75x", "1x", "1.5x", "2x" },
+TabPb:CreateDropdown({ Name = "Velocidade", Options = { "0.25x", "0.5x", "0.75x", "1x", "1.5x", "2x", "3x" },
 	CurrentOption = { "1x" }, MultipleOptions = false, Flag = "akzr_speed",
 	Callback = safe(function(o)
 		local v = tonumber((tostring(pick(o)):gsub("x", ""))) or 1
 		Playback.speed = v
-		if Playback.ctx then
-			Playback.ctx.speed = v
-			N("Velocidade", v .. "x")
-		end
-	end),
-})
-TabPb:CreateSlider({
-	Name = "Ponto de início", Range = { 0, 95 }, Increment = 5, Suffix = "%", CurrentValue = 0, Flag = "akzr_start",
-	Callback = safe(function(v) Playback.startPct = v end),
-})
+		if Playback.ctx then Playback.ctx.speed = v N("Velocidade", v .. "x") end
+	end) })
+TabPb:CreateSlider({ Name = "Ponto de início", Range = { 0, 95 }, Increment = 5, Suffix = "%", CurrentValue = 0,
+	Flag = "akzr_start", Callback = safe(function(v) Playback.startPct = v end) })
 TabPb:CreateButton({ Name = "▶ Reproduzir selecionada", Callback = safe(function()
-	if not UI.sel then N("Selecione uma rota", "Escolha na aba Histórico.") return end
+	if not UI.sel then N("Selecione uma rota", "Escolha na aba Rotas.") return end
 	Playback.start(UI.sel)
 end) })
 TabPb:CreateButton({ Name = "⏸ Pausar", Callback = safe(function() Playback.pause() end) })
 TabPb:CreateButton({ Name = "⏯ Continuar", Callback = safe(function() Playback.resume() end) })
 TabPb:CreateButton({ Name = "■ Parar", Callback = safe(function() Playback.stop("parado pelo usuário") end) })
 TabPb:CreateButton({ Name = "↺ Reiniciar", Callback = safe(function() Playback.restart() end) })
+TabPb:CreateSection("Opções")
+local function toggle(name, key, default, flag)
+	TabPb:CreateToggle({ Name = name, CurrentValue = default, Flag = flag,
+		Callback = safe(function(v) UI.opts[key] = v end) })
+end
+toggle("Repetir em loop", "loop", false, "akzr_loop")
+toggle("Contagem de 3s antes de começar", "countdown", true, "akzr_cd")
+toggle("Ir ao ponto inicial (teleporte)", "tele", true, "akzr_tele")
+toggle("Reproduzir correr (tecla/botão)", "sprint", true, "akzr_sprint")
+toggle("Reproduzir animações", "anims", true, "akzr_anims")
+TabPb:CreateDropdown({ Name = "Precisão do trajeto", Options = { "Alta (5)", "Normal (8)", "Livre (15)" },
+	CurrentOption = { "Normal (8)" }, MultipleOptions = false, Flag = "akzr_tol",
+	Callback = safe(function(o) UI.opts.tol = tonumber(tostring(pick(o)):match("%((%d+)%)")) or 8 end) })
 local sumPara = TabPb:CreateParagraph({ Title = "Resumo da última reprodução", Content = Playback.summary })
 
--- Aba 4: Linha do tempo
-local TabTl = Window:CreateTab("Detalhes")
-TabTl:CreateSection("Linha do tempo da rota selecionada")
-TabTl:CreateDropdown({
-	Name = "Filtro", Options = { "Todos", "Movimento", "Saltos", "Animações", "Interações", "Incompatíveis" },
-	CurrentOption = { "Todos" }, MultipleOptions = false, Flag = "akzr_filter",
-	Callback = safe(function(o) UI.filter = pick(o) UI.page = 1 UI.timeline() end),
-})
-TabTl:CreateSlider({
-	Name = "Página", Range = { 1, 50 }, Increment = 1, Suffix = "", CurrentValue = 1, Flag = "akzr_page",
-	Callback = safe(function(v) UI.page = v UI.timeline() end),
-})
-local tlPara = TabTl:CreateParagraph({ Title = "Eventos", Content = "Selecione uma rota no Histórico." })
-
--- Aba 5: Sistema
-local TabSys = Window:CreateTab("Sistema")
-TabSys:CreateSection("Compatibilidade do ambiente")
-TabSys:CreateParagraph({ Title = "Recursos detectados", Content = Compat.report() })
-TabSys:CreateSection("Ajustes")
-TabSys:CreateSlider({
-	Name = "Intervalo de amostragem", Range = { 5, 50 }, Increment = 5, Suffix = " ×0.01s",
-	CurrentValue = math.floor(CFG.sampleInterval * 100), Flag = "akzr_si",
-	Callback = safe(function(v) CFG.sampleInterval = v / 100 History.save() end),
-})
-TabSys:CreateSlider({
-	Name = "Tolerância de desvio", Range = { 3, 20 }, Increment = 1, Suffix = " studs",
-	CurrentValue = CFG.tolerance, Flag = "akzr_tol",
-	Callback = safe(function(v) CFG.tolerance = v History.save() end),
-})
-TabSys:CreateButton({ Name = "Fechar e limpar o menu", Callback = safe(function()
+-- Aba 4: Jogo (relatório completo)
+local TabGame = Window:CreateTab("Jogo")
+TabGame:CreateButton({ Name = "🔴 LER JOGO (de novo)", Callback = safe(function() Scan.runAsync() end) })
+local secDD = TabGame:CreateDropdown({ Name = "Seção do relatório", Options = { "Jogo" }, CurrentOption = { "Jogo" },
+	MultipleOptions = false, Flag = "akzr_sec", Callback = safe(function(o) UI.section = pick(o) UI.showSection() end) })
+local secPara = TabGame:CreateParagraph({ Title = "Relatório", Content = "Toque em LER JOGO para gerar." })
+TabGame:CreateButton({ Name = "Copiar relatório completo", Callback = safe(function()
+	if #Scan.order == 0 then N("Relatório", "Leia o jogo primeiro.") return end
+	if Compat.clip then pcall(setclipboard, Scan.reportText()) N("Relatório", "Copiado.") else
+		N("Relatório", "Sem área de transferência. Arquivo: " .. CFG.folder .. "/diagnostico_" .. game.PlaceId .. ".txt", 5)
+	end
+end) })
+TabGame:CreateButton({ Name = "Fechar e limpar o menu", Callback = safe(function()
 	if genv.AKZR_CLEANUP then genv.AKZR_CLEANUP() end
 end) })
 
 ------------------------------------------------------------------ UI LOGIC
 local function cardLabel(m)
-	return string.format("%s • %s • %s • %d ev • %s #%s", m.name, os.date("%d/%m %H:%M", m.created),
-		fmt(m.dur), m.n or 0, (m.partial and "incompleta") or ((m.na or 0) > 0 and "parcial") or "ok", m.id:sub(1, 3))
+	return string.format("%s • %s • %d ev • %s%s #%s", m.name, fmt(m.dur), m.n or 0,
+		(m.partial and "incompleta") or ((m.na or 0) > 0 and "parcial") or "ok", m.run and " • correr" or "", m.id:sub(1, 3))
 end
-
 function UI.details()
 	local m = UI.sel and History.byId[UI.sel]
 	if not m then
-		pcall(function() detPara:Set({ Title = "Detalhes da rota", Content = "Nenhuma rota selecionada." }) end)
+		pcall(function() detPara:Set({ Title = "Detalhes", Content = "Nenhuma rota selecionada." }) end)
 		return
 	end
-	History.getEvents(m.id) -- atualiza análise de compatibilidade
-	local txt = string.format(
-		"Nome: %s\nData: %s\nDuração: %s\nEventos: %d\nDeslocamentos: %d • Saltos: %d • Animações: %d • Interações: %d\nCompatibilidade: %d%% (%d incompatíveis)\nEstado: %s%s",
-		m.name, os.date("%d/%m/%Y %H:%M", m.created), fmt(m.dur), m.n or 0, m.moves or 0, m.jumps or 0,
-		m.anims or 0, m.inter or 0, compatPct(m), m.na or 0, statusOf(m),
-		m.partial and ("\nMotivo: " .. tostring(m.partial)) or "")
-	pcall(function() detPara:Set({ Title = "Detalhes da rota", Content = txt }) end)
-	UI.timeline()
+	History.getEvents(m.id)
+	local runTxt = m.run and string.format("sim (velocidade %s → %s)", tostring(m.wsMin), tostring(m.wsMax)) or "não"
+	local txt = string.format("Nome: %s\nData: %s\nDuração: %s • Eventos: %d\nSaltos: %d • Interações: %d\nCorrer: %s\nAnimação de andar: %s\nCompatibilidade: %d%%\nEstado: %s%s",
+		m.name, os.date("%d/%m/%Y %H:%M", m.created), fmt(m.dur), m.n or 0, m.jumps or 0, m.inter or 0, runTxt,
+		tostring(m.loco or "padrão"), compatPct(m), statusOf(m), m.partial and ("\nMotivo: " .. tostring(m.partial)) or "")
+	pcall(function() detPara:Set({ Title = "Detalhes", Content = txt }) end)
 end
-
 function UI.refresh()
 	if not alive then return end
-	local items = History.sorted(UI.query, UI.sort)
+	local items = History.sorted()
 	UI.map = {}
 	local labels, selLabel = {}, nil
 	for _, m in ipairs(items) do
@@ -1077,7 +1320,7 @@ function UI.refresh()
 		labels[#labels + 1] = lb
 		if m.id == UI.sel then selLabel = lb end
 	end
-	pcall(function() countLbl:Set(string.format("Rotas: %d (exibindo %d)", #History.list, #items)) end)
+	pcall(function() countLbl:Set("Rotas: " .. #items) end)
 	if #labels == 0 then labels = { "(nenhuma rota)" } end
 	pcall(function() routeDD:Refresh(labels) end)
 	if not selLabel and UI.sel and not History.byId[UI.sel] then UI.sel = nil end
@@ -1085,55 +1328,26 @@ function UI.refresh()
 	if selLabel then pcall(function() routeDD:Set({ selLabel }) end) end
 	UI.details()
 end
-
-local FILTERS = {
-	["Movimento"] = function(e) return e.k == "move" end,
-	["Saltos"] = function(e) return e.k == "jump" end,
-	["Animações"] = function(e) return e.k == "anim" end,
-	["Interações"] = function(e) return Registry.types[e.k].cat == "inter" end,
-	["Incompatíveis"] = function(e) return Adapters.can(e) == "na" end,
-}
-local function detailOf(e)
-	local d = e.d or {}
-	if e.k == "move" then return string.format("pos %.0f, %.0f, %.0f • %s", e.p[1], e.p[2], e.p[3], tostring(d.st))
-	elseif e.k == "jump" then return tostring(d.ph) .. (d.air and (" • ar " .. d.air .. "s (inferido)") or "")
-	elseif e.k == "state" then return tostring(d.from) .. " → " .. tostring(d.to)
-	elseif e.k == "anim" then return tostring(d.ph) .. " " .. tostring(d.name)
-	elseif e.k == "input" then return tostring(d.ph) .. " " .. tostring(d.key)
-	elseif e.k == "prompt" then return tostring(d.ph) .. " " .. tostring(d.ref and d.ref.name)
-	elseif e.k == "click" then return tostring(d.ref and d.ref.name)
-	elseif e.k == "tool" then return tostring(d.ph) .. " " .. tostring(d.name) end
-	return ""
+function UI.showSection()
+	local lines = Scan.sections[UI.section]
+	if not lines then return end
+	local out = {}
+	for i = 1, math.min(#lines, 45) do out[i] = lines[i] end
+	if #lines > 45 then out[#out + 1] = string.format("... +%d linhas (relatório completo no arquivo/cópia)", #lines - 45) end
+	if #out == 0 then out[1] = "(vazio)" end
+	pcall(function() secPara:Set({ Title = UI.section, Content = table.concat(out, "\n") }) end)
 end
-function UI.timeline()
-	if not UI.sel then return end
-	local ev = History.getEvents(UI.sel)
-	if not ev then pcall(function() tlPara:Set({ Title = "Eventos", Content = "Rota indisponível." }) end) return end
-	local flt = FILTERS[UI.filter]
-	local list = {}
-	for _, e in ipairs(ev) do if not flt or flt(e) then list[#list + 1] = e end end
-	local per = 20
-	local pages = math.max(1, math.ceil(#list / per))
-	local pg = math.clamp(UI.page, 1, pages)
-	local lines = {}
-	for i = (pg - 1) * per + 1, math.min(pg * per, #list) do
-		local e = list[i]
-		local st = Adapters.can(e)
-		lines[#lines + 1] = string.format("%s %s %s — %s", st == "ok" and "✓" or (st == "info" and "ℹ" or "✕"),
-			fmt(e.t), Registry.types[e.k].label, detailOf(e))
-	end
-	if #lines == 0 then lines[1] = "(sem eventos neste filtro)" end
-	pcall(function()
-		tlPara:Set({ Title = string.format("Eventos %d • página %d/%d", #list, pg, pages), Content = table.concat(lines, "\n") })
-	end)
+function UI.updateScan()
+	pcall(function() scanPara:Set({ Title = "Resultado da leitura", Content = Scan.summary }) end)
+	pcall(function() secDD:Refresh(Scan.order) end)
+	UI.section = Scan.order[1] or "Jogo"
+	pcall(function() secDD:Set({ UI.section }) end)
+	UI.showSection()
 end
-
 function UI.onRecState()
 	pcall(function() recBtn:Set(Recorder.active and "■ Parar" or "● Gravar") end)
 end
-function UI.onPbState() end
 
--- Atualização leve da interface (sem processar a cada frame)
 local lastTxt = { rec = "", pb = "", sum = "" }
 task.spawn(function()
 	while alive do
@@ -1142,8 +1356,8 @@ task.spawn(function()
 		if Recorder.active and Recorder.session then
 			local s = Recorder.session
 			local hum = getChar()
-			txt = string.format("● GRAVANDO\nTempo: %s\nEventos: %d\nEstado: %s", fmt(os.clock() - s.t0), #s.events,
-				hum and hum:GetState().Name or "-")
+			txt = string.format("● GRAVANDO\nTempo: %s • Eventos: %d\nEstado: %s • Velocidade: %s", fmt(os.clock() - s.t0),
+				#s.events, hum and hum:GetState().Name or "-", hum and tostring(r1(hum.WalkSpeed)) or "-")
 		else
 			txt = "Pronto para gravar."
 		end
@@ -1154,8 +1368,9 @@ task.spawn(function()
 		local pt
 		local c = Playback.ctx
 		if c then
-			pt = string.format("%s\n%s / %s • %sx\nExecutadas: %d • Falhas: %d", Playback.state == "paused" and "⏸ PAUSADO" or "▶ REPRODUZINDO",
-				fmt(c.t), fmt(c.dur), tostring(Playback.speed), c.ok, c.fail)
+			local head = Playback.state == "paused" and "⏸ PAUSADO" or ((c.wait and "⏳ AGUARDANDO") or "▶ REPRODUZINDO")
+			pt = string.format("%s\n%s / %s • %sx\nExecutadas: %d • Falhas: %d", head, fmt(c.t), fmt(c.dur),
+				tostring(Playback.speed), c.ok, c.fail)
 		else
 			pt = "Parado."
 		end
@@ -1184,4 +1399,4 @@ genv.AKZR_CLEANUP = function()
 end
 
 UI.refresh()
-N("AKZ ROTAS", "Pronto. Aba Gravador → toque em Gravar.", 4)
+N("AKZ ROTAS v2", "Dica: toque em LER JOGO antes de gravar.", 4)
