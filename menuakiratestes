@@ -1,443 +1,420 @@
--- ======================================================================== --
--- GRAVADOR DE ROTA PARA O DRIP AUTO PARKOUR (COM TESTE E CORREÇÃO)
--- Menu flutuante com botão redondo arrastável
--- ======================================================================== --
+-- Gravador Drip v2 — logo redonda arrastável + menu próprio
+-- Grava a rota (CFrame, velocidade, estado), testa e gera o código para copiar.
+
+--[[ === SERVIÇOS E LIMPEZA === ]]
+local genv
+do
+    local ok, g = pcall(function() return getgenv() end)
+    genv = (ok and type(g) == "table") and g or _G
+end
+if type(genv.DripRecorderCleanup) == "function" then pcall(genv.DripRecorderCleanup) end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
+local function cam() return workspace.CurrentCamera end
 
--- ===== GUI PRINCIPAL =====
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "PathRecorderGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
+local CoreGui
+pcall(function() CoreGui = game:GetService("CoreGui") end)
 
--- ===== BOTÃO FLUTUANTE REDONDO (DRAGGABLE) =====
-local FloatButton = Instance.new("TextButton", ScreenGui)
-FloatButton.Name = "FloatButton"
-FloatButton.Size = UDim2.new(0, 60, 0, 60)
-FloatButton.Position = UDim2.new(0, 30, 0.5, -30)
-FloatButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-FloatButton.Text = "🎬"
-FloatButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-FloatButton.TextSize = 28
-FloatButton.Font = Enum.Font.GothamBold
-FloatButton.BorderSizePixel = 0
-FloatButton.Active = true
-FloatButton.AutoButtonColor = false
+--[[ === PALETA E HELPERS === ]]
+local C = {
+    bg = Color3.fromRGB(18, 18, 24), panel = Color3.fromRGB(28, 28, 38),
+    green = Color3.fromRGB(34, 197, 94), red = Color3.fromRGB(239, 68, 68),
+    redDark = Color3.fromRGB(153, 27, 27), blue = Color3.fromRGB(59, 130, 246),
+    cyan = Color3.fromRGB(34, 211, 238), gray = Color3.fromRGB(52, 52, 68),
+    text = Color3.fromRGB(237, 237, 245), muted = Color3.fromRGB(150, 150, 170),
+}
 
-local FloatCorner = Instance.new("UICorner", FloatButton)
-FloatCorner.CornerRadius = UDim.new(1, 0)
-
-local FloatStroke = Instance.new("UIStroke", FloatButton)
-FloatStroke.Color = Color3.fromRGB(0, 170, 0)
-FloatStroke.Thickness = 2
-
--- ===== JANELA DO MENU =====
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 220, 0, 220)
-MainFrame.Position = UDim2.new(0, 30, 0.5, -110)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Visible = false
-
-local UICorner = Instance.new("UICorner", MainFrame)
-UICorner.CornerRadius = UDim.new(0, 10)
-
-local MainStroke = Instance.new("UIStroke", MainFrame)
-MainStroke.Color = Color3.fromRGB(0, 170, 0)
-MainStroke.Thickness = 1
-
--- Barra de título arrastável do menu
-local TitleBar = Instance.new("Frame", MainFrame)
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-TitleBar.BorderSizePixel = 0
-TitleBar.Active = true
-
-local TitleBarCorner = Instance.new("UICorner", TitleBar)
-TitleBarCorner.CornerRadius = UDim.new(0, 10)
-
-local Title = Instance.new("TextLabel", TitleBar)
-Title.Size = UDim2.new(1, -40, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.GothamBold
-Title.Text = "GRAVADOR DRIP"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 13
-Title.TextXAlignment = Enum.TextXAlignment.Left
-
--- Botão de fechar
-local CloseBtn = Instance.new("TextButton", TitleBar)
-CloseBtn.Size = UDim2.new(0, 25, 0, 25)
-CloseBtn.Position = UDim2.new(1, -30, 0, 2)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.TextSize = 12
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.BorderSizePixel = 0
-local CloseCorner = Instance.new("UICorner", CloseBtn)
-CloseCorner.CornerRadius = UDim.new(0, 5)
-
-local StatusLabel = Instance.new("TextLabel", MainFrame)
-StatusLabel.Size = UDim2.new(1, -20, 0, 25)
-StatusLabel.Position = UDim2.new(0, 10, 0, 35)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.Text = "Status: Parado"
-StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-StatusLabel.TextSize = 11
-
--- Botão Gravar / Parar
-local RecordBtn = Instance.new("TextButton", MainFrame)
-RecordBtn.Size = UDim2.new(1, -20, 0, 32)
-RecordBtn.Position = UDim2.new(0, 10, 0, 65)
-RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-RecordBtn.Font = Enum.Font.GothamBold
-RecordBtn.Text = "INICIAR GRAVAÇÃO"
-RecordBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-RecordBtn.TextSize = 11
-RecordBtn.BorderSizePixel = 0
-local BtnCorner = Instance.new("UICorner", RecordBtn)
-BtnCorner.CornerRadius = UDim.new(0, 6)
-
--- Botão Testar Rota Gravada
-local TestBtn = Instance.new("TextButton", MainFrame)
-TestBtn.Size = UDim2.new(1, -20, 0, 32)
-TestBtn.Position = UDim2.new(0, 10, 0, 103)
-TestBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 180)
-TestBtn.Font = Enum.Font.GothamBold
-TestBtn.Text = "▶ TESTAR ROTA GRAVADA"
-TestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-TestBtn.TextSize = 11
-TestBtn.BorderSizePixel = 0
-local TestCorner = Instance.new("UICorner", TestBtn)
-TestCorner.CornerRadius = UDim.new(0, 6)
-
--- Botão Copiar Resultado
-local CopyBtn = Instance.new("TextButton", MainFrame)
-CopyBtn.Size = UDim2.new(1, -20, 0, 32)
-CopyBtn.Position = UDim2.new(0, 10, 0, 141)
-CopyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-CopyBtn.Font = Enum.Font.GothamBold
-CopyBtn.Text = "COPIAR CÓDIGO GERADO"
-CopyBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-CopyBtn.TextSize = 11
-CopyBtn.BorderSizePixel = 0
-local CopyCorner = Instance.new("UICorner", CopyBtn)
-CopyCorner.CornerRadius = UDim.new(0, 6)
-
--- ===== SISTEMA DE ARRASTAR (BOTÃO FLUTUANTE) =====
-local dragging = false
-local dragInput, dragStart, startPos
-
-local function updateDrag(input)
-    local delta = input.Position - dragStart
-    FloatButton.Position = UDim2.new(
-        startPos.X.Scale, startPos.X.Offset + delta.X,
-        startPos.Y.Scale, startPos.Y.Offset + delta.Y
-    )
-    -- Move o menu junto com o botão se estiver aberto
-    if MainFrame.Visible then
-        MainFrame.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y + 70
-        )
-    end
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    if props then for k, v in pairs(props) do o[k] = v end end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
+local function stroke(o, color, alpha, th)
+    return new("UIStroke", { Color = color, Transparency = alpha, Thickness = th or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
+end
+local function tween(o, t, props)
+    local tw = TweenService:Create(o, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
+end
+local function label(parent, text, size, pos, font, ts, color, align)
+    return new("TextLabel", { Text = text, Size = size, Position = pos or UDim2.new(), BackgroundTransparency = 1,
+        Font = font or Enum.Font.Gotham, TextSize = ts or 12, TextColor3 = color or C.text,
+        TextXAlignment = align or Enum.TextXAlignment.Left, BorderSizePixel = 0 }, parent)
+end
+local function makeButton(parent, text, pos, color)
+    local b = new("TextButton", { Text = text, Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = C.text,
+        BackgroundColor3 = color, AutoButtonColor = false, Size = UDim2.new(1, -20, 0, 36), Position = pos,
+        BorderSizePixel = 0 }, parent)
+    b:SetAttribute("Base", color)
+    corner(b, 10)
+    b.MouseEnter:Connect(function() tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base"):Lerp(Color3.new(1, 1, 1), 0.14) }) end)
+    b.MouseLeave:Connect(function() tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base") }) end)
+    return b
+end
+local function setBase(b, color)
+    b:SetAttribute("Base", color)
+    tween(b, 0.2, { BackgroundColor3 = color })
 end
 
-FloatButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or
-       input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = FloatButton.Position
+local Conns = {}
+local function track(c) Conns[#Conns + 1] = c return c end
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-FloatButton.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or
-       input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input == dragInput then
-        updateDrag(input)
-    end
-end)
-
--- ===== SISTEMA DE ARRASTAR (JANELA DO MENU PELA TITLEBAR) =====
-local menuDragging = false
-local menuDragStart, menuStartPos
-
-TitleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or
-       input.UserInputType == Enum.UserInputType.Touch then
-        menuDragging = true
-        menuDragStart = input.Position
-        menuStartPos = MainFrame.Position
-
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                menuDragging = false
-            end
-        end)
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if menuDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
-       input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - menuDragStart
-        MainFrame.Position = UDim2.new(
-            menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
--- ===== ABRIR/FECHAR MENU =====
-local function toggleMenu()
-    MainFrame.Visible = not MainFrame.Visible
-    if MainFrame.Visible then
-        -- Posiciona o menu ao lado do botão
-        MainFrame.Position = UDim2.new(
-            FloatButton.Position.X.Scale,
-            FloatButton.Position.X.Offset + 70,
-            FloatButton.Position.Y.Scale,
-            FloatButton.Position.Y.Offset
-        )
-        FloatStroke.Color = Color3.fromRGB(0, 220, 0)
-    else
-        FloatStroke.Color = Color3.fromRGB(0, 170, 0)
-    end
-end
-
--- Detecta clique (sem arrastar) no botão flutuante
-local clickStartTime = 0
-local clickStartPos = nil
-
-FloatButton.MouseButton1Down:Connect(function()
-    clickStartTime = tick()
-    clickStartPos = UserInputService:GetMouseLocation()
-end)
-
-FloatButton.MouseButton1Up:Connect(function()
-    local elapsed = tick() - clickStartTime
-    local currentPos = UserInputService:GetMouseLocation()
-    -- Se foi um clique rápido e sem arrastar muito, abre/fecha o menu
-    if elapsed < 0.25 and clickStartPos and (currentPos - clickStartPos).Magnitude < 5 then
-        toggleMenu()
-    end
-end)
-
-CloseBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-    FloatStroke.Color = Color3.fromRGB(0, 170, 0)
-end)
-
--- ===== LÓGICA DE GRAVAÇÃO E REPRODUÇÃO =====
+--[[ === ESTADO === ]]
 local recordedData = {}
-local isRecording = false
-local recordingConnection = nil
-local playbackConnection = nil
+local mode = "idle" -- idle | rec | test
+local recordingConn, playbackConn
 local startTime = 0
-local antigravidade = nil
+local antigravidade
 local originalCollides = {}
+local savedWalkSpeed, savedAutoRotate
+local cancelTest = false
+local UI = {}
 
-local function stopPlayback()
-    if playbackConnection then
-        playbackConnection:Disconnect()
-        playbackConnection = nil
-    end
+local function getParts()
     local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if antigravidade then
-        antigravidade:Destroy()
-        antigravidade = nil
+    return char, char and char:FindFirstChild("HumanoidRootPart"), char and char:FindFirstChildOfClass("Humanoid")
+end
+
+--[[ === GUI: LOGO REDONDA + MENU (ScreenGuis separados) === ]]
+local function mountGui(gui)
+    local parent
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h then parent = h end
     end
+    parent = parent or CoreGui
+    local ok = pcall(function() gui.Parent = parent end)
+    if not ok or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+end
+
+local LOGO = 56
+local vp0 = cam().ViewportSize
+local MENU_W = math.clamp(vp0.X - 90, 240, 280)
+local MENU_H = math.clamp(vp0.Y - 30, 250, 330)
+
+local menuGui = new("ScreenGui", { Name = "DripMenu" .. math.random(100, 999), ResetOnSpawn = false,
+    IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 998 })
+mountGui(menuGui)
+local logoGui = new("ScreenGui", { Name = "DripLogo" .. math.random(100, 999), ResetOnSpawn = false,
+    IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000 })
+mountGui(logoGui)
+
+-- Menu
+local menu = new("Frame", { Size = UDim2.fromOffset(MENU_W, MENU_H),
+    Position = UDim2.fromOffset((vp0.X - MENU_W) / 2, (vp0.Y - MENU_H) / 2),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, Visible = false }, menuGui)
+corner(menu, 14)
+stroke(menu, C.green, 0.4, 2)
+local scale = new("UIScale", { Scale = 1 }, menu)
+
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 40), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, menu)
+corner(header, 14)
+new("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(22, 163, 74), Color3.fromRGB(8, 145, 178)), Rotation = 0 }, header)
+local hfill = new("Frame", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, header)
+new("UIGradient", { Color = ColorSequence.new(Color3.fromRGB(22, 163, 74), Color3.fromRGB(8, 145, 178)), Rotation = 0 }, hfill)
+label(header, "GRAVADOR DRIP", UDim2.new(1, -60, 1, 0), UDim2.new(0, 14, 0, 0), Enum.Font.GothamBlack, 14)
+local closeBtn = new("TextButton", { Text = "✕", Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = C.text,
+    BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.6, AutoButtonColor = false,
+    Size = UDim2.fromOffset(28, 26), Position = UDim2.new(1, -36, 0, 7), BorderSizePixel = 0 }, header)
+corner(closeBtn, 8)
+
+local body = new("ScrollingFrame", { Size = UDim2.new(1, 0, 1, -48), Position = UDim2.new(0, 0, 0, 46),
+    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = C.green,
+    CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y }, menu)
+
+UI.status = label(body, "Status: Parado", UDim2.new(1, -20, 0, 22), UDim2.new(0, 10, 0, 4), Enum.Font.GothamBold, 12, C.muted)
+local recBtn = makeButton(body, "● INICIAR GRAVAÇÃO", UDim2.new(0, 10, 0, 30), C.green)
+local testBtn = makeButton(body, "▶ TESTAR ROTA GRAVADA", UDim2.new(0, 10, 0, 74), C.blue)
+local copyBtn = makeButton(body, "COPIAR CÓDIGO GERADO", UDim2.new(0, 10, 0, 118), C.gray)
+
+-- Caixa de código (aparece quando o executor não tem setclipboard)
+local codeBox = new("TextBox", { Size = UDim2.new(1, -20, 0, 90), Position = UDim2.new(0, 10, 0, 164),
+    BackgroundColor3 = C.panel, TextColor3 = C.text, Font = Enum.Font.Code, TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+    ClearTextOnFocus = false, MultiLine = true, TextEditable = false, TextWrapped = false,
+    Text = "", Visible = false, BorderSizePixel = 0 }, body)
+corner(codeBox, 8)
+new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingTop = UDim.new(0, 4) }, codeBox)
+
+-- Logo
+local logo = new("TextButton", { Size = UDim2.fromOffset(LOGO, LOGO), Text = "", AutoButtonColor = false,
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 5,
+    Position = UDim2.fromOffset(vp0.X * 0.9 - LOGO / 2, vp0.Y * 0.35) }, logoGui)
+corner(logo, LOGO / 2)
+local logoStroke = stroke(logo, C.cyan, 0.1, 2)
+local logoGrad = new("UIGradient", { Color = ColorSequence.new(C.green, C.cyan), Rotation = 45 }, logo)
+local logoText = label(logo, "D", UDim2.fromScale(1, 1), nil, Enum.Font.GothamBlack, 26, C.text, Enum.TextXAlignment.Center)
+logoText.ZIndex = 6
+
+--[[ === POSICIONAMENTO (SEMPRE DENTRO DA TELA) === ]]
+local function clampMenu()
+    local vp = cam().ViewportSize
+    local p = menu.Position
+    menu.Position = UDim2.fromOffset(math.clamp(p.X.Offset, 0, math.max(vp.X - MENU_W, 0)),
+        math.clamp(p.Y.Offset, 0, math.max(vp.Y - 60, 0)))
+end
+
+local function clampLogo()
+    local vp = cam().ViewportSize
+    local p = logo.Position
+    local x = math.clamp(p.X.Offset, 6, math.max(vp.X - LOGO - 6, 6))
+    local y = math.clamp(p.Y.Offset, 6, math.max(vp.Y - LOGO - 6, 6))
+    tween(logo, 0.18, { Position = UDim2.fromOffset(x, y) })
+end
+
+local function toggleMenu(show)
+    if show == nil then show = not menu.Visible end
+    if show then
+        menu.Visible = true
+        clampMenu()
+        scale.Scale = 0.9
+        tween(scale, 0.15, { Scale = 1 })
+    else
+        menu.Visible = false
+    end
+end
+
+closeBtn.Activated:Connect(function() toggleMenu(false) end) -- só esconde o menu; a logo continua
+
+-- Arrastar o menu pela barra de título
+local mDrag, mStart, mPos = false, nil, nil
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        mDrag, mStart, mPos = true, input.Position, menu.Position
+    end
+end)
+
+-- Arrastar a logo (toque simples abre/fecha o menu)
+local lDrag, lMoved, lStart, lPos = false, false, nil, nil
+logo.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        lDrag, lMoved, lStart, lPos = true, false, input.Position, logo.Position
+    end
+end)
+
+track(UIS.InputChanged:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    if mDrag then
+        local d = input.Position - mStart
+        menu.Position = UDim2.fromOffset(mPos.X.Offset + d.X, mPos.Y.Offset + d.Y)
+        clampMenu()
+    end
+    if lDrag then
+        local d = input.Position - lStart
+        if d.Magnitude > 8 then lMoved = true end
+        if lMoved then logo.Position = UDim2.fromOffset(lPos.X.Offset + d.X, lPos.Y.Offset + d.Y) end
+    end
+end))
+track(UIS.InputEnded:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    mDrag = false
+    if lDrag then
+        lDrag = false
+        if lMoved then clampLogo() else toggleMenu() end
+    end
+end))
+local c0 = cam()
+if c0 then track(c0:GetPropertyChangedSignal("ViewportSize"):Connect(function() clampLogo() clampMenu() end)) end
+
+--[[ === VISUAL DOS ESTADOS === ]]
+local logoPulse
+local function setStatus(txt, color)
+    UI.status.Text = txt
+    UI.status.TextColor3 = color or C.muted
+end
+
+local function applyMode(m)
+    mode = m
+    if logoPulse then logoPulse:Cancel() logoPulse = nil end
+    logoStroke.Transparency = 0.1
+    if m == "idle" then
+        recBtn.Text = "● INICIAR GRAVAÇÃO"
+        setBase(recBtn, C.green)
+        testBtn.Text = "▶ TESTAR ROTA GRAVADA"
+        setBase(testBtn, C.blue)
+        logoGrad.Color = ColorSequence.new(C.green, C.cyan)
+        logoText.Text = "D"
+    elseif m == "rec" then
+        recBtn.Text = "■ PARAR GRAVAÇÃO"
+        setBase(recBtn, C.red)
+        logoGrad.Color = ColorSequence.new(C.red, C.redDark)
+        logoText.Text = "●"
+        logoPulse = TweenService:Create(logoStroke, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+            { Transparency = 0.9 })
+        logoPulse:Play()
+    else
+        testBtn.Text = "■ PARAR TESTE"
+        setBase(testBtn, C.red)
+        logoGrad.Color = ColorSequence.new(C.blue, C.cyan)
+        logoText.Text = "▶"
+    end
+end
+
+--[[ === GRAVAÇÃO === ]]
+local function startRecording()
+    local _, hrp = getParts()
+    if not hrp then setStatus("Personagem não carregado!", C.red) return end
+    recordedData = {}
+    codeBox.Visible = false
+    startTime = os.clock()
+    applyMode("rec")
+    recordingConn = RunService.Heartbeat:Connect(function()
+        local _, root, hum = getParts() -- pega sempre o personagem atual (respawn)
+        if not root then return end
+        local vel = root.AssemblyLinearVelocity
+        recordedData[#recordedData + 1] = {
+            Time = os.clock() - startTime,
+            CF = { root.CFrame:GetComponents() },
+            Velocity = { vel.X, vel.Y, vel.Z },
+            State = hum and hum:GetState() or Enum.HumanoidStateType.Running,
+        }
+        UI.status.Text = string.format("Gravando... %d pts", #recordedData)
+    end)
+    setStatus("Gravando... 0 pts", C.red)
+end
+
+local function stopRecording()
+    if recordingConn then recordingConn:Disconnect() recordingConn = nil end
+    applyMode("idle")
+    setStatus("Gravado! (" .. #recordedData .. " pts)", C.green)
+end
+
+--[[ === TESTE (REPRODUÇÃO LOCAL) === ]]
+local function stopPlayback()
+    if playbackConn then playbackConn:Disconnect() playbackConn = nil end
+    local _, _, hum = getParts()
+    if antigravidade then antigravidade:Destroy() antigravidade = nil end
     if hum then
-        hum.AutoRotate = true
+        hum.AutoRotate = savedAutoRotate ~= nil and savedAutoRotate or true
+        if savedWalkSpeed then hum.WalkSpeed = savedWalkSpeed end
     end
     for parte, status in pairs(originalCollides) do
-        if parte and parte.Parent then
-            parte.CanCollide = status
-        end
+        if parte and parte.Parent then parte.CanCollide = status end
     end
     table.clear(originalCollides)
+    savedWalkSpeed, savedAutoRotate = nil, nil
 end
 
-RecordBtn.MouseButton1Click:Connect(function()
-    if playbackConnection then stopPlayback() end
-    isRecording = not isRecording
-    
-    if isRecording then
-        recordedData = {}
-        startTime = os.clock()
-        RecordBtn.Text = "PARAR GRAVAÇÃO"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-        StatusLabel.Text = "Status: Gravando..."
-        
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        
-        if not hrp then return end
-        
-        recordingConnection = RunService.Heartbeat:Connect(function()
-            local currentTime = os.clock() - startTime
-            local cf = hrp.CFrame
-            local vel = hrp.AssemblyLinearVelocity
-            local state = hum and hum:GetState() or Enum.HumanoidStateType.Running
-            
-            table.insert(recordedData, {
-                Time = currentTime,
-                CF = {cf:GetComponents()},
-                Velocity = {vel.X, vel.Y, vel.Z},
-                State = state
-            })
-        end)
-    else
-        if recordingConnection then
-            recordingConnection:Disconnect()
-            recordingConnection = nil
-        end
-        RecordBtn.Text = "INICIAR GRAVAÇÃO"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        StatusLabel.Text = "Status: Gravado! (" .. #recordedData .. " pts)"
-    end
-end)
+local function runTest()
+    local char, hrp, hum = getParts()
+    if not (hrp and hum) then setStatus("Personagem não carregado!", C.red) return end
+    cancelTest = false
+    applyMode("test")
+    setStatus("Indo até o início da rota...", C.cyan)
 
--- Sistema de Testar a Rota Gravada Localmente
-TestBtn.MouseButton1Click:Connect(function()
-    if isRecording then
-        StatusLabel.Text = "Pare a gravação antes de testar!"
-        return
-    end
-    if #recordedData == 0 then
-        StatusLabel.Text = "Nenhuma rota gravada!"
-        return
-    end
-    
-    if playbackConnection then
-        stopPlayback()
-        StatusLabel.Text = "Status: Teste cancelado."
-        return
-    end
-
-    StatusLabel.Text = "Status: Reproduzindo teste..."
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChild("Humanoid")
-    if not hrp or not hum then return end
-
+    -- 1) anda até o primeiro ponto
     local startCF = CFrame.new(unpack(recordedData[1].CF))
+    savedWalkSpeed, savedAutoRotate = hum.WalkSpeed, hum.AutoRotate
     hum.WalkSpeed = 22
     hum:MoveTo(startCF.Position)
-
     local reached = false
-    local conn
-    conn = hum.MoveToFinished:Connect(function()
-        reached = true
-        if conn then conn:Disconnect() end
-    end)
+    local mConn = hum.MoveToFinished:Connect(function() reached = true end)
+    local timeout = os.clock() + 4
+    while not reached and os.clock() < timeout and not cancelTest do task.wait(0.1) end
+    mConn:Disconnect()
+    if cancelTest then stopPlayback() applyMode("idle") setStatus("Teste cancelado.", C.muted) return end
 
-    local timeout = tick() + 4
-    while not reached and tick() < timeout do
-        task.wait(0.1)
-    end
-    if conn then conn:Disconnect() end
-
+    -- 2) reproduz a rota (sem colisão, com antigravidade)
     hum.AutoRotate = false
-    antigravidade = Instance.new("BodyForce", hrp)
-    antigravidade.Force = Vector3.new(0, 0, 0)
-
+    local totalMass = 0
     for _, parte in ipairs(char:GetChildren()) do
         if parte:IsA("BasePart") then
             originalCollides[parte] = parte.CanCollide
             parte.CanCollide = false
+            totalMass += parte:GetMass()
         end
     end
+    antigravidade = Instance.new("BodyForce", hrp)
+    antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
 
-    local pstartTime = os.clock()
-    local totalPoints = #recordedData
-    local currentIndex = 1
-
-    playbackConnection = RunService.Heartbeat:Connect(function()
-        local elapsedTime = os.clock() - pstartTime
-        while currentIndex < totalPoints and elapsedTime >= recordedData[currentIndex + 1].Time do
-            currentIndex = currentIndex + 1
-        end
-        if currentIndex >= totalPoints then
+    setStatus("Reproduzindo teste...", C.cyan)
+    local pStart, total, idx = os.clock(), #recordedData, 1
+    playbackConn = RunService.Heartbeat:Connect(function()
+        local elapsed = os.clock() - pStart
+        while idx < total and elapsed >= recordedData[idx + 1].Time do idx += 1 end
+        if idx >= total or not hrp.Parent then
             stopPlayback()
-            StatusLabel.Text = "Status: Teste concluído!"
+            applyMode("idle")
+            setStatus("Teste concluído!", C.green)
             return
         end
-        
-        local p0 = recordedData[currentIndex]
-        local p1 = recordedData[currentIndex + 1]
-        local alpha = (p1.Time - p0.Time > 0) and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
-        
-        local cf0 = CFrame.new(unpack(p0.CF))
-        local cf1 = CFrame.new(unpack(p1.CF))
-        hrp.CFrame = cf0:Lerp(cf1, alpha)
-
-        local totalMass = 0
-        for _, parte in ipairs(char:GetChildren()) do
-            if parte:IsA("BasePart") then
-                totalMass = totalMass + parte:GetMass()
-            end
-        end
-        if antigravidade and antigravidade.Parent then
-            antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
-        end
-        if p1.Velocity then
-            hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
-        end
-        if p0.State then
-            pcall(function()
-                hum:ChangeState(p0.State)
-            end)
-        end
+        local p0, p1 = recordedData[idx], recordedData[idx + 1]
+        local span = p1.Time - p0.Time
+        local alpha = span > 0 and math.clamp((elapsed - p0.Time) / span, 0, 1) or 1
+        hrp.CFrame = CFrame.new(unpack(p0.CF)):Lerp(CFrame.new(unpack(p1.CF)), alpha)
+        hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
+        if p0.State then pcall(function() hum:ChangeState(p0.State) end) end
     end)
+end
+
+--[[ === GERAR / COPIAR CÓDIGO === ]]
+local function buildCode()
+    local lines = { "return {" }
+    for _, node in ipairs(recordedData) do
+        local cf = {}
+        for i, v in ipairs(node.CF) do cf[i] = string.format("%.4f", v) end
+        local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
+        lines[#lines + 1] = string.format("    {Time = %.3f, CF = {%s}, Velocity = {%.3f, %.3f, %.3f}, State = Enum.HumanoidStateType.%s},",
+            node.Time, table.concat(cf, ", "), node.Velocity[1], node.Velocity[2], node.Velocity[3], stateName)
+    end
+    lines[#lines + 1] = "}"
+    return table.concat(lines, "\n")
+end
+
+--[[ === BOTÕES === ]]
+recBtn.Activated:Connect(function()
+    if mode == "test" then cancelTest = true stopPlayback() end
+    if mode == "rec" then stopRecording() else startRecording() end
 end)
 
-CopyBtn.MouseButton1Click:Connect(function()
-    if #recordedData == 0 then
-        StatusLabel.Text = "Status: Nada gravado ainda!"
+testBtn.Activated:Connect(function()
+    if mode == "rec" then setStatus("Pare a gravação antes de testar!", C.red) return end
+    if mode == "test" then
+        cancelTest = true
+        stopPlayback()
+        applyMode("idle")
+        setStatus("Teste cancelado.", C.muted)
         return
     end
-    
-    local result = "return {\n"
-    for _, node in ipairs(recordedData) do
-        local cfStr = table.concat(node.CF, ", ")
-        local velStr = table.concat(node.Velocity, ", ")
-        local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
-        
-        result = result .. string.format("    {Time = %.3f, CF = {%s}, Velocity = {%s}, State = Enum.HumanoidStateType.%s},\n", 
-            node.Time, cfStr, velStr, stateName)
-    end
-    result = result .. "}"
-    
-    if setclipboard then
-        setclipboard(result)
-        StatusLabel.Text = "Status: Copiado com sucesso!"
+    if #recordedData == 0 then setStatus("Nenhuma rota gravada!", C.red) return end
+    task.spawn(runTest)
+end)
+
+copyBtn.Activated:Connect(function()
+    if #recordedData == 0 then setStatus("Nada gravado ainda!", C.red) return end
+    local code = buildCode()
+    local copied = false
+    if setclipboard then copied = pcall(setclipboard, code) end
+    if copied then
+        setStatus("Copiado com sucesso!", C.green)
     else
-        StatusLabel.Text = "Status: Sem suporte a clipboard (veja F9)."
-        print(result)
+        -- sem clipboard: mostra o código numa caixa dentro do menu
+        codeBox.Text = code
+        codeBox.Visible = true
+        setStatus("Sem clipboard: código na caixa abaixo.", C.muted)
     end
 end)
+
+--[[ === LIMPEZA E INÍCIO === ]]
+genv.DripRecorderCleanup = function()
+    cancelTest = true
+    if recordingConn then recordingConn:Disconnect() end
+    stopPlayback()
+    for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
+    pcall(function() menuGui:Destroy() end)
+    pcall(function() logoGui:Destroy() end)
+    genv.DripRecorderCleanup = nil
+end
+
+applyMode("idle")
+clampLogo()
+toggleMenu(true)
