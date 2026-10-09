@@ -1,25 +1,21 @@
--- RouteHub v1.0.0
+-- RouteHub v2.0.0
 --[[
-    ROUTE HUB — Hub de gravação e replay de rotas para Roblox (Luau)
-    UI própria (Instance.new), sem bibliotecas externas.
-    Cole no executor e execute. APIs opcionais do executor são detectadas via
-    pcall; se não existirem, o script degrada sem quebrar.
+    ROUTE HUB v2 — gravador e replay de rotas (Roblox / Luau)
+    - Logo redonda arrastável (separada do menu, nunca sai da tela)
+    - Menu com abas: Principal, Histórico, Diagnóstico, Config
+    - Diagnóstico visível na própria tela (não precisa de console)
+    - Replay: o boneco ANDA até o ponto inicial (sem teleporte) e depois reproduz
 ]]
 
---[[ === SEÇÃO 1: AMBIENTE, SERVIÇOS E DETECÇÃO DE API === ]]
+--[[ === SEÇÃO 1: AMBIENTE E SERVIÇOS === ]]
 local genv
 do
     local ok, g = pcall(function() return getgenv() end)
     genv = (ok and type(g) == "table") and g or _G
 end
+if type(genv.RouteHubCleanup) == "function" then pcall(genv.RouteHubCleanup) end
 
--- Limpa execução anterior (evita GUI/hook duplicado ao re-executar)
-if type(genv.RouteHubCleanup) == "function" then
-    pcall(genv.RouteHubCleanup)
-end
-
-local VERSION = "1.0.0"
-local APP_NAME = "ROUTE HUB"
+local VERSION = "2.0.0"
 local DATA_FILE = "RouteHub_Data.json"
 
 local Players = game:GetService("Players")
@@ -27,85 +23,65 @@ local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
 local GuiService = game:GetService("GuiService")
 local PPS = game:GetService("ProximityPromptService")
+local PathfindingService = game:GetService("PathfindingService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
 
 local CoreGui = nil
 pcall(function() CoreGui = game:GetService("CoreGui") end)
-local VIM = nil -- VirtualInputManager (pode não existir)
+local VIM = nil
 pcall(function() VIM = game:GetService("VirtualInputManager") end)
 
 local LocalPlayer = Players.LocalPlayer
 
 -- APIs opcionais do executor (nil quando ausentes)
 local API = {
-    writefile = writefile,
-    readfile = readfile,
-    isfile = isfile,
-    delfile = delfile,
-    hookmetamethod = hookmetamethod,
-    getnamecallmethod = getnamecallmethod,
-    newcclosure = newcclosure,
-    fireproximityprompt = fireproximityprompt,
-    firetouchinterest = firetouchinterest,
-    fireclickdetector = fireclickdetector,
-    getconnections = getconnections,
-    gethui = gethui,
+    writefile = writefile, readfile = readfile, isfile = isfile, delfile = delfile,
+    hookmetamethod = hookmetamethod, getnamecallmethod = getnamecallmethod,
+    newcclosure = newcclosure, fireproximityprompt = fireproximityprompt,
+    firetouchinterest = firetouchinterest, fireclickdetector = fireclickdetector,
+    getconnections = getconnections, gethui = gethui,
 }
 
 local function cam() return workspace.CurrentCamera end
 
---[[ === SEÇÃO 2: PALETA, CONFIGURAÇÕES E ESTADO GLOBAL === ]]
+--[[ === SEÇÃO 2: PALETA, CONFIG E ESTADO === ]]
 local C = {
-    bg = Color3.fromRGB(18, 18, 24),
-    panel = Color3.fromRGB(26, 26, 34),
-    panel2 = Color3.fromRGB(34, 34, 46),
-    accent = Color3.fromRGB(124, 58, 237),
-    accent2 = Color3.fromRGB(34, 211, 238),
-    success = Color3.fromRGB(34, 197, 94),
-    danger = Color3.fromRGB(239, 68, 68),
-    dangerDark = Color3.fromRGB(153, 27, 27),
-    text = Color3.fromRGB(237, 237, 245),
-    muted = Color3.fromRGB(150, 150, 170),
-    stroke = Color3.fromRGB(124, 58, 237),
+    bg = Color3.fromRGB(18, 18, 24), panel = Color3.fromRGB(26, 26, 34),
+    panel2 = Color3.fromRGB(38, 38, 52), accent = Color3.fromRGB(124, 58, 237),
+    accent2 = Color3.fromRGB(34, 211, 238), success = Color3.fromRGB(34, 197, 94),
+    danger = Color3.fromRGB(239, 68, 68), dangerDark = Color3.fromRGB(153, 27, 27),
+    warn = Color3.fromRGB(250, 204, 21),
+    text = Color3.fromRGB(237, 237, 245), muted = Color3.fromRGB(150, 150, 170),
 }
 
 local Defaults = {
-    speedMultiplier = 1.0,
-    loopReplay = false,
-    cameraSampleRateMs = 50,
-    moveSampleRateMs = 30,
-    autoRename = true,
-    theme = "dark-neon",
-    actionDelayMs = 0,
-    blur = false,
+    speedMultiplier = 1.0, loopReplay = false, autoRename = true,
+    actionDelayMs = 0, moveSampleRateMs = 100,
+    recordCamera = false, recordAnim = false,
+    theme = "dark-neon", logoX = 0.92, logoY = 0.35,
 }
 local S = {}
 for k, v in pairs(Defaults) do S[k] = v end
-
 local Data = { routes = {}, settings = S }
-local Conns = {} -- conexões globais do hub (limpas no Cleanup)
-local function track(conn) Conns[#Conns + 1] = conn return conn end
-
+local Conns = {}
+local function track(c) Conns[#Conns + 1] = c return c end
 local State = { mode = "idle" } -- idle | rec | replay
+local UI = { pages = {}, tabs = {} }
 
 --[[ === SEÇÃO 3: UTILITÁRIOS === ]]
 local function r3(n) return math.floor(n * 1000 + 0.5) / 1000 end
 local function r4(n) return math.floor(n * 10000 + 0.5) / 10000 end
-
 local function fmtTime(ms)
     local s = math.floor((ms or 0) / 1000)
     return string.format("%02d:%02d", math.floor(s / 60), s % 60)
 end
-
 local function fmtDate(ts)
     local ok, s = pcall(os.date, "%d/%m %H:%M", ts)
-    return ok and s or "--/-- --:--"
+    return ok and s or "--"
 end
-
 local function getChar() return LocalPlayer.Character end
 local function getHum()
     local c = LocalPlayer.Character
@@ -116,7 +92,6 @@ local function getRoot()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
--- Caminho de uma instância como lista de nomes a partir de game
 local function instPath(inst)
     local p, cur = {}, inst
     while cur and cur ~= game do
@@ -135,32 +110,23 @@ local function resolvePath(p)
         cur = nxt
     end
     if cur then return cur end
-    -- Fallback: busca pelo nome final dentro do Workspace
     local ok, found = pcall(function() return workspace:FindFirstChild(p[#p], true) end)
     return ok and found or nil
 end
 
--- Serialização JSON-friendly de argumentos de Remote
 local function ser(v, depth)
     depth = depth or 0
     local t = typeof(v)
     if t == "number" then
         if v ~= v or v == math.huge or v == -math.huge then return 0 end
         return v
-    elseif t == "string" or t == "boolean" then
-        return v
-    elseif t == "Vector3" then
-        return { __t = "V3", x = v.X, y = v.Y, z = v.Z }
-    elseif t == "Vector2" then
-        return { __t = "V2", x = v.X, y = v.Y }
-    elseif t == "CFrame" then
-        return { __t = "CF", c = { v:GetComponents() } }
-    elseif t == "Color3" then
-        return { __t = "C3", r = v.R, g = v.G, b = v.B }
-    elseif t == "Instance" then
-        return { __t = "I", p = instPath(v) }
-    elseif t == "EnumItem" then
-        return { __t = "E", e = tostring(v) }
+    elseif t == "string" or t == "boolean" then return v
+    elseif t == "Vector3" then return { __t = "V3", x = v.X, y = v.Y, z = v.Z }
+    elseif t == "Vector2" then return { __t = "V2", x = v.X, y = v.Y }
+    elseif t == "CFrame" then return { __t = "CF", c = { v:GetComponents() } }
+    elseif t == "Color3" then return { __t = "C3", r = v.R, g = v.G, b = v.B }
+    elseif t == "Instance" then return { __t = "I", p = instPath(v) }
+    elseif t == "EnumItem" then return { __t = "E", e = tostring(v) }
     elseif t == "table" then
         if depth > 4 then return { __t = "N" } end
         local arr, map = {}, {}
@@ -170,14 +136,13 @@ local function ser(v, depth)
         end
         return { __t = "T", arr = arr, map = map }
     end
-    return { __t = "N" } -- nil, function, userdata etc.
+    return { __t = "N" }
 end
 
 local function deser(v)
     if type(v) ~= "table" then return v end
     local t = v.__t
-    if t == "N" then return nil
-    elseif t == "V3" then return Vector3.new(v.x, v.y, v.z)
+    if t == "V3" then return Vector3.new(v.x, v.y, v.z)
     elseif t == "V2" then return Vector2.new(v.x, v.y)
     elseif t == "CF" then return CFrame.new(unpack(v.c))
     elseif t == "C3" then return Color3.new(v.r, v.g, v.b)
@@ -203,35 +168,30 @@ end
 local function decode(s)
     local ok, r = pcall(HttpService.JSONDecode, HttpService, s)
     if ok then return r end
-    return nil
 end
-
 local function sanitize(n) return (tostring(n):gsub("[^%w_%-]", "_")) end
 local function routeFile(route) return "RouteHub_" .. sanitize(route.name) .. ".json" end
 
 local function saveAll()
     Data.settings = S
-    genv.RouteHubData = Data -- persistência em memória (getgenv)
-    if API.writefile then -- fallback: sem writefile, só memória
+    genv.RouteHubData = Data
+    if API.writefile then
         local js = encode(Data)
         if js then pcall(API.writefile, DATA_FILE, js) end
     end
 end
-
 local function saveRouteFile(route)
     if not API.writefile then return end
     local js = encode(route)
     if js then pcall(API.writefile, routeFile(route), js) end
 end
-
 local function deleteRouteFile(route)
-    if not (API.delfile and API.isfile) then return end -- sem delfile: arquivo fica órfão
+    if not (API.delfile and API.isfile) then return end
     pcall(function()
         local f = routeFile(route)
         if API.isfile(f) then API.delfile(f) end
     end)
 end
-
 local function loadAll()
     local src = genv.RouteHubData
     if not (type(src) == "table" and type(src.routes) == "table") then
@@ -257,78 +217,68 @@ local function loadAll()
     end
 end
 
---[[ === SEÇÃO 5: HELPERS DE UI E TOASTS === ]]
-local UI = { pages = {}, tabs = {} }
-
+--[[ === SEÇÃO 5: HELPERS DE UI, TOASTS === ]]
 local function new(class, props, parent)
     local o = Instance.new(class)
-    if props then
-        for k, v in pairs(props) do o[k] = v end
-    end
+    if props then for k, v in pairs(props) do o[k] = v end end
     if parent then o.Parent = parent end
     return o
 end
-
-local function corner(o, r)
-    return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o)
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r or 8) }, o) end
+local function stroke(o, color, alpha, th)
+    return new("UIStroke", { Color = color or C.accent, Transparency = alpha or 0.7, Thickness = th or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
 end
-
-local function stroke(o, color, alpha)
-    return new("UIStroke", {
-        Color = color or C.stroke, Transparency = alpha or 0.7, Thickness = 1,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, o)
+local function gradient(o, c1, c2, rot)
+    return new("UIGradient", { Color = ColorSequence.new(c1, c2), Rotation = rot or 0 }, o)
 end
-
 local function tween(o, t, props, style, dir)
     local tw = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
     tw:Play()
     return tw
 end
-
-local function label(parent, text, size, pos, font, textSize, color, align)
+local function label(parent, text, size, pos, font, ts, color, align)
     return new("TextLabel", {
-        Text = text, Size = size, Position = pos or UDim2.new(),
-        BackgroundTransparency = 1, Font = font or Enum.Font.Gotham,
-        TextSize = textSize or 13, TextColor3 = color or C.text,
+        Text = text, Size = size, Position = pos or UDim2.new(), BackgroundTransparency = 1,
+        Font = font or Enum.Font.Gotham, TextSize = ts or 13, TextColor3 = color or C.text,
         TextXAlignment = align or Enum.TextXAlignment.Left, BorderSizePixel = 0,
     }, parent)
 end
-
 local function makeButton(parent, text, size, pos, color, textColor)
     local base = color or C.accent
     local b = new("TextButton", {
-        Text = text, Font = Enum.Font.GothamBold, TextSize = 14,
-        TextColor3 = textColor or C.text, BackgroundColor3 = base,
-        AutoButtonColor = false, Size = size, Position = pos or UDim2.new(),
+        Text = text, Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = textColor or C.text,
+        BackgroundColor3 = base, AutoButtonColor = false, Size = size, Position = pos or UDim2.new(),
         BorderSizePixel = 0,
     }, parent)
     b:SetAttribute("Base", base)
-    corner(b, 8)
-    b.MouseEnter:Connect(function()
-        tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base"):Lerp(Color3.new(1, 1, 1), 0.14) })
-    end)
-    b.MouseLeave:Connect(function()
-        tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base") })
-    end)
+    corner(b, 10)
+    b.MouseEnter:Connect(function() tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base"):Lerp(Color3.new(1, 1, 1), 0.14) }) end)
+    b.MouseLeave:Connect(function() tween(b, 0.12, { BackgroundColor3 = b:GetAttribute("Base") }) end)
     return b
 end
+-- Define a ordem do item dentro de uma lista (UIListLayout)
+local function ord(obj)
+    local p = obj.Parent
+    local n = (p:GetAttribute("n") or 0) + 1
+    p:SetAttribute("n", n)
+    obj.LayoutOrder = n
+    return obj
+end
 
--- Sistema de toasts (canto inferior direito)
 local Toast = { container = nil }
 function Toast.show(msg, kind)
     if not Toast.container then return end
     local col = (kind == "success" and C.success) or (kind == "error" and C.danger) or C.accent
-    local g = new("CanvasGroup", {
-        Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = C.panel,
-        GroupTransparency = 1, BorderSizePixel = 0,
-    }, Toast.container)
-    corner(g, 8)
-    stroke(g, col, 0.4)
+    local g = new("CanvasGroup", { Size = UDim2.new(0, 260, 0, 34), BackgroundColor3 = C.panel,
+        GroupTransparency = 1, BorderSizePixel = 0 }, Toast.container)
+    corner(g, 10)
+    stroke(g, col, 0.3)
     new("Frame", { Size = UDim2.new(0, 4, 1, 0), BackgroundColor3 = col, BorderSizePixel = 0 }, g)
-    label(g, tostring(msg), UDim2.new(1, -18, 1, 0), UDim2.new(0, 12, 0, 0), Enum.Font.GothamBold, 12, C.text)
+    local l = label(g, tostring(msg), UDim2.new(1, -18, 1, 0), UDim2.new(0, 12, 0, 0), Enum.Font.GothamBold, 12)
+    l.TextTruncate = Enum.TextTruncate.AtEnd
     tween(g, 0.2, { GroupTransparency = 0 })
-    task.delay(2.6, function()
+    task.delay(2.8, function()
         if g and g.Parent then
             local tw = tween(g, 0.3, { GroupTransparency = 1 })
             tw.Completed:Connect(function() if g then g:Destroy() end end)
@@ -336,122 +286,167 @@ function Toast.show(msg, kind)
     end)
 end
 
---[[ === SEÇÃO 6: MÓDULO DE DIAGNÓSTICO (OCULTO) === ]]
+--[[ === SEÇÃO 6: DIAGNÓSTICO (BOTÃO VISÍVEL, RESULTADO NA TELA) === ]]
 local Diag = { running = false, report = nil }
 
-local function diagStep(name, fn)
-    local ok, err = pcall(fn)
-    if not ok then warn("[DIAG] Falha ao inspecionar " .. name .. ": " .. tostring(err)) end
-end
+local function esc(s) return (tostring(s):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
+local function hex(c) return string.format("#%02x%02x%02x", c.R * 255, c.G * 255, c.B * 255) end
+local function colored(c, s) return '<font color="' .. hex(c) .. '">' .. s .. "</font>" end
 
 function Diag.run()
     if Diag.running then return end
     Diag.running = true
+    UI.setDiagText(colored(C.accent2, "<b>Escaneando o jogo...</b>") .. "\nAguarde alguns segundos.")
     task.spawn(function()
-        local rep = {}
-        local char, hum = getChar(), getHum()
+        local rep, L = {}, {}
+        local function head(t) L[#L + 1] = "\n" .. colored(C.accent2, "<b>" .. t .. "</b>") end
+        local function ok(t) L[#L + 1] = colored(C.success, "● ") .. t end
+        local function warnL(t) L[#L + 1] = colored(C.warn, "● ") .. t end
+        local function bad(t) L[#L + 1] = colored(C.danger, "● ") .. t end
+        local function step(name, fn)
+            local good, err = pcall(fn)
+            if not good then bad("Falha ao inspecionar " .. name .. ": " .. esc(err)) end
+        end
 
-        diagStep("Character/Animator", function()
-            local animator = hum and hum:FindFirstChildOfClass("Animator")
-            local tracks = animator and animator:GetPlayingAnimationTracks() or {}
-            local animate = char and char:FindFirstChild("Animate")
-            rep.playingTracks = #tracks
-            rep.walkAnim = ((animate and animate:FindFirstChild("walk")) ~= nil) or #tracks > 0
-            print(rep.walkAnim and "[DIAG] Animações de caminhada detectadas: OK"
-                or "[DIAG] Animações de caminhada detectadas: nenhuma")
+        head("EXECUTOR")
+        step("executor", function()
+            rep.hook = (API.hookmetamethod and API.getnamecallmethod) and true or false
+            rep.firePrompt = API.fireproximityprompt and true or false
+            rep.fireTouch = API.firetouchinterest and true or false
+            rep.fireClick = API.fireclickdetector and true or false
+            rep.getconn = API.getconnections and true or false
+            rep.vim = VIM and true or false
+            rep.files = API.writefile and true or false
+            ;(rep.hook and ok or warnL)("Hook de Remotes (hookmetamethod): " .. (rep.hook and "sim" or "não — Remotes não serão gravados"))
+            ;(rep.firePrompt and ok or warnL)("fireproximityprompt: " .. (rep.firePrompt and "sim" or "não (uso InputHold)"))
+            ;(rep.getconn and ok or warnL)("getconnections (clicar botões da loja): " .. (rep.getconn and "sim" or "não (uso clique virtual)"))
+            ;(rep.vim and ok or warnL)("VirtualInputManager: " .. (rep.vim and "sim" or "não"))
+            ;(rep.files and ok or warnL)("Salvar em arquivo: " .. (rep.files and "sim" or "não — só memória"))
         end)
 
-        diagStep("Humanoid (pulo)", function()
-            if not hum then error("Humanoid ausente") end
-            rep.useJumpPower = hum.UseJumpPower
-            rep.jumpPower = hum.JumpPower
-            rep.jumpHeight = hum.JumpHeight
+        head("PERSONAGEM")
+        step("personagem", function()
+            local char, hum, root = getChar(), getHum(), getRoot()
+            if not (char and hum and root) then error("personagem não carregado") end
             rep.walkSpeed = hum.WalkSpeed
-            print("[DIAG] Modo de pulo detectado: OK (" .. (hum.UseJumpPower and "JumpPower" or "JumpHeight") .. ")")
+            rep.useJumpPower = hum.UseJumpPower
+            ok(string.format("WalkSpeed: %.0f", hum.WalkSpeed))
+            ok("Pulo: " .. (hum.UseJumpPower and ("JumpPower " .. hum.JumpPower) or ("JumpHeight " .. hum.JumpHeight)))
+            local animator = hum:FindFirstChildOfClass("Animator")
+            local tracks = animator and animator:GetPlayingAnimationTracks() or {}
+            local animate = char:FindFirstChild("Animate")
+            rep.walkAnim = ((animate and animate:FindFirstChild("walk")) ~= nil) or #tracks > 0
+            ;(rep.walkAnim and ok or warnL)("Animações de caminhada: " .. (rep.walkAnim and "detectadas" or "não encontradas"))
+            rep.pathOk = pcall(function()
+                local p = PathfindingService:CreatePath()
+                p:ComputeAsync(root.Position, root.Position + Vector3.new(0, 0, 10))
+            end)
+            ;(rep.pathOk and ok or warnL)("Pathfinding (andar até o ponto inicial): " .. (rep.pathOk and "funciona" or "indisponível, uso caminho direto"))
         end)
 
-        diagStep("sprint", function()
-            local found = 0
+        head("TELA / BOTÕES")
+        step("PlayerGui", function()
+            rep.touchEnabled = UIS.TouchEnabled
+            ok("Toque na tela: " .. (UIS.TouchEnabled and "sim" or "não"))
             local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            local total, sprint, shop = 0, {}, {}
+            local n = 0
             if pg then
-                for i, o in ipairs(pg:GetDescendants()) do
+                for _, o in ipairs(pg:GetDescendants()) do
                     if o:IsA("GuiButton") then
+                        total += 1
                         local s = (o.Name .. " " .. (o:IsA("TextButton") and o.Text or "")):lower()
-                        if s:find("sprint") or s:find("run") or s:find("correr") or s:find("corrida") then
-                            found += 1
+                        if (s:find("sprint") or s:find("run") or s:find("correr") or s:find("corrida")) and #sprint < 5 then
+                            sprint[#sprint + 1] = o.Name
+                        end
+                        if (s:find("shop") or s:find("loja") or s:find("buy") or s:find("compr") or s:find("store")) and #shop < 5 then
+                            shop[#shop + 1] = o.Name
                         end
                     end
-                    if i % 1500 == 0 then task.wait() end
+                    n += 1
+                    if n % 1000 == 0 then task.wait() end
                 end
             end
-            local changed = false
-            local base = hum and hum.WalkSpeed or 16
-            local conn
-            if hum then
-                conn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function() changed = true end)
-            end
-            task.wait(3)
-            if conn then conn:Disconnect() end
-            rep.sprintButtons = found
-            rep.sprintByWalkSpeed = changed or base > 16
-            if found > 0 or rep.sprintByWalkSpeed then
-                print("[DIAG] Botão de correr (sprint) detectado: OK")
-            else
-                print("[DIAG] Botão de correr (sprint) detectado: nenhum")
-            end
+            rep.guiButtons, rep.sprintButtons, rep.shopButtons = total, #sprint, #shop
+            ok("Botões na tela do jogo: " .. total)
+            ;(#sprint > 0 and ok or warnL)("Botão de correr: " .. (#sprint > 0 and esc(table.concat(sprint, ", ")) or "não encontrado"))
+            if #shop > 0 then ok("Botões de loja/compra: " .. esc(table.concat(shop, ", "))) end
         end)
 
-        diagStep("RemoteEvents/Prompts", function()
+        head("REMOTES E INTERAÇÕES")
+        step("Remotes/Prompts", function()
             local counts = { RemoteEvent = 0, RemoteFunction = 0, BindableEvent = 0,
                 ProximityPrompt = 0, ClickDetector = 0, TouchTransmitter = 0 }
+            local remotes, prompts = {}, {}
             local n = 0
             for _, root in ipairs({ ReplicatedStorage, ReplicatedFirst, workspace }) do
                 for _, o in ipairs(root:GetDescendants()) do
                     local cn = o.ClassName
-                    if counts[cn] ~= nil then counts[cn] += 1 end
+                    if counts[cn] ~= nil then
+                        counts[cn] += 1
+                        if cn == "RemoteEvent" and #remotes < 12 then remotes[#remotes + 1] = o.Name end
+                        if cn == "ProximityPrompt" and #prompts < 8 then
+                            prompts[#prompts + 1] = string.format("%s (%s, hold %.1fs)", o.Parent and o.Parent.Name or "?",
+                                o.ActionText ~= "" and o.ActionText or "sem texto", o.HoldDuration)
+                        end
+                    end
                     n += 1
-                    if n % 2000 == 0 then task.wait() end
+                    if n % 1500 == 0 then task.wait() end
                 end
             end
-            rep.remoteEvents = counts.RemoteEvent
-            rep.remoteFunctions = counts.RemoteFunction
-            rep.bindables = counts.BindableEvent
-            rep.prompts = counts.ProximityPrompt
-            rep.clickDetectors = counts.ClickDetector
-            rep.touchInterests = counts.TouchTransmitter
-            print("[DIAG] RemoteEvents de ação detectados: " .. counts.RemoteEvent)
-            print("[DIAG] TouchInterest / ProximityPrompt detectados: " .. (counts.TouchTransmitter + counts.ProximityPrompt))
+            rep.remoteEvents, rep.remoteFunctions = counts.RemoteEvent, counts.RemoteFunction
+            rep.prompts, rep.clickDetectors, rep.touchInterests = counts.ProximityPrompt, counts.ClickDetector, counts.TouchTransmitter
+            ok("RemoteEvents: " .. counts.RemoteEvent .. " | RemoteFunctions: " .. counts.RemoteFunction)
+            if #remotes > 0 then L[#L + 1] = "   " .. colored(C.muted, esc(table.concat(remotes, ", ") .. (counts.RemoteEvent > #remotes and ", ..." or ""))) end
+            ok("ProximityPrompts: " .. counts.ProximityPrompt)
+            for _, p in ipairs(prompts) do L[#L + 1] = "   " .. colored(C.muted, esc(p)) end
+            ok("ClickDetectors: " .. counts.ClickDetector .. " | TouchInterest: " .. counts.TouchTransmitter)
         end)
 
-        diagStep("Tools", function()
-            local n = 0
-            local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-            if bp then for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then n += 1 end end end
-            if char then for _, t in ipairs(char:GetChildren()) do if t:IsA("Tool") then n += 1 end end end
-            rep.tools = n
-            print("[DIAG] Tools equipáveis detectadas: " .. n)
+        head("FERRAMENTAS")
+        step("Tools", function()
+            local names = {}
+            local bp, char = LocalPlayer:FindFirstChildOfClass("Backpack"), getChar()
+            for _, holder in ipairs({ bp, char }) do
+                if holder then for _, t in ipairs(holder:GetChildren()) do
+                    if t:IsA("Tool") then names[#names + 1] = t.Name end
+                end end
+            end
+            rep.tools = #names
+            ok("Tools equipáveis: " .. #names .. (#names > 0 and (" — " .. esc(table.concat(names, ", "))) or ""))
         end)
 
-        diagStep("Toque", function()
-            rep.touchEnabled = UIS.TouchEnabled
-            print("[DIAG] Suporte a toque: " .. (UIS.TouchEnabled and "OK" or "não"))
-        end)
+        head("O QUE A GRAVAÇÃO VAI CAPTURAR")
+        L[#L + 1] = colored(C.success, "● ") .. "Caminhada e pulos (posição por posição)"
+        L[#L + 1] = colored(C.success, "● ") .. "Mudanças de velocidade (correr)"
+        if rep.hook and (rep.remoteEvents or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "Remotes disparados por você" end
+        if (rep.prompts or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "ProximityPrompts (segurar / acionar)" end
+        if (rep.guiButtons or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "Cliques em botões do jogo (loja etc.)" end
+        if (rep.clickDetectors or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "ClickDetectors" end
+        if (rep.touchInterests or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "Peças de toque (TouchInterest)" end
+        if (rep.tools or 0) > 0 then L[#L + 1] = colored(C.success, "● ") .. "Equipar / usar ferramentas" end
 
         Diag.report = rep
-        genv.RouteHubDiag = rep -- relatório estruturado usado pelo gravador
+        genv.RouteHubDiag = rep
+        UI.setDiagText(table.concat(L, "\n"))
         Diag.running = false
+        Toast.show("Diagnóstico concluído", "success")
     end)
 end
 
---[[ === SEÇÃO 7: MÓDULO DE GRAVAÇÃO === ]]
+--[[ === SEÇÃO 7: GRAVAÇÃO === ]]
+local IGNORE_KEYS = {
+    [Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true, [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true,
+    [Enum.KeyCode.Up] = true, [Enum.KeyCode.Down] = true, [Enum.KeyCode.Left] = true, [Enum.KeyCode.Right] = true,
+    [Enum.KeyCode.Space] = true, [Enum.KeyCode.LeftShift] = true, [Enum.KeyCode.RightShift] = true,
+    [Enum.KeyCode.LeftControl] = true, [Enum.KeyCode.Unknown] = true,
+} -- movimento é gravado por posição; essas teclas só atrapalhariam o replay
+
 local Recorder = {
     active = false, events = {}, t0 = 0, conns = {}, charConns = {},
-    seen = setmetatable({}, { __mode = "k" }),
-    boundTools = setmetatable({}, { __mode = "k" }),
-    touches = {}, touchLast = {}, downSet = {}, keysDown = {},
-    animSummary = {}, touchId = 0,
-    baseWS = 16, lastWS = 16, runSpeed = 0, lastMD = Vector3.zero,
-    lastMoveMs = 0, lastForceMs = 0, lastCamMs = 0, lastAnimMs = 0, lastCF = nil,
+    boundTools = setmetatable({}, { __mode = "k" }), seenTracks = setmetatable({}, { __mode = "k" }),
+    keysDown = {}, startPos = nil, baseWS = 16, lastWS = 16,
+    lastP = Vector3.zero, wasMoving = false, lastMoveMs = 0, lastCamMs = 0, lastCF = nil,
 }
 
 function Recorder.add(typ, data)
@@ -462,7 +457,6 @@ function Recorder.add(typ, data)
 end
 
 local function pointerInfo(input)
-    local vp = cam().ViewportSize
     local inset = GuiService:GetGuiInset()
     local px, py, sx, sy
     if input.UserInputType == Enum.UserInputType.Touch then
@@ -473,27 +467,28 @@ local function pointerInfo(input)
         sx, sy = m.X, m.Y
         px, py = sx - inset.X, sy - inset.Y
     end
-    return px, py, sx, sy, vp
+    return px, py, sx, sy
 end
 
--- Retorna o GuiButton do jogo sob o ponteiro, "ours" se for o hub, ou nil
-local function findGuiButton(px, py, sx, sy)
-    local win = UI.main
-    if win and win.Parent and win.Visible then
-        local ap, as = win.AbsolutePosition, win.AbsoluteSize
-        if sx >= ap.X and sx <= ap.X + as.X and sy >= ap.Y and sy <= ap.Y + as.Y then
-            return "ours"
+local function overOurs(sx, sy)
+    for _, f in ipairs({ UI.menu, UI.logo }) do
+        if f and f.Parent and f.Visible then
+            local ap, as = f.AbsolutePosition, f.AbsoluteSize
+            if sx >= ap.X and sx <= ap.X + as.X and sy >= ap.Y and sy <= ap.Y + as.Y then return true end
         end
     end
+    return false
+end
+
+local function findGameButton(px, py, sx, sy)
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not pg then return nil end
     for _, pos in ipairs({ Vector2.new(px, py), Vector2.new(sx, sy) }) do
         local ok, objs = pcall(pg.GetGuiObjectsAtPosition, pg, pos.X, pos.Y)
         if ok then
             for _, o in ipairs(objs) do
-                if o:IsA("GuiButton") and o.Visible and not (UI.gui and o:IsDescendantOf(UI.gui)) then
-                    return o
-                end
+                local mine = (UI.gui and o:IsDescendantOf(UI.gui)) or (UI.logoGui and o:IsDescendantOf(UI.logoGui))
+                if o:IsA("GuiButton") and o.Visible and not mine then return o end
             end
         end
     end
@@ -503,93 +498,37 @@ end
 function Recorder.onInputBegan(input, gpe)
     local ut = input.UserInputType
     if ut == Enum.UserInputType.Keyboard then
-        if gpe then return end -- digitando em caixa de texto/chat
+        if gpe then return end
         local kc = input.KeyCode
-        if kc == Enum.KeyCode.D and UIS:IsKeyDown(Enum.KeyCode.LeftControl)
-            and UIS:IsKeyDown(Enum.KeyCode.LeftShift) then return end
+        if IGNORE_KEYS[kc] then return end
         Recorder.keysDown[kc] = os.clock()
-        Recorder.add("KeyDown", { k = kc.Name, held = true })
-    elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.MouseButton2
-        or ut == Enum.UserInputType.Touch then
-        local px, py, sx, sy, vp = pointerInfo(input)
-        local btn = findGuiButton(px, py, sx, sy)
-        if btn == "ours" then return end
-        if gpe and not btn then return end -- controles nativos (joystick/pulo) não entram
-        local d = { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "down" }
-        if btn then d.btn = instPath(btn) end
-        if ut == Enum.UserInputType.Touch then
-            Recorder.touchId += 1
-            Recorder.touches[input] = Recorder.touchId
-            d.id = Recorder.touchId
-            Recorder.add("Touch", d)
-        else
-            d.b = (ut == Enum.UserInputType.MouseButton1) and 1 or 2
-            Recorder.downSet[ut] = true
-            Recorder.add("Click", d)
-        end
-    elseif ut.Name:find("Gamepad") and input.KeyCode ~= Enum.KeyCode.Thumbstick1
-        and input.KeyCode ~= Enum.KeyCode.Thumbstick2 and input.KeyCode ~= Enum.KeyCode.Unknown then
-        Recorder.keysDown[input.KeyCode] = os.clock()
-        Recorder.add("KeyDown", { k = input.KeyCode.Name, gp = true, held = true })
+        Recorder.add("KeyDown", { k = kc.Name })
+    elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.Touch then
+        local px, py, sx, sy = pointerInfo(input)
+        if overOurs(sx, sy) then return end
+        local btn = findGameButton(px, py, sx, sy) -- só botões do jogo (loja etc.); toques soltos são ignorados
+        if btn then Recorder.add("Click", { btn = instPath(btn), nm = btn.Name }) end
     end
 end
 
-function Recorder.onInputEnded(input, gpe)
-    local ut = input.UserInputType
-    if ut == Enum.UserInputType.Keyboard or ut.Name:find("Gamepad") then
-        local kc = input.KeyCode
-        local since = Recorder.keysDown[kc]
-        if since then
-            Recorder.keysDown[kc] = nil
-            Recorder.add("KeyUp", { k = kc.Name, gp = ut ~= Enum.UserInputType.Keyboard or nil,
-                dur = math.floor((os.clock() - since) * 1000) })
-        end
-    elseif ut == Enum.UserInputType.MouseButton1 or ut == Enum.UserInputType.MouseButton2 then
-        if Recorder.downSet[ut] then
-            Recorder.downSet[ut] = nil
-            local _, _, sx, sy, vp = pointerInfo(input)
-            Recorder.add("Click", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "up",
-                b = (ut == Enum.UserInputType.MouseButton1) and 1 or 2 })
-        end
-    elseif ut == Enum.UserInputType.Touch then
-        local id = Recorder.touches[input]
-        if id then
-            Recorder.touches[input] = nil
-            Recorder.touchLast[id] = nil
-            local _, _, sx, sy, vp = pointerInfo(input)
-            Recorder.add("Touch", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "up", id = id })
-        end
+function Recorder.onInputEnded(input)
+    local kc = input.KeyCode
+    local since = Recorder.keysDown[kc]
+    if since then
+        Recorder.keysDown[kc] = nil
+        Recorder.add("KeyUp", { k = kc.Name, dur = math.floor((os.clock() - since) * 1000) })
     end
-end
-
-function Recorder.onInputChanged(input)
-    if input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local id = Recorder.touches[input]
-    if not id then return end
-    local now = os.clock()
-    if Recorder.touchLast[id] and now - Recorder.touchLast[id] < 0.05 then return end
-    Recorder.touchLast[id] = now
-    local _, _, sx, sy, vp = pointerInfo(input)
-    Recorder.add("Touch", { x = r4(sx / vp.X), y = r4(sy / vp.Y), phase = "move", id = id })
 end
 
 function Recorder.logTrack(track)
-    if Recorder.seen[track] then return end
-    Recorder.seen[track] = true
+    if Recorder.seenTracks[track] then return end
+    Recorder.seenTracks[track] = true
     local anim = track.Animation
-    local id = anim and anim.AnimationId or ""
-    local d = { id = id, pr = track.Priority.Name, sp = r3(track.Speed),
-        w = r3(track.WeightTarget), lp = track.Looped, nm = track.Name }
-    local ev = Recorder.add("Animation", d)
-    local s = Recorder.animSummary[id]
-    if not s then
-        Recorder.animSummary[id] = { id = id, t = ev and ev.t or 0, n = 1, pr = d.pr }
-    else
-        s.n += 1
-    end
+    Recorder.add("Animation", { id = anim and anim.AnimationId or "", pr = track.Priority.Name,
+        sp = r3(track.Speed), w = r3(track.WeightTarget) })
 end
 
-function Recorder.addConn(list, sig, fn)
+local function addConn(list, sig, fn)
     local c = sig:Connect(fn)
     list[#list + 1] = c
     return c
@@ -604,12 +543,12 @@ function Recorder.bindTool(tool)
     if Recorder.boundTools[tool] then return end
     Recorder.boundTools[tool] = true
     local L = Recorder.charConns
-    Recorder.addConn(L, tool.Equipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Equipped" }) end)
-    Recorder.addConn(L, tool.Unequipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Unequipped" }) end)
-    Recorder.addConn(L, tool.Activated, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Activated" }) end)
+    addConn(L, tool.Equipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Equipped" }) end)
+    addConn(L, tool.Unequipped, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Unequipped" }) end)
+    addConn(L, tool.Activated, function() Recorder.add("ToolActivated", { n = tool.Name, ev = "Activated" }) end)
 end
 
--- Conecta os hooks do personagem (reconectado automaticamente em respawn)
+-- Reconecta ao respawnar durante a gravação
 function Recorder.bindCharacter(char)
     Recorder.unbindChar()
     if not char then return end
@@ -617,103 +556,73 @@ function Recorder.bindCharacter(char)
     local root = char:WaitForChild("HumanoidRootPart", 5)
     if not hum or not Recorder.active then return end
     local L = Recorder.charConns
-
-    Recorder.addConn(L, hum.Jumping, function(active)
-        if active then
-            Recorder.add("Jump", { up = hum.UseJumpPower, pw = r3(hum.UseJumpPower and hum.JumpPower or hum.JumpHeight) })
-        end
-    end)
-    Recorder.addConn(L, hum.StateChanged, function(old, new)
-        Recorder.add("StateChange", { s = new.Name, o = old.Name })
-    end)
-    Recorder.addConn(L, hum.Running, function(speed) Recorder.runSpeed = speed end)
-
-    local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
-    if animator then
-        Recorder.addConn(L, animator.AnimationPlayed, function(track) Recorder.logTrack(track) end)
+    addConn(L, hum.Jumping, function(active) if active then Recorder.add("Jump", {}) end end)
+    if S.recordAnim then
+        local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 3)
+        if animator then addConn(L, animator.AnimationPlayed, Recorder.logTrack) end
     end
-
     for _, t in ipairs(char:GetChildren()) do if t:IsA("Tool") then Recorder.bindTool(t) end end
-    Recorder.addConn(L, char.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
+    addConn(L, char.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
     local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
     if bp then
         for _, t in ipairs(bp:GetChildren()) do if t:IsA("Tool") then Recorder.bindTool(t) end end
-        Recorder.addConn(L, bp.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
+        addConn(L, bp.ChildAdded, function(t) if t:IsA("Tool") then Recorder.bindTool(t) end end)
     end
-
-    if root then
-        local lastTouch = {}
-        Recorder.addConn(L, root.Touched, function(part)
+    local rep = Diag.report
+    if root and rep and (rep.touchInterests or 0) > 0 then
+        local last = {}
+        addConn(L, root.Touched, function(part)
             if not part:FindFirstChildOfClass("TouchTransmitter") then return end
             local now = os.clock()
-            if lastTouch[part] and now - lastTouch[part] < 0.5 then return end
-            lastTouch[part] = now
+            if last[part] and now - last[part] < 0.5 then return end
+            last[part] = now
             Recorder.add("TouchPart", { p = instPath(part) })
         end)
     end
 end
 
--- Amostragem por frame (movimento, câmera e polling de animações)
 function Recorder.sample()
     if not Recorder.active then return end
     local nowMs = math.floor((os.clock() - Recorder.t0) * 1000)
     local hum, root = getHum(), getRoot()
-
-    if hum and nowMs - Recorder.lastMoveMs >= S.moveSampleRateMs then
+    if hum and root and nowMs - Recorder.lastMoveMs >= S.moveSampleRateMs then
         Recorder.lastMoveMs = nowMs
-        local md, ws = hum.MoveDirection, hum.WalkSpeed
-        if (md - Recorder.lastMD).Magnitude > 0.02 or nowMs - Recorder.lastForceMs >= 500 then
-            Recorder.lastMD = md
-            Recorder.lastForceMs = nowMs
-            local d = { d = { r3(md.X), r3(md.Y), r3(md.Z) }, ws = r3(ws),
-                sprint = ws > Recorder.baseWS + 0.5, rs = r3(Recorder.runSpeed or 0),
-                st = hum:GetState().Name }
-            if root then
-                local p = root.Position
-                d.p = { r3(p.X), r3(p.Y), r3(p.Z) }
-            end
-            Recorder.add("Move", d)
+        local p = root.Position
+        local moving = hum.MoveDirection.Magnitude > 0.05
+        if (moving and (p - Recorder.lastP).Magnitude >= 0.4) or (not moving and Recorder.wasMoving) then
+            Recorder.add("Move", { p = { r3(p.X), r3(p.Y), r3(p.Z) } })
+            Recorder.lastP = p
         end
+        Recorder.wasMoving = moving
+        local ws = hum.WalkSpeed
         if math.abs(ws - Recorder.lastWS) > 0.01 then
             Recorder.lastWS = ws
-            Recorder.add("Sprint", { ws = r3(ws), on = ws > Recorder.baseWS + 0.5, base = r3(Recorder.baseWS) })
+            Recorder.add("Sprint", { ws = r3(ws), on = ws > Recorder.baseWS + 0.5 })
         end
     end
-
-    local c = cam()
-    if c and nowMs - Recorder.lastCamMs >= S.cameraSampleRateMs then
+    if S.recordCamera and nowMs - Recorder.lastCamMs >= 100 then
         Recorder.lastCamMs = nowMs
-        local cf, last = c.CFrame, Recorder.lastCF
-        if not last or (cf.Position - last.Position).Magnitude > 0.01
-            or cf.LookVector:Dot(last.LookVector) < 0.99999 then
-            Recorder.lastCF = cf
-            local comps = { cf:GetComponents() }
+        local c = cam()
+        if c and (not Recorder.lastCF or (c.CFrame.Position - Recorder.lastCF.Position).Magnitude > 0.05
+            or c.CFrame.LookVector:Dot(Recorder.lastCF.LookVector) < 0.9999) then
+            Recorder.lastCF = c.CFrame
+            local comps = { c.CFrame:GetComponents() }
             for i = 1, #comps do comps[i] = r4(comps[i]) end
             Recorder.add("Camera", { c = comps })
         end
     end
-
-    if hum and nowMs - Recorder.lastAnimMs >= 500 then
-        Recorder.lastAnimMs = nowMs
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do Recorder.logTrack(tr) end
-        end
-    end
 end
 
--- Log de RemoteEvent/RemoteFunction chamados pelo jogador (via hook __namecall)
-genv.RouteHubRemoteLogger = nil
+-- Remotes: hook em __namecall (instalado uma única vez, logger trocável)
 local function remoteLogger(remote, method, args)
     if not Recorder.active or State.mode == "replay" then return end
-    local ok = pcall(function()
+    pcall(function()
         if typeof(remote) ~= "Instance" then return end
         if not (remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction")) then return end
         local list = {}
         for i = 1, args.n do list[i] = ser(args[i]) end
         Recorder.add("Remote", { p = instPath(remote), m = method, n = args.n, a = list, nm = remote.Name })
     end)
-    return ok
 end
 
 local function installRemoteHook()
@@ -726,10 +635,7 @@ local function installRemoteHook()
             local m = API.getnamecallmethod()
             if m == "FireServer" or m == "InvokeServer" then
                 local lg = genv.RouteHubRemoteLogger
-                if lg then
-                    local args = table.pack(...)
-                    task.defer(lg, self, m, args) -- fora do hook: não altera o namecall original
-                end
+                if lg then task.defer(lg, self, m, table.pack(...)) end -- fora do hook
             end
             return old(self, ...)
         end))
@@ -738,92 +644,60 @@ local function installRemoteHook()
     return ok
 end
 
--- Fallback sem hookmetamethod: registra apenas OnClientEvent (informativo, não reproduzível)
-function Recorder.bindRemoteFallback()
-    task.spawn(function()
-        local n = 0
-        for _, o in ipairs(ReplicatedStorage:GetDescendants()) do
-            if o:IsA("RemoteEvent") then
-                Recorder.addConn(Recorder.conns, o.OnClientEvent, function(...)
-                    local args = table.pack(...)
-                    local list = {}
-                    for i = 1, args.n do list[i] = ser(args[i]) end
-                    Recorder.add("Remote", { p = instPath(o), m = "OnClientEvent", dir = "in", n = args.n, a = list, nm = o.Name })
-                end)
-            end
-            n += 1
-            if n % 1500 == 0 then task.wait() end
-        end
-    end)
-end
-
 function Recorder.bindClickDetectors()
-    task.spawn(function()
-        local n = 0
-        local function hook(cd)
-            Recorder.addConn(Recorder.conns, cd.MouseClick, function()
-                Recorder.add("ClickDetector", { p = instPath(cd), ev = "MouseClick" })
+    for _, o in ipairs(workspace:GetDescendants()) do
+        if o:IsA("ClickDetector") then
+            pcall(function()
+                addConn(Recorder.conns, o.MouseClick, function()
+                    Recorder.add("ClickDetector", { p = instPath(o) })
+                end)
             end)
         end
-        for _, o in ipairs(workspace:GetDescendants()) do
-            if o:IsA("ClickDetector") then pcall(hook, o) end
-            n += 1
-            if n % 1500 == 0 then task.wait() end
-        end
-        Recorder.addConn(Recorder.conns, workspace.DescendantAdded, function(o)
-            if o:IsA("ClickDetector") then pcall(hook, o) end
-        end)
-    end)
+    end
 end
 
 function Recorder.start()
-    if Recorder.active then return end
-    Recorder.events = {}
-    Recorder.animSummary = {}
-    Recorder.seen = setmetatable({}, { __mode = "k" })
+    if Recorder.active then return false end
+    local root = getRoot()
+    if not (root and getHum()) then return false end
+    Recorder.events, Recorder.keysDown = {}, {}
     Recorder.boundTools = setmetatable({}, { __mode = "k" })
-    Recorder.touches, Recorder.touchLast, Recorder.downSet, Recorder.keysDown = {}, {}, {}, {}
-    Recorder.touchId = 0
+    Recorder.seenTracks = setmetatable({}, { __mode = "k" })
     Recorder.t0 = os.clock()
-    Recorder.lastMoveMs, Recorder.lastForceMs, Recorder.lastCamMs, Recorder.lastAnimMs = -1000, -1000, -1000, -1000
-    Recorder.lastCF = nil
-    Recorder.lastMD = Vector3.new(9, 9, 9)
-    local hum = getHum()
-    local ws = hum and hum.WalkSpeed or 16
-    Recorder.baseWS = math.min(ws, 16)
-    Recorder.lastWS = ws
+    Recorder.startPos = root.Position
+    Recorder.lastP = root.Position
+    Recorder.wasMoving = false
+    Recorder.lastMoveMs, Recorder.lastCamMs, Recorder.lastCF = -1000, -1000, nil
+    local ws = getHum().WalkSpeed
+    Recorder.baseWS, Recorder.lastWS = math.min(ws, 16), ws
     Recorder.active = true
 
     genv.RouteHubRemoteLogger = remoteLogger
-    local hooked = installRemoteHook()
-    if not hooked then Recorder.bindRemoteFallback() end
-
-    local rep = Diag.report or genv.RouteHubDiag
-    if not (rep and rep.clickDetectors == 0) then Recorder.bindClickDetectors() end
+    installRemoteHook()
 
     local L = Recorder.conns
-    Recorder.addConn(L, UIS.InputBegan, Recorder.onInputBegan)
-    Recorder.addConn(L, UIS.InputEnded, Recorder.onInputEnded)
-    Recorder.addConn(L, UIS.InputChanged, Recorder.onInputChanged)
-    Recorder.addConn(L, RunService.RenderStepped, Recorder.sample)
+    addConn(L, UIS.InputBegan, Recorder.onInputBegan)
+    addConn(L, UIS.InputEnded, Recorder.onInputEnded)
+    addConn(L, RunService.Heartbeat, Recorder.sample)
 
-    -- ProximityPrompt: hold / triggered
     local holds = {}
-    Recorder.addConn(L, PPS.PromptButtonHoldBegan, function(prompt, plr)
+    addConn(L, PPS.PromptButtonHoldBegan, function(prompt, plr)
         if plr ~= LocalPlayer then return end
-        holds[prompt] = Recorder.add("PromptHold", { p = instPath(prompt), dur = prompt.HoldDuration, ph = "begin" })
+        holds[prompt] = Recorder.add("PromptHold", { p = instPath(prompt), dur = prompt.HoldDuration })
     end)
-    Recorder.addConn(L, PPS.PromptButtonHoldEnded, function(prompt, plr)
+    addConn(L, PPS.PromptButtonHoldEnded, function(prompt, plr)
         if plr ~= LocalPlayer then return end
         local ev = holds[prompt]
         holds[prompt] = nil
-        if ev then ev.data.dur = math.max((Recorder.t0 and (math.floor((os.clock() - Recorder.t0) * 1000) - ev.t)) / 1000, 0) end
+        if ev then ev.data.dur = math.max((math.floor((os.clock() - Recorder.t0) * 1000) - ev.t) / 1000, 0) end
     end)
-    Recorder.addConn(L, PPS.PromptTriggered, function(prompt, plr)
+    addConn(L, PPS.PromptTriggered, function(prompt, plr)
         if plr ~= LocalPlayer then return end
         Recorder.add("PromptTriggered", { p = instPath(prompt), hd = prompt.HoldDuration })
     end)
 
+    local rep = Diag.report
+    if rep and (rep.clickDetectors or 0) > 0 then task.spawn(Recorder.bindClickDetectors) end
     task.spawn(Recorder.bindCharacter, getChar())
     return true
 end
@@ -835,105 +709,107 @@ function Recorder.stop()
     for _, c in ipairs(Recorder.conns) do pcall(function() c:Disconnect() end) end
     Recorder.conns = {}
     Recorder.unbindChar()
-    local anims = {}
-    for _, s in pairs(Recorder.animSummary) do anims[#anims + 1] = s end
-    table.sort(anims, function(a, b) return (a.t or 0) < (b.t or 0) end)
     local okG, guid = pcall(HttpService.GenerateGUID, HttpService, false)
+    local sp = Recorder.startPos
     local route = {
-        id = okG and guid or tostring(os.time()),
-        name = "Rota_" .. os.time(),
-        created = os.time(),
-        duration = duration,
-        count = #Recorder.events,
-        events = Recorder.events,
-        animations = anims,
-        baseWalkSpeed = Recorder.baseWS,
-        placeId = game.PlaceId,
+        id = okG and guid or tostring(os.time()), name = "Rota_" .. os.time(), created = os.time(),
+        duration = duration, count = #Recorder.events, events = Recorder.events,
+        startPos = sp and { r3(sp.X), r3(sp.Y), r3(sp.Z) } or nil,
+        baseWalkSpeed = Recorder.baseWS, placeId = game.PlaceId,
     }
     Recorder.events = {}
     return route
 end
 
---[[ === SEÇÃO 8: MÓDULO DE REPLAY === ]]
-local Replay = { running = false, cancel = false, route = nil }
-local RS = { move = Vector3.zero, camTarget = nil, camSet = false, heldKeys = {},
-    pointerDown = {}, btnPos = {}, animCache = {}, recentHold = {}, origWS = nil, origCamType = nil }
+--[[ === SEÇÃO 8: REPLAY (ANDA ATÉ O PONTO INICIAL, SEM TELEPORTE) === ]]
+local Replay = { running = false, cancel = false, route = nil, status = "" }
+local RS = { heldKeys = {}, animCache = {}, recentHold = {}, origWS = nil,
+    camTarget = nil, camSet = false, origCamType = nil }
 local ReplayAnimPriorities = { Action = true, Action2 = true, Action3 = true, Action4 = true }
--- Prioridades Core/Idle/Movement não são reaplicadas: o script Animate do jogo já as toca pelo Move.
-local ReplayStates = { Climbing = true, Swimming = true, GettingUp = true } -- estados seguros de reaplicar
 local Exec = {}
 
-local function guiCenterScreen(obj)
-    local ap, as = obj.AbsolutePosition, obj.AbsoluteSize
-    local sg = obj:FindFirstAncestorOfClass("ScreenGui")
-    local inset = (sg and sg.IgnoreGuiInset) and Vector2.zero or GuiService:GetGuiInset()
-    return ap.X + as.X / 2 + inset.X, ap.Y + as.Y / 2 + inset.Y
+local function hMoveTo(pos)
+    local h = getHum()
+    if h then h:MoveTo(pos) end
+end
+
+local function flatDist(a, b) return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude end
+
+-- Anda (de verdade) até pos usando Pathfinding quando possível; nunca teleporta
+local function walkTo(pos, timeout)
+    local root = getRoot()
+    if not (root and getHum()) then return false end
+    local deadline = os.clock() + timeout
+    local function arrived()
+        local r = getRoot()
+        return r ~= nil and flatDist(r.Position, pos) < 4 and math.abs(r.Position.Y - pos.Y) < 10
+    end
+    if arrived() then return true end
+
+    local waypoints
+    local okP = pcall(function()
+        local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
+        path:ComputeAsync(root.Position, pos)
+        if path.Status == Enum.PathStatus.Success then waypoints = path:GetWaypoints() end
+    end)
+    if okP and waypoints then
+        for _, wp in ipairs(waypoints) do
+            if Replay.cancel or os.clock() > deadline then break end
+            local h = getHum()
+            if not h then break end
+            if wp.Action == Enum.PathWaypointAction.Jump then h.Jump = true end
+            h:MoveTo(wp.Position)
+            local t0 = os.clock()
+            while not Replay.cancel and os.clock() - t0 < 3 do
+                local r = getRoot()
+                if not r or flatDist(r.Position, wp.Position) < 3.5 then break end
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end
+    -- Aproximação final direta (também é o fallback sem Pathfinding)
+    while not Replay.cancel and os.clock() < deadline and not arrived() do
+        hMoveTo(pos) -- MoveTo expira em ~8s, então reemite
+        local t0 = os.clock()
+        while not Replay.cancel and os.clock() - t0 < 2 and not arrived() do RunService.Heartbeat:Wait() end
+    end
+    return arrived()
 end
 
 local function fireGuiButton(obj)
-    if not API.getconnections then return end -- fallback: sem getconnections, só clique virtual
-    for _, sigName in ipairs({ "MouseButton1Click", "Activated", "MouseButton1Down", "MouseButton1Up" }) do
+    if not API.getconnections then return 0 end
+    local fired = 0
+    for _, sigName in ipairs({ "Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up" }) do
         pcall(function()
-            for _, c in ipairs(API.getconnections(obj[sigName])) do c:Fire() end
+            for _, c in ipairs(API.getconnections(obj[sigName])) do c:Fire() fired += 1 end
         end)
     end
+    return fired
 end
 
-local function pointerPos(ev, key)
-    local d = ev.data
-    if d.phase == "down" and d.btn then
-        local obj = resolvePath(d.btn)
-        if obj and obj:IsA("GuiObject") then
-            local x, y = guiCenterScreen(obj)
-            RS.btnPos[key] = { x, y, obj }
-            return x, y, obj
-        end
-    elseif d.phase ~= "down" and RS.btnPos[key] then
-        local p = RS.btnPos[key]
-        return p[1], p[2], p[3]
-    end
-    local vp = cam().ViewportSize
-    return d.x * vp.X, d.y * vp.Y, nil
-end
-
-local function sendPointer(ev, isTouch)
-    local d = ev.data
-    local key = ev.type .. tostring(d.id or d.b or 0)
-    local x, y, obj = pointerPos(ev, key)
-    if d.phase == "up" then RS.btnPos[key] = nil; RS.pointerDown[key] = nil end
-    if not VIM then
-        if obj and d.phase == "down" then fireGuiButton(obj) end -- fallback sem VirtualInputManager
-        return
-    end
-    if d.phase == "down" then RS.pointerDown[key] = { x = x, y = y, touch = isTouch, b = d.b, id = d.id } end
-    if isTouch then
-        local state = (d.phase == "down" and 0) or (d.phase == "move" and 1) or 2
-        local ok = pcall(function() VIM:SendTouchEvent(d.id or 0, state, x, y) end)
-        if ok then return end
-    end
-    if d.phase == "move" then
-        pcall(function() VIM:SendMouseMoveEvent(x, y, game) end)
-        return
-    end
-    pcall(function() VIM:SendMouseButtonEvent(x, y, (d.b or 1) - 1, d.phase == "down", game, 0) end)
+local function clickGuiObject(obj)
+    if fireGuiButton(obj) > 0 then return end -- mais confiável para botões de loja
+    if not VIM then return end
+    local ap, as = obj.AbsolutePosition, obj.AbsoluteSize
+    local sg = obj:FindFirstAncestorOfClass("ScreenGui")
+    local inset = (sg and sg.IgnoreGuiInset) and Vector2.zero or GuiService:GetGuiInset()
+    local x, y = ap.X + as.X / 2 + inset.X, ap.Y + as.Y / 2 + inset.Y
+    pcall(function() VIM:SendTouchEvent(0, 0, x, y) end)
+    pcall(function() VIM:SendMouseButtonEvent(x, y, 0, true, game, 0) end)
+    task.wait(0.05)
+    pcall(function() VIM:SendTouchEvent(0, 2, x, y) end)
+    pcall(function() VIM:SendMouseButtonEvent(x, y, 0, false, game, 0) end)
 end
 
 function Exec.Move(ev)
-    local d = ev.data
-    RS.move = Vector3.new(d.d[1], d.d[2], d.d[3])
-    local hum = getHum()
-    if hum and d.ws and math.abs(hum.WalkSpeed - d.ws) > 0.01 then hum.WalkSpeed = d.ws end
+    local p = ev.data.p
+    if p then hMoveTo(Vector3.new(p[1], p[2], p[3])) end
 end
-
 function Exec.Sprint(ev)
-    local hum = getHum()
-    if hum then hum.WalkSpeed = ev.data.ws end
+    local h = getHum()
+    if h and ev.data.ws then h.WalkSpeed = ev.data.ws end
 end
-
-function Exec.Jump(ev)
-    local hum = getHum()
-    if hum then hum.Jump = true end
-end
+function Exec.Jump() local h = getHum() if h then h.Jump = true end end
 
 function Exec.Camera(ev)
     local c = cam()
@@ -942,35 +818,33 @@ function Exec.Camera(ev)
         RS.origCamType = c.CameraType
         c.CameraType = Enum.CameraType.Scriptable
         RS.camSet = true
-        c.CFrame = CFrame.new(unpack(ev.data.c))
     end
     RS.camTarget = CFrame.new(unpack(ev.data.c))
 end
 
 function Exec.KeyDown(ev)
-    if ev.data.gp or not VIM then return end -- sem VirtualInputManager: tecla não reproduzível
     local kc = Enum.KeyCode[ev.data.k]
-    if not kc then return end
+    if not (VIM and kc) then return end
     RS.heldKeys[ev.data.k] = true
     VIM:SendKeyEvent(true, kc, false, game)
 end
-
 function Exec.KeyUp(ev)
-    if ev.data.gp or not VIM then return end
     local kc = Enum.KeyCode[ev.data.k]
-    if not kc then return end
+    if not (VIM and kc) then return end
     RS.heldKeys[ev.data.k] = nil
     VIM:SendKeyEvent(false, kc, false, game)
 end
 
-function Exec.Click(ev) sendPointer(ev, false) end
-function Exec.Touch(ev) sendPointer(ev, true) end
+function Exec.Click(ev)
+    local obj = resolvePath(ev.data.btn)
+    if obj and obj:IsA("GuiObject") then task.spawn(clickGuiObject, obj) end
+end
 
 function Exec.Animation(ev)
     local d = ev.data
     if not ReplayAnimPriorities[d.pr] or not d.id or d.id == "" then return end
-    local hum = getHum()
-    local animator = hum and hum:FindFirstChildOfClass("Animator")
+    local h = getHum()
+    local animator = h and h:FindFirstChildOfClass("Animator")
     if not animator then return end
     local track = RS.animCache[d.id]
     if not track then
@@ -986,7 +860,6 @@ end
 
 function Exec.Remote(ev)
     local d = ev.data
-    if d.dir == "in" then return end -- evento recebido do servidor: não reproduzível
     local remote = resolvePath(d.p)
     if not remote then return end
     local args = {}
@@ -1005,8 +878,8 @@ function Exec.PromptHold(ev)
     local dur = (ev.data.dur or prompt.HoldDuration) / math.max(S.speedMultiplier, 0.01)
     task.spawn(function()
         local ok = pcall(function() prompt:InputHoldBegin() end)
-        if not ok and API.fireproximityprompt then
-            pcall(API.fireproximityprompt, prompt)
+        if not ok then
+            if API.fireproximityprompt then pcall(API.fireproximityprompt, prompt) end
             return
         end
         task.wait(math.max(dur, 0.05))
@@ -1018,11 +891,11 @@ function Exec.PromptTriggered(ev)
     local prompt = resolvePath(ev.data.p)
     if not prompt or not prompt:IsA("ProximityPrompt") then return end
     local last = RS.recentHold[prompt]
-    if last and os.clock() - last < 2 + prompt.HoldDuration then return end -- o hold já dispara o prompt
+    if last and os.clock() - last < 2 + prompt.HoldDuration then return end -- o hold já aciona
     if API.fireproximityprompt then
         API.fireproximityprompt(prompt)
     else
-        prompt:InputHoldBegin() -- fallback sem fireproximityprompt
+        prompt:InputHoldBegin()
         task.wait()
         prompt:InputHoldEnd()
     end
@@ -1030,7 +903,7 @@ end
 
 function Exec.ClickDetector(ev)
     local cd = resolvePath(ev.data.p)
-    if cd and API.fireclickdetector then API.fireclickdetector(cd) end -- sem fireclickdetector: ignorado
+    if cd and API.fireclickdetector then API.fireclickdetector(cd) end
 end
 
 function Exec.TouchPart(ev)
@@ -1049,26 +922,18 @@ local function findTool(name)
     local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
     t = bp and bp:FindFirstChild(name)
     if t and t:IsA("Tool") then return t end
-    return nil
 end
 
 function Exec.ToolActivated(ev)
-    local d, hum = ev.data, getHum()
+    local d, h = ev.data, getHum()
     if d.ev == "Equipped" then
         local tool = findTool(d.n)
-        if tool and hum then hum:EquipTool(tool) end
+        if tool and h then h:EquipTool(tool) end
     elseif d.ev == "Unequipped" then
-        if hum then hum:UnequipTools() end
+        if h then h:UnequipTools() end
     else
         local tool = findTool(d.n)
         if tool then tool:Activate() end
-    end
-end
-
-function Exec.StateChange(ev)
-    local hum = getHum()
-    if hum and ReplayStates[ev.data.s] then
-        hum:ChangeState(Enum.HumanoidStateType[ev.data.s])
     end
 end
 
@@ -1077,31 +942,21 @@ local function replayRelease()
         for key in pairs(RS.heldKeys) do
             pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode[key], false, game) end)
         end
-        for _, p in pairs(RS.pointerDown) do
-            pcall(function()
-                if p.touch then VIM:SendTouchEvent(p.id or 0, 2, p.x, p.y)
-                else VIM:SendMouseButtonEvent(p.x, p.y, (p.b or 1) - 1, false, game, 0) end
-            end)
-        end
     end
-    RS.heldKeys, RS.pointerDown, RS.btnPos = {}, {}, {}
+    RS.heldKeys, RS.recentHold = {}, {}
     for _, tr in pairs(RS.animCache) do pcall(function() tr:Stop(0.1) end) end
     RS.animCache = {}
-    RS.move = Vector3.zero
-    RS.recentHold = {}
 end
 
 local function replayBegin()
-    local hum = getHum()
-    RS.origWS = hum and hum.WalkSpeed
+    local h = getHum()
+    RS.origWS = h and h.WalkSpeed
     RS.camSet, RS.camTarget = false, nil
     pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
     RunService:BindToRenderStep("RouteHubReplay", Enum.RenderPriority.Last.Value, function()
-        local h = getHum()
-        if h then pcall(function() h:Move(RS.move, false) end) end
         if RS.camTarget then
             local c = cam()
-            if c then c.CFrame = c.CFrame:Lerp(RS.camTarget, 0.6) end
+            if c then c.CFrame = c.CFrame:Lerp(RS.camTarget, 0.5) end
         end
     end)
 end
@@ -1109,42 +964,32 @@ end
 local function replayEnd()
     pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
     replayRelease()
-    local hum = getHum()
-    if hum then
-        pcall(function() hum:Move(Vector3.zero, false) end)
-        if RS.origWS then hum.WalkSpeed = RS.origWS end
+    local h, r = getHum(), getRoot()
+    if h and r then
+        h:MoveTo(r.Position) -- para o boneco
+        if RS.origWS then h.WalkSpeed = RS.origWS end
     end
     local c = cam()
-    if c and RS.camSet then
-        c.CameraType = RS.origCamType or Enum.CameraType.Custom
-    end
+    if c and RS.camSet then c.CameraType = RS.origCamType or Enum.CameraType.Custom end
     RS.camSet, RS.camTarget = false, nil
 end
 
--- Uma passada completa pela rota. Retorna true se terminou sem cancelar
 function Replay.pass(events, duration)
     replayRelease()
-    local idx, startClock, lastUI = 1, os.clock(), 0
-    local errs = 0
+    local idx, startClock, lastUI, errs = 1, os.clock(), 0, 0
     while not Replay.cancel do
         local now = (os.clock() - startClock) * S.speedMultiplier * 1000
         while idx <= #events and events[idx].e.t <= now do
             local ev = events[idx].e
             idx += 1
             local fn = Exec[ev.type]
-            if fn then
-                local ok = pcall(fn, ev)
-                if not ok then errs += 1 end -- erro por evento não interrompe o replay
-            end
-            if S.actionDelayMs > 0 then
-                local w = task.wait(S.actionDelayMs / 1000)
-                startClock += w -- pausa a linha do tempo durante o delay extra
-            end
+            if fn and not pcall(fn, ev) then errs += 1 end
+            if S.actionDelayMs > 0 then startClock += task.wait(S.actionDelayMs / 1000) end
         end
         if os.clock() - lastUI > 0.1 then
             lastUI = os.clock()
             UI.setProgress(duration > 0 and math.clamp(now / duration, 0, 1) or 1,
-                string.format("%s / %s", fmtTime(math.min(now, duration)), fmtTime(duration)))
+                fmtTime(math.min(now, duration)) .. " / " .. fmtTime(duration))
         end
         if idx > #events and now >= duration then break end
         RunService.Heartbeat:Wait()
@@ -1167,10 +1012,21 @@ function Replay.run(route)
         return a.e.t < b.e.t
     end)
     local duration = route.duration or (events[#events] and events[#events].e.t) or 0
+    local startPos = route.startPos and Vector3.new(route.startPos[1], route.startPos[2], route.startPos[3]) or nil
 
     replayBegin()
     local totalErrs = 0
     repeat
+        if startPos then
+            Replay.status = "Indo até o ponto inicial..."
+            UI.setProgress(0, "Indo até o ponto inicial...")
+            local arrived = walkTo(startPos, 60)
+            if not arrived and not Replay.cancel then
+                Toast.show("Não cheguei ao ponto inicial, reproduzindo mesmo assim", "error")
+            end
+        end
+        if Replay.cancel then break end
+        Replay.status = "Reproduzindo: " .. tostring(route.name)
         local finished, errs = Replay.pass(events, duration)
         totalErrs += errs or 0
         if finished and S.loopReplay and not Replay.cancel then task.wait(0.25) end
@@ -1178,7 +1034,7 @@ function Replay.run(route)
     replayEnd()
 
     warn(string.format("[REPLAY] Finalizado em %.1fs", os.clock() - tStart))
-    if totalErrs > 0 then Toast.show(totalErrs .. " evento(s) falharam no replay", "error") end
+    if totalErrs > 0 then Toast.show(totalErrs .. " evento(s) falharam", "error") end
     Replay.running = false
     UI.showProgress(false)
     UI.setMode("idle")
@@ -1186,61 +1042,49 @@ end
 
 function Replay.start(route)
     if Replay.running then return end
-    if Recorder.active then Toast.show("Pare a gravação antes de reproduzir", "error") return end
+    if Recorder.active then Toast.show("Pare a gravação antes", "error") return end
     task.spawn(Replay.run, route)
 end
+function Replay.stop() if Replay.running then Replay.cancel = true end end
 
-function Replay.stop()
-    if Replay.running then Replay.cancel = true end
-end
-
---[[ === SEÇÃO 9: CONSTRUÇÃO DA UI === ]]
+--[[ === SEÇÃO 9: WIDGETS (SLIDER / TOGGLE) === ]]
 local function makeToggle(parent, text, init, onChange)
     local row = new("Frame", { Size = UDim2.new(1, -6, 0, 40), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, parent)
-    corner(row, 8)
-    label(row, text, UDim2.new(1, -70, 1, 0), UDim2.new(0, 10, 0, 0), Enum.Font.GothamBold, 12)
-    local sw = new("TextButton", {
-        Text = "", AutoButtonColor = false, Size = UDim2.fromOffset(40, 20),
+    corner(row, 10)
+    label(row, text, UDim2.new(1, -70, 1, 0), UDim2.new(0, 12, 0, 0), Enum.Font.GothamBold, 12)
+    local sw = new("TextButton", { Text = "", AutoButtonColor = false, Size = UDim2.fromOffset(42, 22),
         AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
-        BackgroundColor3 = init and C.accent or C.panel2, BorderSizePixel = 0,
-    }, row)
-    corner(sw, 10)
-    local knob = new("Frame", {
-        Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0, 0.5),
-        Position = init and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
-        BackgroundColor3 = C.text, BorderSizePixel = 0,
-    }, sw)
-    corner(knob, 8)
+        BackgroundColor3 = init and C.accent or C.panel2, BorderSizePixel = 0 }, row)
+    corner(sw, 11)
+    local knob = new("Frame", { Size = UDim2.fromOffset(18, 18), AnchorPoint = Vector2.new(0, 0.5),
+        Position = init and UDim2.new(1, -20, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+        BackgroundColor3 = C.text, BorderSizePixel = 0 }, sw)
+    corner(knob, 9)
     local value = init
     sw.Activated:Connect(function()
         value = not value
         tween(sw, 0.15, { BackgroundColor3 = value and C.accent or C.panel2 })
-        tween(knob, 0.15, { Position = value and UDim2.new(1, -18, 0.5, 0) or UDim2.new(0, 2, 0.5, 0) })
+        tween(knob, 0.15, { Position = value and UDim2.new(1, -20, 0.5, 0) or UDim2.new(0, 2, 0.5, 0) })
         onChange(value)
         saveAll()
     end)
-    return row
+    return ord(row)
 end
 
 local function makeSlider(parent, text, min, max, step, init, fmt, onChange, scroller)
     local row = new("Frame", { Size = UDim2.new(1, -6, 0, 54), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, parent)
-    corner(row, 8)
-    label(row, text, UDim2.new(0.6, 0, 0, 20), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 12)
-    local valLbl = label(row, "", UDim2.new(0.4, -10, 0, 20), UDim2.new(0.6, 0, 0, 6), Enum.Font.GothamBold, 12,
+    corner(row, 10)
+    label(row, text, UDim2.new(0.6, 0, 0, 20), UDim2.new(0, 12, 0, 6), Enum.Font.GothamBold, 12)
+    local valLbl = label(row, "", UDim2.new(0.4, -12, 0, 20), UDim2.new(0.6, 0, 0, 6), Enum.Font.GothamBold, 12,
         C.accent2, Enum.TextXAlignment.Right)
-    local track_ = new("TextButton", {
-        Text = "", AutoButtonColor = false, Size = UDim2.new(1, -24, 0, 6),
-        Position = UDim2.new(0, 12, 0, 38), BackgroundColor3 = C.bg, BorderSizePixel = 0,
-    }, row)
-    corner(track_, 3)
-    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent, BorderSizePixel = 0 }, track_)
+    local bar = new("TextButton", { Text = "", AutoButtonColor = false, Size = UDim2.new(1, -28, 0, 6),
+        Position = UDim2.new(0, 14, 0, 38), BackgroundColor3 = C.bg, BorderSizePixel = 0 }, row)
+    corner(bar, 3)
+    local fill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent, BorderSizePixel = 0 }, bar)
     corner(fill, 3)
-    local knob = new("Frame", {
-        Size = UDim2.fromOffset(16, 16), AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = C.text, BorderSizePixel = 0, ZIndex = 2,
-    }, track_)
-    corner(knob, 8)
-
+    local knob = new("Frame", { Size = UDim2.fromOffset(18, 18), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0), BackgroundColor3 = C.text, BorderSizePixel = 0, ZIndex = 2 }, bar)
+    corner(knob, 9)
     local function set(v, fire)
         v = math.clamp(math.floor((v - min) / step + 0.5) * step + min, min, max)
         local a = (v - min) / (max - min)
@@ -1250,13 +1094,11 @@ local function makeSlider(parent, text, min, max, step, init, fmt, onChange, scr
         if fire then onChange(v) end
     end
     set(init, false)
-
     local dragging = false
     local function fromInput(input)
-        local a = math.clamp((input.Position.X - track_.AbsolutePosition.X) / math.max(track_.AbsoluteSize.X, 1), 0, 1)
-        set(min + a * (max - min), true)
+        set(min + math.clamp((input.Position.X - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1) * (max - min), true)
     end
-    track_.InputBegan:Connect(function(input)
+    bar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             if scroller then scroller.ScrollingEnabled = false end
@@ -1265,9 +1107,7 @@ local function makeSlider(parent, text, min, max, step, init, fmt, onChange, scr
     end)
     track(UIS.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch) then
-            fromInput(input)
-        end
+            or input.UserInputType == Enum.UserInputType.Touch) then fromInput(input) end
     end))
     track(UIS.InputEnded:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
@@ -1277,19 +1117,19 @@ local function makeSlider(parent, text, min, max, step, init, fmt, onChange, scr
             saveAll()
         end
     end))
-    return row
+    return ord(row)
 end
 
-local function applyBlur()
-    pcall(function()
-        local b = Lighting:FindFirstChild("RouteHubBlur")
-        if S.blur and UI.main and UI.main.Visible then
-            if not b then b = Instance.new("BlurEffect") b.Name = "RouteHubBlur" b.Size = 0 b.Parent = Lighting end
-            tween(b, 0.3, { Size = 8 })
-        elseif b then
-            b:Destroy()
-        end
-    end)
+--[[ === SEÇÃO 10: UI — AÇÕES === ]]
+function UI.setDiagText(txt) if UI.diagLabel then UI.diagLabel.Text = txt end end
+
+function UI.setProgress(frac, text)
+    if UI.progFill then UI.progFill.Size = UDim2.new(frac, 0, 1, 0) end
+    if UI.progLabel and text then UI.progLabel.Text = text end
+end
+function UI.showProgress(on)
+    if UI.progHolder then UI.progHolder.Visible = on end
+    if on then UI.setProgress(0, "00:00") end
 end
 
 function UI.switchTab(name)
@@ -1299,79 +1139,81 @@ function UI.switchTab(name)
         btn:SetAttribute("Base", on and C.accent or C.panel2)
         tween(btn, 0.15, { BackgroundColor3 = on and C.accent or C.panel2 })
     end
-    UI.currentTab = name
-end
-
-function UI.setProgress(frac, text)
-    if UI.progFill then UI.progFill.Size = UDim2.new(frac, 0, 1, 0) end
-    if UI.progLabel and text then UI.progLabel.Text = text end
-end
-
-function UI.showProgress(on)
-    if UI.progHolder then UI.progHolder.Visible = on end
-    if on then UI.setProgress(0, "00:00") end
 end
 
 function UI.setMode(mode)
     State.mode = mode
-    local b = UI.recBtn
-    if not b then return end
+    local b, lg = UI.recBtn, UI.logo
     if UI.pulse then UI.pulse:Cancel() UI.pulse = nil end
-    local idleSize = UDim2.new(1, 0, 0, 56)
-    if mode == "idle" then
-        b.Text = "● GRAVAR"
-        b:SetAttribute("Base", C.danger)
-        tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
-    elseif mode == "rec" then
-        b.Text = "■ PARAR"
-        b:SetAttribute("Base", C.danger)
-        tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
-        task.delay(0.27, function()
-            if State.mode == "rec" then
-                UI.pulse = TweenService:Create(b, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-                    { BackgroundColor3 = C.dangerDark, Size = UDim2.new(1, -10, 0, 52) })
-                UI.pulse:Play()
-            end
-        end)
-    elseif mode == "replay" then
-        b.Text = "■ PARAR REPLAY"
-        b:SetAttribute("Base", C.accent)
-        tween(b, 0.25, { BackgroundColor3 = C.accent, Size = idleSize })
+    if UI.logoPulse then UI.logoPulse:Cancel() UI.logoPulse = nil end
+    if b then
+        local idleSize = UDim2.new(1, 0, 0, 56)
+        if mode == "idle" then
+            b.Text = "● GRAVAR"
+            b:SetAttribute("Base", C.danger)
+            tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
+        elseif mode == "rec" then
+            b.Text = "■ PARAR"
+            b:SetAttribute("Base", C.danger)
+            tween(b, 0.25, { BackgroundColor3 = C.danger, Size = idleSize })
+            task.delay(0.27, function()
+                if State.mode == "rec" then
+                    UI.pulse = TweenService:Create(b, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+                        { BackgroundColor3 = C.dangerDark, Size = UDim2.new(1, -10, 0, 52) })
+                    UI.pulse:Play()
+                end
+            end)
+        else
+            b.Text = "■ PARAR REPLAY"
+            b:SetAttribute("Base", C.accent)
+            tween(b, 0.25, { BackgroundColor3 = C.accent, Size = idleSize })
+        end
+    end
+    if lg and UI.logoGrad and UI.logoText and UI.logoStroke then
+        if mode == "rec" then
+            UI.logoGrad.Color = ColorSequence.new(C.danger, C.dangerDark)
+            UI.logoText.Text = "●"
+            UI.logoPulse = TweenService:Create(UI.logoStroke, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+                { Transparency = 0.9 })
+            UI.logoPulse:Play()
+        elseif mode == "replay" then
+            UI.logoGrad.Color = ColorSequence.new(C.success, C.accent2)
+            UI.logoText.Text = "▶"
+            UI.logoStroke.Transparency = 0.1
+        else
+            UI.logoGrad.Color = ColorSequence.new(C.accent, C.accent2)
+            UI.logoText.Text = "R"
+            UI.logoStroke.Transparency = 0.1
+        end
     end
 end
 
 function UI.prompt(title, default, callback)
     if UI.promptFrame then UI.promptFrame:Destroy() end
-    local overlay = new("Frame", {
-        Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
-        BackgroundTransparency = 0.5, ZIndex = 40, BorderSizePixel = 0,
-    }, UI.main)
-    corner(overlay, 12)
+    local overlay = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.45, ZIndex = 40, BorderSizePixel = 0 }, UI.menu)
+    corner(overlay, 14)
     UI.promptFrame = overlay
-    local box = new("Frame", {
-        Size = UDim2.fromOffset(250, 126), AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C.panel, ZIndex = 41, BorderSizePixel = 0,
-    }, overlay)
-    corner(box, 10)
+    local box = new("Frame", { Size = UDim2.fromOffset(250, 126), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C.panel, ZIndex = 41, BorderSizePixel = 0 }, overlay)
+    corner(box, 12)
     stroke(box, C.accent, 0.4)
     label(box, title, UDim2.new(1, -20, 0, 22), UDim2.new(0, 10, 0, 8), Enum.Font.GothamBold, 13).ZIndex = 42
-    local tb = new("TextBox", {
-        Text = default or "", PlaceholderText = "Nome da rota", ClearTextOnFocus = false,
-        Size = UDim2.new(1, -20, 0, 32), Position = UDim2.new(0, 10, 0, 36),
-        BackgroundColor3 = C.bg, TextColor3 = C.text, PlaceholderColor3 = C.muted,
-        Font = Enum.Font.Gotham, TextSize = 13, ZIndex = 42, BorderSizePixel = 0,
-    }, box)
-    corner(tb, 6)
-    local ok = makeButton(box, "Confirmar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0, 10, 1, -40), C.success)
-    local cancel = makeButton(box, "Cancelar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0.5, 5, 1, -40), C.panel2)
-    ok.ZIndex, cancel.ZIndex = 42, 42
+    local tb = new("TextBox", { Text = default or "", PlaceholderText = "Nome da rota", ClearTextOnFocus = false,
+        Size = UDim2.new(1, -20, 0, 32), Position = UDim2.new(0, 10, 0, 36), BackgroundColor3 = C.bg,
+        TextColor3 = C.text, PlaceholderColor3 = C.muted, Font = Enum.Font.Gotham, TextSize = 13,
+        ZIndex = 42, BorderSizePixel = 0 }, box)
+    corner(tb, 8)
+    local okB = makeButton(box, "Confirmar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0, 10, 1, -40), C.success)
+    local noB = makeButton(box, "Cancelar", UDim2.new(0.5, -15, 0, 30), UDim2.new(0.5, 5, 1, -40), C.panel2)
+    okB.ZIndex, noB.ZIndex = 42, 42
     local function close() overlay:Destroy() UI.promptFrame = nil end
-    ok.Activated:Connect(function()
+    okB.Activated:Connect(function()
         local txt = tb.Text:gsub("^%s+", ""):gsub("%s+$", "")
         close()
         if txt ~= "" then callback(txt) end
     end)
-    cancel.Activated:Connect(close)
+    noB.Activated:Connect(close)
     tb:CaptureFocus()
 end
 
@@ -1406,25 +1248,26 @@ function UI.renderHistory()
     local scroll = UI.histScroll
     if not scroll then return end
     for _, ch in ipairs(scroll:GetChildren()) do
-        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+        if not ch:IsA("UIListLayout") then ch:Destroy() end
     end
+    scroll:SetAttribute("n", 0)
     if #Data.routes == 0 then
-        label(scroll, "Nenhuma rota salva.\nGrave uma na aba Principal.", UDim2.new(1, 0, 0, 60), nil,
-            Enum.Font.Gotham, 13, C.muted, Enum.TextXAlignment.Center)
+        ord(label(scroll, "Nenhuma rota salva ainda.\nGrave uma na aba Principal.", UDim2.new(1, 0, 0, 60), nil,
+            Enum.Font.Gotham, 13, C.muted, Enum.TextXAlignment.Center))
     end
     for i = #Data.routes, 1, -1 do
         local route = Data.routes[i]
-        local item = new("Frame", { Size = UDim2.new(1, -6, 0, 62), BackgroundColor3 = C.panel,
-            BorderSizePixel = 0, LayoutOrder = #Data.routes - i }, scroll)
-        corner(item, 8)
-        stroke(item, C.stroke, 0.8)
-        local nameLbl = label(item, route.name, UDim2.new(1, -112, 0, 22), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 13)
-        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+        local item = new("Frame", { Size = UDim2.new(1, -6, 0, 62), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, scroll)
+        corner(item, 10)
+        stroke(item, C.accent, 0.8)
+        ord(item)
+        local nm = label(item, route.name, UDim2.new(1, -116, 0, 22), UDim2.new(0, 12, 0, 7), Enum.Font.GothamBold, 13)
+        nm.TextTruncate = Enum.TextTruncate.AtEnd
         label(item, string.format("%s • %d ações • %s", fmtTime(route.duration), route.count or #route.events, fmtDate(route.created)),
-            UDim2.new(1, -112, 0, 18), UDim2.new(0, 10, 0, 34), Enum.Font.Gotham, 11, C.muted)
-        local play = makeButton(item, "▶", UDim2.fromOffset(30, 30), UDim2.new(1, -104, 0.5, -15), C.success)
-        local ren = makeButton(item, "✎", UDim2.fromOffset(30, 30), UDim2.new(1, -70, 0.5, -15), C.panel2)
-        local del = makeButton(item, "🗑", UDim2.fromOffset(30, 30), UDim2.new(1, -36, 0.5, -15), C.danger)
+            UDim2.new(1, -116, 0, 18), UDim2.new(0, 12, 0, 34), Enum.Font.Gotham, 11, C.muted)
+        local play = makeButton(item, "▶", UDim2.fromOffset(32, 32), UDim2.new(1, -108, 0.5, -16), C.success)
+        local ren = makeButton(item, "✎", UDim2.fromOffset(32, 32), UDim2.new(1, -72, 0.5, -16), C.panel2)
+        local del = makeButton(item, "🗑", UDim2.fromOffset(32, 32), UDim2.new(1, -36, 0.5, -16), C.danger)
         play.Activated:Connect(function() UI.playRoute(route) end)
         ren.Activated:Connect(function() UI.renameRoute(route) end)
         del.Activated:Connect(function() UI.deleteRoute(route) end)
@@ -1432,26 +1275,17 @@ function UI.renderHistory()
     if UI.countLbl then UI.countLbl.Text = "Rotas salvas: " .. #Data.routes end
 end
 
-function UI.revealDiag()
-    if UI.diagBtn and not UI.diagBtn.Visible then
-        UI.diagBtn.Visible = true
-    end
-end
-
 local function startRecording()
     if Replay.running then Toast.show("Pare o replay antes de gravar", "error") return end
-    Recorder.start()
+    if not Recorder.start() then Toast.show("Personagem não carregado", "error") return end
     UI.setMode("rec")
-    Toast.show("Gravação iniciada", "success")
+    Toast.show("Gravando...", "success")
 end
 
 local function stopRecording()
     local route = Recorder.stop()
     UI.setMode("idle")
-    if not route or route.count == 0 then
-        Toast.show("Nada foi gravado", "error")
-        return
-    end
+    if not route or route.count == 0 then Toast.show("Nada foi gravado", "error") return end
     Data.routes[#Data.routes + 1] = route
     saveAll()
     saveRouteFile(route)
@@ -1463,84 +1297,104 @@ end
 function UI.onMainButton()
     if State.mode == "idle" then startRecording()
     elseif State.mode == "rec" then stopRecording()
-    elseif State.mode == "replay" then Replay.stop() end
+    else Replay.stop() end
 end
 
-local Cleanup -- definido na seção 11
+local Cleanup
 
-function UI.build()
-    local gui = new("ScreenGui", {
-        Name = "RouteHub_" .. math.random(1000, 9999), ResetOnSpawn = false,
-        IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
-    })
+--[[ === SEÇÃO 11: UI — CONSTRUÇÃO (MENU + LOGO SEPARADOS) === ]]
+local function mountGui(gui)
     local parent
     if API.gethui then
         local ok, h = pcall(API.gethui)
         if ok and h then parent = h end
     end
     parent = parent or CoreGui
-    local okP = pcall(function() gui.Parent = parent end)
-    if not okP or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    local ok = pcall(function() gui.Parent = parent end)
+    if not ok or not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+end
+
+local MENU_W, MENU_H = 440, 320
+local LOGO = 56
+
+function UI.clampMenu()
+    local m = UI.menu
+    if not m then return end
+    local vp = cam().ViewportSize
+    local x = math.clamp(m.Position.X.Offset, 0, math.max(vp.X - m.AbsoluteSize.X, 0))
+    local y = math.clamp(m.Position.Y.Offset, 0, math.max(vp.Y - 60, 0))
+    m.Position = UDim2.fromOffset(x, y)
+end
+
+function UI.clampLogo(save)
+    local lg = UI.logo
+    if not lg then return end
+    local vp = cam().ViewportSize
+    local x = math.clamp(lg.Position.X.Offset, 6, math.max(vp.X - LOGO - 6, 6))
+    local y = math.clamp(lg.Position.Y.Offset, 6, math.max(vp.Y - LOGO - 6, 6))
+    tween(lg, 0.18, { Position = UDim2.fromOffset(x, y) })
+    if save then
+        S.logoX, S.logoY = x / vp.X, y / vp.Y
+        saveAll()
+    end
+end
+
+function UI.toggleMenu(show)
+    local m = UI.menu
+    if show == nil then show = not m.Visible end
+    if show then
+        m.Visible = true
+        UI.clampMenu()
+        UI.scale.Scale = 0.9
+        tween(UI.scale, 0.15, { Scale = 1 })
+    else
+        m.Visible = false
+    end
+end
+
+function UI.build()
+    local vp = cam().ViewportSize
+    MENU_W = math.clamp(vp.X - 90, 300, 440)
+    MENU_H = math.clamp(vp.Y - 30, 230, 320)
+
+    -- ===== MENU (ScreenGui próprio) =====
+    local gui = new("ScreenGui", { Name = "RouteHubMenu" .. math.random(100, 999), ResetOnSpawn = false,
+        IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 998 })
+    mountGui(gui)
     UI.gui = gui
 
-    local vp = cam().ViewportSize
-    local W = math.clamp(vp.X - 24, 300, 470)
-    local H = math.clamp(vp.Y - 24, 240, 330)
-    local sideW = (W < 400) and 84 or 104
+    local menu = new("Frame", { Size = UDim2.fromOffset(MENU_W, MENU_H),
+        Position = UDim2.fromOffset((vp.X - MENU_W) / 2, (vp.Y - MENU_H) / 2),
+        BackgroundColor3 = C.bg, BorderSizePixel = 0, Visible = false }, gui)
+    corner(menu, 14)
+    stroke(menu, C.accent, 0.35, 2)
+    UI.menu = menu
+    UI.scale = new("UIScale", { Scale = 1 }, menu)
 
-    -- Sombra + janela principal
-    local main = new("Frame", {
-        Name = "Window", Size = UDim2.fromOffset(W, H), AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C.bg, BorderSizePixel = 0,
-        ClipsDescendants = false,
-    }, gui)
-    corner(main, 12)
-    stroke(main, C.stroke, 0.3)
-    new("ImageLabel", {
-        BackgroundTransparency = 1, Image = "rbxassetid://1316045217", ImageColor3 = Color3.new(0, 0, 0),
-        ImageTransparency = 0.5, ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(10, 10, 118, 118),
-        Size = UDim2.new(1, 40, 1, 40), Position = UDim2.fromOffset(-20, -14), ZIndex = 0,
-    }, main)
-    UI.main = main
+    local header = new("Frame", { Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, menu)
+    corner(header, 14)
+    gradient(header, C.accent, Color3.fromRGB(76, 29, 149), 0)
+    local fill = new("Frame", { Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 1, -14),
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0 }, header)
+    gradient(fill, C.accent, Color3.fromRGB(76, 29, 149), 0)
+    label(header, "ROUTE HUB", UDim2.new(0, 140, 0, 22), UDim2.new(0, 14, 0, 4), Enum.Font.GothamBlack, 16)
+    label(header, "v" .. VERSION, UDim2.new(0, 100, 0, 12), UDim2.new(0, 14, 0, 26), Enum.Font.Gotham, 10, Color3.fromRGB(210, 200, 255))
+    local closeBtn = makeButton(header, "✕", UDim2.fromOffset(30, 26), UDim2.new(1, -38, 0, 8), Color3.fromRGB(60, 30, 100))
+    closeBtn.Activated:Connect(function() UI.toggleMenu(false) end) -- só esconde o menu; a logo continua
 
-    -- Barra de título
-    local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, main)
-    corner(bar, 12)
-    new("Frame", { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, bar)
-    label(bar, APP_NAME, UDim2.new(0, 110, 0, 20), UDim2.new(0, 44, 0, 3), Enum.Font.GothamBold, 15)
-    label(bar, "v" .. VERSION, UDim2.new(0, 110, 0, 12), UDim2.new(0, 44, 0, 23), Enum.Font.Gotham, 10, C.muted)
-
-    -- Hotspot invisível (5 toques rápidos revelam o diagnóstico)
-    local hot = new("TextButton", {
-        Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(38, 38), ZIndex = 20, AutoButtonColor = false,
-    }, bar)
-    local taps = {}
-    hot.Activated:Connect(function()
-        local now = os.clock()
-        taps[#taps + 1] = now
-        while #taps > 0 and now - taps[1] > 2.5 do table.remove(taps, 1) end
-        if #taps >= 5 then
-            taps = {}
-            UI.revealDiag()
-        end
-    end)
-
-    local minBtn = makeButton(bar, "–", UDim2.fromOffset(28, 24), UDim2.new(1, -66, 0, 7), C.panel2)
-    local closeBtn = makeButton(bar, "✕", UDim2.fromOffset(28, 24), UDim2.new(1, -34, 0, 7), C.danger)
-
-    -- Arrastar pela barra de título
-    local dragging, dragStart, startPos
-    bar.InputBegan:Connect(function(input)
+    -- arrastar o menu pela barra
+    local dragging, dStart, dPos
+    header.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging, dragStart, startPos = true, input.Position, main.Position
+            dragging, dStart, dPos = true, input.Position, menu.Position
         end
     end)
     track(UIS.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
-                startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            local d = input.Position - dStart
+            menu.Position = UDim2.fromOffset(dPos.X.Offset + d.X, dPos.Y.Offset + d.Y)
+            UI.clampMenu()
         end
     end))
     track(UIS.InputEnded:Connect(function(input)
@@ -1549,130 +1403,161 @@ function UI.build()
         end
     end))
 
-    -- Conteúdo (sidebar + páginas)
-    local content = new("Frame", { Size = UDim2.new(1, 0, 1, -38), Position = UDim2.new(0, 0, 0, 38), BackgroundTransparency = 1 }, main)
-    UI.content = content
-    local side = new("Frame", { Size = UDim2.new(0, sideW, 1, -16), Position = UDim2.new(0, 8, 0, 8), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, content)
-    corner(side, 10)
-    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, side)
-    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, side)
-
-    local pageArea = new("Frame", {
-        Size = UDim2.new(1, -(sideW + 24), 1, -16), Position = UDim2.new(0, sideW + 16, 0, 8), BackgroundTransparency = 1,
-    }, content)
-
-    local tabNames = { "Principal", "Histórico", "Config" }
-    for i, name in ipairs(tabNames) do
-        local tb = makeButton(side, name, UDim2.new(1, 0, 0, 34), nil, C.panel2)
-        tb.LayoutOrder = i
-        tb.TextSize = 12
+    -- abas (linha horizontal)
+    local tabRow = new("Frame", { Size = UDim2.new(1, -16, 0, 30), Position = UDim2.new(0, 8, 0, 48), BackgroundTransparency = 1 }, menu)
+    local names = { "Principal", "Histórico", "Diagnóstico", "Config" }
+    for i, name in ipairs(names) do
+        local tb = makeButton(tabRow, name, UDim2.new(1 / #names, -4, 1, 0), UDim2.new((i - 1) / #names, 2, 0, 0), C.panel2)
+        tb.TextSize = 11
         tb.Activated:Connect(function() UI.switchTab(name) end)
         UI.tabs[name] = tb
     end
-    UI.tabs["Principal"]:SetAttribute("Base", C.accent)
 
-    -- === Aba Principal ===
-    local pMain = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, pageArea)
-    UI.pages["Principal"] = pMain
-    local card = new("Frame", { Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, pMain)
+    local area = new("Frame", { Size = UDim2.new(1, -16, 1, -90), Position = UDim2.new(0, 8, 0, 82), BackgroundTransparency = 1 }, menu)
+    local function newPage(name)
+        local sf = new("ScrollingFrame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+            ScrollBarThickness = 3, ScrollBarImageColor3 = C.accent, CanvasSize = UDim2.new(),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false }, area)
+        new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
+        UI.pages[name] = sf
+        return sf
+    end
+
+    -- Principal
+    local pMain = newPage("Principal")
+    local card = new("Frame", { Size = UDim2.new(1, -6, 0, 52), BackgroundColor3 = C.panel, BorderSizePixel = 0 }, pMain)
     corner(card, 10)
-    stroke(card, C.stroke, 0.8)
-    UI.statusLbl = label(card, "Pronto", UDim2.new(1, -20, 0, 24), UDim2.new(0, 10, 0, 6), Enum.Font.GothamBold, 14)
-    UI.countLbl = label(card, "Rotas salvas: 0", UDim2.new(1, -20, 0, 18), UDim2.new(0, 10, 0, 32), Enum.Font.Gotham, 11, C.muted)
+    stroke(card, C.accent, 0.8)
+    ord(card)
+    UI.statusLbl = label(card, "Pronto", UDim2.new(1, -24, 0, 24), UDim2.new(0, 12, 0, 5), Enum.Font.GothamBold, 14)
+    UI.countLbl = label(card, "Rotas salvas: 0", UDim2.new(1, -24, 0, 16), UDim2.new(0, 12, 0, 30), Enum.Font.Gotham, 11, C.muted)
 
-    local recHolder = new("Frame", { Size = UDim2.new(1, 0, 0, 56), Position = UDim2.new(0, 0, 0, 68), BackgroundTransparency = 1 }, pMain)
-    local rec = makeButton(recHolder, "● GRAVAR", UDim2.new(1, 0, 0, 56), UDim2.new(), C.danger)
+    local recWrap = new("Frame", { Size = UDim2.new(1, -6, 0, 56), BackgroundTransparency = 1 }, pMain)
+    ord(recWrap)
+    local rec = makeButton(recWrap, "● GRAVAR", UDim2.new(1, 0, 0, 56), UDim2.new(0.5, 0, 0, 0), C.danger)
     rec.AnchorPoint = Vector2.new(0.5, 0)
-    rec.Position = UDim2.new(0.5, 0, 0, 0)
     rec.TextSize = 18
     rec.Activated:Connect(UI.onMainButton)
     UI.recBtn = rec
 
-    local prog = new("Frame", { Size = UDim2.new(1, 0, 0, 40), Position = UDim2.new(0, 0, 0, 134), BackgroundTransparency = 1, Visible = false }, pMain)
+    local dBtn = makeButton(pMain, "🔍  DIAGNÓSTICO", UDim2.new(1, -6, 0, 40), nil, C.accent2, Color3.fromRGB(10, 20, 30))
+    ord(dBtn)
+    dBtn.Activated:Connect(function()
+        UI.switchTab("Diagnóstico")
+        Diag.run()
+    end)
+    local hint = label(pMain, "Rode o diagnóstico antes de gravar: ele detecta o que o jogo usa (botões, Remotes, prompts).",
+        UDim2.new(1, -6, 0, 30), nil, Enum.Font.Gotham, 10, C.muted)
+    hint.TextWrapped = true
+    ord(hint)
+
+    local prog = new("Frame", { Size = UDim2.new(1, -6, 0, 40), BackgroundTransparency = 1, Visible = false }, pMain)
+    ord(prog)
     UI.progHolder = prog
-    local track_ = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = C.panel2, BorderSizePixel = 0 }, prog)
-    corner(track_, 4)
-    UI.progFill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent2, BorderSizePixel = 0 }, track_)
+    local bar = new("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = C.panel2, BorderSizePixel = 0 }, prog)
+    corner(bar, 4)
+    UI.progFill = new("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = C.accent2, BorderSizePixel = 0 }, bar)
     corner(UI.progFill, 4)
     UI.progLabel = label(prog, "00:00", UDim2.new(1, 0, 0, 18), UDim2.new(0, 0, 0, 14), Enum.Font.GothamBold, 12, C.muted, Enum.TextXAlignment.Center)
 
-    label(pMain, "Dica: reproduza rotas pela aba Histórico.", UDim2.new(1, 0, 0, 16), UDim2.new(0, 0, 1, -18),
-        Enum.Font.Gotham, 10, C.muted)
+    -- Histórico
+    UI.histScroll = newPage("Histórico")
 
-    -- === Aba Histórico ===
-    local hist = new("ScrollingFrame", {
-        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
-        ScrollBarThickness = 3, ScrollBarImageColor3 = C.accent, CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
-    }, pageArea)
-    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, hist)
-    UI.pages["Histórico"] = hist
-    UI.histScroll = hist
+    -- Diagnóstico
+    local pDiag = newPage("Diagnóstico")
+    local runBtn = makeButton(pDiag, "🔍  Executar diagnóstico", UDim2.new(1, -6, 0, 38), nil, C.accent2, Color3.fromRGB(10, 20, 30))
+    ord(runBtn)
+    runBtn.Activated:Connect(function() Diag.run() end)
+    local resFrame = new("Frame", { Size = UDim2.new(1, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = C.panel, BorderSizePixel = 0 }, pDiag)
+    corner(resFrame, 10)
+    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, resFrame)
+    ord(resFrame)
+    UI.diagLabel = new("TextLabel", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1, RichText = true, TextWrapped = true, Font = Enum.Font.Gotham, TextSize = 12,
+        TextColor3 = C.text, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        Text = colored(C.muted, "Aperte o botão acima para o hub escanear o jogo: personagem, botões da tela, Remotes, prompts e ferramentas. O resultado aparece aqui.") }, resFrame)
 
-    -- === Aba Configurações ===
-    local cfg = new("ScrollingFrame", {
-        Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
-        ScrollBarThickness = 3, ScrollBarImageColor3 = C.accent, CanvasSize = UDim2.new(),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y, Visible = false,
-    }, pageArea)
-    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, cfg)
-    UI.pages["Config"] = cfg
-
+    -- Config
+    local cfg = newPage("Config")
     makeSlider(cfg, "Velocidade do replay", 0.25, 4, 0.25, S.speedMultiplier,
         function(v) return string.format("%.2fx", v) end, function(v) S.speedMultiplier = v end, cfg)
     makeToggle(cfg, "Loop de replay", S.loopReplay, function(v) S.loopReplay = v end)
     makeToggle(cfg, "Renomear automaticamente", S.autoRename, function(v) S.autoRename = v end)
     makeSlider(cfg, "Delay entre ações", 0, 500, 10, S.actionDelayMs,
         function(v) return v .. " ms" end, function(v) S.actionDelayMs = v end, cfg)
-    makeSlider(cfg, "Amostragem da câmera", 20, 200, 10, S.cameraSampleRateMs,
-        function(v) return v .. " ms" end, function(v) S.cameraSampleRateMs = v end, cfg)
-    makeSlider(cfg, "Amostragem do movimento", 15, 100, 5, S.moveSampleRateMs,
+    makeSlider(cfg, "Precisão do caminho (amostra)", 50, 300, 10, S.moveSampleRateMs,
         function(v) return v .. " ms" end, function(v) S.moveSampleRateMs = v end, cfg)
-    makeToggle(cfg, "Blur de fundo", S.blur, function(v) S.blur = v applyBlur() end)
-
-    -- Botão de diagnóstico: oculto até o gatilho secreto
-    local diagBtn = makeButton(cfg, "Diagnóstico", UDim2.new(1, -6, 0, 34), nil, C.panel2, C.muted)
-    diagBtn.TextSize = 12
-    diagBtn.Visible = false
-    diagBtn.Activated:Connect(function() Diag.run() end)
-    UI.diagBtn = diagBtn
-
-    -- Toasts
-    local tc = new("Frame", {
-        Size = UDim2.fromOffset(250, 220), AnchorPoint = Vector2.new(1, 1),
-        Position = UDim2.new(1, -12, 1, -12), BackgroundTransparency = 1, ZIndex = 60,
-    }, gui)
-    new("UIListLayout", {
-        Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Bottom,
-        HorizontalAlignment = Enum.HorizontalAlignment.Right, SortOrder = Enum.SortOrder.LayoutOrder,
-    }, tc)
-    Toast.container = tc
-
-    -- Minimizar / fechar
-    local minimized = false
-    minBtn.Activated:Connect(function()
-        minimized = not minimized
-        if minimized then
-            content.Visible = false
-            tween(main, 0.2, { Size = UDim2.fromOffset(W, 38) })
-        else
-            tween(main, 0.2, { Size = UDim2.fromOffset(W, H) }).Completed:Connect(function()
-                if not minimized then content.Visible = true end
-            end)
-        end
-    end)
-    closeBtn.Activated:Connect(function()
+    makeToggle(cfg, "Gravar câmera (avançado)", S.recordCamera, function(v) S.recordCamera = v end)
+    makeToggle(cfg, "Gravar animações (avançado)", S.recordAnim, function(v) S.recordAnim = v end)
+    local unload = makeButton(cfg, "Descarregar hub", UDim2.new(1, -6, 0, 36), nil, C.dangerDark)
+    ord(unload)
+    unload.Activated:Connect(function()
         if Recorder.active then stopRecording() end
         Cleanup()
     end)
 
+    -- Toasts (centro inferior)
+    local tc = new("Frame", { Size = UDim2.fromOffset(280, 200), AnchorPoint = Vector2.new(0.5, 1),
+        Position = UDim2.new(0.5, 0, 1, -14), BackgroundTransparency = 1, ZIndex = 60 }, gui)
+    new("UIListLayout", { Padding = UDim.new(0, 6), VerticalAlignment = Enum.VerticalAlignment.Bottom,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center, SortOrder = Enum.SortOrder.LayoutOrder }, tc)
+    Toast.container = tc
+
+    -- ===== LOGO REDONDA (ScreenGui separado, sempre visível) =====
+    local lgui = new("ScreenGui", { Name = "RouteHubLogo" .. math.random(100, 999), ResetOnSpawn = false,
+        IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000 })
+    mountGui(lgui)
+    UI.logoGui = lgui
+
+    local logo = new("TextButton", { Size = UDim2.fromOffset(LOGO, LOGO), Text = "", AutoButtonColor = false,
+        BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, ZIndex = 5,
+        Position = UDim2.fromOffset(S.logoX * vp.X, S.logoY * vp.Y) }, lgui)
+    corner(logo, LOGO / 2)
+    UI.logoStroke = stroke(logo, C.accent2, 0.1, 2)
+    UI.logoGrad = gradient(logo, C.accent, C.accent2, 45)
+    UI.logoText = label(logo, "R", UDim2.fromScale(1, 1), nil, Enum.Font.GothamBlack, 26, C.text, Enum.TextXAlignment.Center)
+    UI.logoText.ZIndex = 6
+    UI.logo = logo
+
+    local ldrag, lstart, lpos, lmoved = false, nil, nil, false
+    logo.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            ldrag, lmoved, lstart, lpos = true, false, input.Position, logo.Position
+        end
+    end)
+    track(UIS.InputChanged:Connect(function(input)
+        if ldrag and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - lstart
+            if d.Magnitude > 8 then lmoved = true end
+            if lmoved then logo.Position = UDim2.fromOffset(lpos.X.Offset + d.X, lpos.Y.Offset + d.Y) end
+        end
+    end))
+    track(UIS.InputEnded:Connect(function(input)
+        if ldrag and (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            ldrag = false
+            if lmoved then UI.clampLogo(true) -- solta e volta para dentro da tela
+            else UI.toggleMenu() end -- toque simples abre/fecha o menu
+        end
+    end))
+
+    -- Reajusta ao girar a tela / mudar a resolução
+    local c = cam()
+    if c then
+        track(c:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+            UI.clampLogo(false)
+            UI.clampMenu()
+        end))
+    end
+
+    UI.clampLogo(false)
     UI.switchTab("Principal")
     UI.setMode("idle")
     UI.renderHistory()
-    applyBlur()
 end
 
--- Atualização periódica do status ao vivo
 function UI.startStatusLoop()
     task.spawn(function()
         while UI.gui and UI.gui.Parent and not UI.dead do
@@ -1681,8 +1566,7 @@ function UI.startStatusLoop()
                 UI.statusLbl.Text = string.format("Gravando... %s | %d ações", fmtTime(ms), #Recorder.events)
                 UI.statusLbl.TextColor3 = C.danger
             elseif State.mode == "replay" then
-                local r = Replay.route
-                UI.statusLbl.Text = "Reproduzindo: " .. (r and r.name or "")
+                UI.statusLbl.Text = Replay.status ~= "" and Replay.status or "Reproduzindo..."
                 UI.statusLbl.TextColor3 = C.accent2
             else
                 UI.statusLbl.Text = "Pronto"
@@ -1693,26 +1577,23 @@ function UI.startStatusLoop()
     end)
 end
 
---[[ === SEÇÃO 10: ATALHOS, RESPAWN E LIMPEZA === ]]
+--[[ === SEÇÃO 12: ATALHOS, RESPAWN, LIMPEZA E INÍCIO === ]]
 local function bindShortcuts()
-    -- Ctrl+Shift+D: revela o botão de diagnóstico e executa a varredura silenciosa
+    -- Ctrl+Shift+D (PC): abre o menu na aba Diagnóstico e executa
     track(UIS.InputBegan:Connect(function(input, gpe)
         if gpe then return end
         if input.KeyCode == Enum.KeyCode.D and UIS:IsKeyDown(Enum.KeyCode.LeftControl)
             and UIS:IsKeyDown(Enum.KeyCode.LeftShift) then
-            UI.revealDiag()
+            UI.toggleMenu(true)
+            UI.switchTab("Diagnóstico")
             Diag.run()
         end
     end))
-
-    -- Respawn: reconecta os hooks do personagem durante a gravação
     track(LocalPlayer.CharacterAdded:Connect(function(char)
-        if Recorder.active then
-            task.spawn(Recorder.bindCharacter, char)
-        end
+        if Recorder.active then task.spawn(Recorder.bindCharacter, char) end
         if Replay.running then
-            local hum = char:WaitForChild("Humanoid", 5)
-            if hum then RS.origWS = hum.WalkSpeed end
+            local h = char:WaitForChild("Humanoid", 5)
+            if h then RS.origWS = h.WalkSpeed end
         end
     end))
 end
@@ -1724,21 +1605,17 @@ Cleanup = function()
     pcall(function() RunService:UnbindFromRenderStep("RouteHubReplay") end)
     for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
     Conns = {}
-    pcall(function() genv.RouteHubRemoteLogger = nil end) -- o hook permanece inerte sem logger
-    pcall(function()
-        local b = Lighting:FindFirstChild("RouteHubBlur")
-        if b then b:Destroy() end
-    end)
+    pcall(function() genv.RouteHubRemoteLogger = nil end)
     pcall(function() if UI.gui then UI.gui:Destroy() end end)
+    pcall(function() if UI.logoGui then UI.logoGui:Destroy() end end)
     genv.RouteHubCleanup = nil
 end
 
---[[ === SEÇÃO 11: INICIALIZAÇÃO === ]]
 loadAll()
 UI.build()
 UI.startStatusLoop()
 bindShortcuts()
 saveAll()
 genv.RouteHubCleanup = Cleanup
+UI.toggleMenu(true)
 Toast.show("ROUTE HUB v" .. VERSION .. " carregado", "success")
-print("[RouteHub] v" .. VERSION .. " carregado — " .. #Data.routes .. " rota(s)")
