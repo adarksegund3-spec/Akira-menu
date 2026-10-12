@@ -1,5 +1,6 @@
 -- ======================================================================== --
--- GRAVADOR DE ROTA - VERSÃO STEALTH + TIMER DE ALTA PRECISÃO
+-- GRAVADOR DE ROTA - VERSÃO COMPACTA
+-- Menu pequeno + CFrame direto (sem stealth) + Timer de alta precisão
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -13,15 +14,15 @@ ScreenGui.Name = "PathRecorderGui"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 
--- ===== BOTÃO FLUTUANTE =====
+-- ===== BOTÃO FLUTUANTE (compacto) =====
 local FloatButton = Instance.new("TextButton", ScreenGui)
 FloatButton.Name = "FloatButton"
-FloatButton.Size = UDim2.new(0, 60, 0, 60)
-FloatButton.Position = UDim2.new(0, 30, 0.5, -30)
+FloatButton.Size = UDim2.new(0, 42, 0, 42)
+FloatButton.Position = UDim2.new(0, 15, 0.5, -21)
 FloatButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 FloatButton.Text = "🎬"
 FloatButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-FloatButton.TextSize = 28
+FloatButton.TextSize = 20
 FloatButton.Font = Enum.Font.GothamBold
 FloatButton.BorderSizePixel = 0
 FloatButton.Active = true
@@ -31,63 +32,63 @@ local FloatCorner = Instance.new("UICorner", FloatButton)
 FloatCorner.CornerRadius = UDim.new(1, 0)
 local FloatStroke = Instance.new("UIStroke", FloatButton)
 FloatStroke.Color = Color3.fromRGB(0, 170, 0)
-FloatStroke.Thickness = 2
+FloatStroke.Thickness = 1.5
 
--- ===== JANELA DO MENU =====
+-- ===== JANELA DO MENU (compacta) =====
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 240, 0, 290)
-MainFrame.Position = UDim2.new(0, 30, 0.5, -145)
+MainFrame.Size = UDim2.new(0, 170, 0, 230)
+MainFrame.Position = UDim2.new(0, 15, 0.5, -115)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Visible = false
 
 local UICorner = Instance.new("UICorner", MainFrame)
-UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.CornerRadius = UDim.new(0, 8)
 local MainStroke = Instance.new("UIStroke", MainFrame)
 MainStroke.Color = Color3.fromRGB(0, 170, 0)
 MainStroke.Thickness = 1
 
--- TitleBar
+-- TitleBar compacta
 local TitleBar = Instance.new("Frame", MainFrame)
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
+TitleBar.Size = UDim2.new(1, 0, 0, 22)
 TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 TitleBar.BorderSizePixel = 0
 TitleBar.Active = true
 local TitleBarCorner = Instance.new("UICorner", TitleBar)
-TitleBarCorner.CornerRadius = UDim.new(0, 10)
+TitleBarCorner.CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel", TitleBar)
-Title.Size = UDim2.new(1, -40, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
+Title.Size = UDim2.new(1, -30, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.GothamBold
-Title.Text = "GRAVADOR DRIP"
+Title.Text = "DRIP"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 13
+Title.TextSize = 11
 Title.TextXAlignment = Enum.TextXAlignment.Left
 
 local CloseBtn = Instance.new("TextButton", TitleBar)
-CloseBtn.Size = UDim2.new(0, 25, 0, 25)
-CloseBtn.Position = UDim2.new(1, -30, 0, 2)
+CloseBtn.Size = UDim2.new(0, 18, 0, 18)
+CloseBtn.Position = UDim2.new(1, -22, 0, 2)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
 CloseBtn.Text = "✕"
 CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.TextSize = 12
+CloseBtn.TextSize = 10
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
 local CloseCorner = Instance.new("UICorner", CloseBtn)
-CloseCorner.CornerRadius = UDim.new(0, 5)
+CloseCorner.CornerRadius = UDim.new(0, 4)
 
--- ===== TIMER DISPLAY (grande e destacado) =====
+-- Timer compacto
 local TimerFrame = Instance.new("Frame", MainFrame)
-TimerFrame.Size = UDim2.new(1, -20, 0, 50)
-TimerFrame.Position = UDim2.new(0, 10, 0, 35)
+TimerFrame.Size = UDim2.new(1, -12, 0, 32)
+TimerFrame.Position = UDim2.new(0, 6, 0, 26)
 TimerFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
 TimerFrame.BorderSizePixel = 0
 local TimerFrameCorner = Instance.new("UICorner", TimerFrame)
-TimerFrameCorner.CornerRadius = UDim.new(0, 8)
+TimerFrameCorner.CornerRadius = UDim.new(0, 6)
 local TimerFrameStroke = Instance.new("UIStroke", TimerFrame)
 TimerFrameStroke.Color = Color3.fromRGB(0, 170, 0)
 TimerFrameStroke.Thickness = 1
@@ -98,67 +99,65 @@ TimerLabel.BackgroundTransparency = 1
 TimerLabel.Font = Enum.Font.Code
 TimerLabel.Text = "00:00.000"
 TimerLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
-TimerLabel.TextSize = 26
-TimerLabel.TextScaled = false
+TimerLabel.TextSize = 17
 
 local StatusLabel = Instance.new("TextLabel", MainFrame)
-StatusLabel.Size = UDim2.new(1, -20, 0, 20)
-StatusLabel.Position = UDim2.new(0, 10, 0, 88)
+StatusLabel.Size = UDim2.new(1, -12, 0, 14)
+StatusLabel.Position = UDim2.new(0, 6, 0, 60)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.Text = "Status: Parado"
+StatusLabel.Text = "Parado"
 StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-StatusLabel.TextSize = 11
+StatusLabel.TextSize = 9
 
--- Botões
+-- Botões compactos
 local RecordBtn = Instance.new("TextButton", MainFrame)
-RecordBtn.Size = UDim2.new(1, -20, 0, 34)
-RecordBtn.Position = UDim2.new(0, 10, 0, 115)
+RecordBtn.Size = UDim2.new(1, -12, 0, 26)
+RecordBtn.Position = UDim2.new(0, 6, 0, 78)
 RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
 RecordBtn.Font = Enum.Font.GothamBold
 RecordBtn.Text = "INICIAR GRAVAÇÃO"
 RecordBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-RecordBtn.TextSize = 11
+RecordBtn.TextSize = 9
 RecordBtn.BorderSizePixel = 0
 local BtnCorner = Instance.new("UICorner", RecordBtn)
-BtnCorner.CornerRadius = UDim.new(0, 6)
+BtnCorner.CornerRadius = UDim.new(0, 5)
 
 local TestBtn = Instance.new("TextButton", MainFrame)
-TestBtn.Size = UDim2.new(1, -20, 0, 34)
-TestBtn.Position = UDim2.new(0, 10, 0, 155)
+TestBtn.Size = UDim2.new(1, -12, 0, 26)
+TestBtn.Position = UDim2.new(0, 6, 0, 108)
 TestBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 180)
 TestBtn.Font = Enum.Font.GothamBold
-TestBtn.Text = "▶ TESTAR ROTA GRAVADA"
+TestBtn.Text = "▶ TESTAR ROTA"
 TestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-TestBtn.TextSize = 11
+TestBtn.TextSize = 9
 TestBtn.BorderSizePixel = 0
 local TestCorner = Instance.new("UICorner", TestBtn)
-TestCorner.CornerRadius = UDim.new(0, 6)
+TestCorner.CornerRadius = UDim.new(0, 5)
 
 local CopyBtn = Instance.new("TextButton", MainFrame)
-CopyBtn.Size = UDim2.new(1, -20, 0, 34)
-CopyBtn.Position = UDim2.new(0, 10, 0, 195)
+CopyBtn.Size = UDim2.new(1, -12, 0, 26)
+CopyBtn.Position = UDim2.new(0, 6, 0, 138)
 CopyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
 CopyBtn.Font = Enum.Font.GothamBold
-CopyBtn.Text = "COPIAR CÓDIGO GERADO"
+CopyBtn.Text = "COPIAR CÓDIGO"
 CopyBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-CopyBtn.TextSize = 11
+CopyBtn.TextSize = 9
 CopyBtn.BorderSizePixel = 0
 local CopyCorner = Instance.new("UICorner", CopyBtn)
-CopyCorner.CornerRadius = UDim.new(0, 6)
+CopyCorner.CornerRadius = UDim.new(0, 5)
 
--- Botão Resetar Timer
 local ResetTimerBtn = Instance.new("TextButton", MainFrame)
-ResetTimerBtn.Size = UDim2.new(1, -20, 0, 26)
-ResetTimerBtn.Position = UDim2.new(0, 10, 0, 237)
+ResetTimerBtn.Size = UDim2.new(1, -12, 0, 22)
+ResetTimerBtn.Position = UDim2.new(0, 6, 0, 168)
 ResetTimerBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 ResetTimerBtn.Font = Enum.Font.GothamBold
 ResetTimerBtn.Text = "RESETAR TIMER"
 ResetTimerBtn.TextColor3 = Color3.fromRGB(220, 220, 220)
-ResetTimerBtn.TextSize = 10
+ResetTimerBtn.TextSize = 9
 ResetTimerBtn.BorderSizePixel = 0
 local ResetCorner = Instance.new("UICorner", ResetTimerBtn)
-ResetCorner.CornerRadius = UDim.new(0, 6)
+ResetCorner.CornerRadius = UDim.new(0, 5)
 
 -- ===== DRAG DO BOTÃO =====
 local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
@@ -172,7 +171,7 @@ local function updateDrag(input)
     if MainFrame.Visible then
         MainFrame.Position = UDim2.new(
             startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y + 70
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y + 50
         )
     end
 end
@@ -231,7 +230,7 @@ local function toggleMenu()
     if MainFrame.Visible then
         MainFrame.Position = UDim2.new(
             FloatButton.Position.X.Scale,
-            FloatButton.Position.X.Offset + 70,
+            FloatButton.Position.X.Offset + 50,
             FloatButton.Position.Y.Scale,
             FloatButton.Position.Y.Offset
         )
@@ -278,12 +277,7 @@ local function formatTime(t)
 end
 
 local function updateTimerDisplay()
-    local elapsed
-    if timerRunning then
-        elapsed = os.clock() - timerStartTime
-    else
-        elapsed = timerFrozen
-    end
+    local elapsed = timerRunning and (os.clock() - timerStartTime) or timerFrozen
     TimerLabel.Text = formatTime(elapsed)
 end
 
@@ -292,7 +286,6 @@ local function startTimer()
     timerRunning = true
     timerFrozen = 0
     if timerConnection then timerConnection:Disconnect() end
-    -- RenderStepped = atualização a cada frame renderizado (mais preciso que Heartbeat)
     timerConnection = RunService.RenderStepped:Connect(updateTimerDisplay)
     TimerFrameStroke.Color = Color3.fromRGB(0, 255, 120)
     TimerLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
@@ -326,11 +319,11 @@ end
 
 ResetTimerBtn.MouseButton1Click:Connect(function()
     resetTimer()
-    StatusLabel.Text = "Status: Timer resetado"
+    StatusLabel.Text = "Timer resetado"
 end)
 
 -- ======================================================================== --
--- LÓGICA DE GRAVAÇÃO / REPRODUÇÃO
+-- GRAVAÇÃO / REPRODUÇÃO (CFrame direto - sem stealth)
 -- ======================================================================== --
 
 local recordedData = {}
@@ -338,8 +331,8 @@ local isRecording = false
 local recordingConnection = nil
 local playbackConnection = nil
 local startTime = 0
+local antigravidade = nil
 local originalCollides = {}
-local stealthInstances = {}
 local animationCache = {}
 local activeTracks = {}
 
@@ -357,13 +350,6 @@ local function getOrLoadTrack(animator, animationId)
     return nil
 end
 
-local function clearStealth()
-    for _, obj in ipairs(stealthInstances) do
-        pcall(function() obj:Destroy() end)
-    end
-    stealthInstances = {}
-end
-
 local function stopPlayback()
     if playbackConnection then
         playbackConnection:Disconnect()
@@ -371,8 +357,11 @@ local function stopPlayback()
     end
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChild("Humanoid")
+    if antigravidade then
+        antigravidade:Destroy()
+        antigravidade = nil
+    end
     if hum then hum.AutoRotate = true end
-    clearStealth()
     for _, track in pairs(activeTracks) do
         pcall(function() track:Stop(0.1) end)
     end
@@ -394,10 +383,9 @@ RecordBtn.MouseButton1Click:Connect(function()
         recordedData = {}
         startTime = os.clock()
         startTimer()
-
         RecordBtn.Text = "PARAR GRAVAÇÃO"
         RecordBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-        StatusLabel.Text = "Status: Gravando..."
+        StatusLabel.Text = "Gravando..."
 
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -408,7 +396,7 @@ RecordBtn.MouseButton1Click:Connect(function()
             stopTimer()
             RecordBtn.Text = "INICIAR GRAVAÇÃO"
             RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-            StatusLabel.Text = "Status: Sem personagem!"
+            StatusLabel.Text = "Sem personagem!"
             return
         end
 
@@ -446,31 +434,31 @@ RecordBtn.MouseButton1Click:Connect(function()
             recordingConnection:Disconnect()
             recordingConnection = nil
         end
-        -- Para o timer no MESMO instante em que a gravação para
         stopTimer()
         RecordBtn.Text = "INICIAR GRAVAÇÃO"
         RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        StatusLabel.Text = string.format("Status: Gravado! %d pts | Duração: %s", #recordedData, formatTime(timerFrozen))
+        StatusLabel.Text = string.format("OK! %d pts", #recordedData)
     end
 end)
 
--- ===== REPRODUÇÃO (STEALTH) =====
+-- ===== REPRODUÇÃO (CFrame direto - MÉTODO QUE FUNCIONA NO DELTA) =====
 TestBtn.MouseButton1Click:Connect(function()
     if isRecording then
-        StatusLabel.Text = "Pare a gravação antes de testar!"
+        StatusLabel.Text = "Pare gravação primeiro!"
         return
     end
     if #recordedData == 0 then
-        StatusLabel.Text = "Nenhuma rota gravada!"
+        StatusLabel.Text = "Nada gravado!"
         return
     end
     if playbackConnection then
         stopPlayback()
-        StatusLabel.Text = "Status: Teste cancelado."
+        stopTimer()
+        StatusLabel.Text = "Teste cancelado"
         return
     end
 
-    StatusLabel.Text = "Status: Reproduzindo (stealth)..."
+    StatusLabel.Text = "Reproduzindo..."
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
@@ -479,42 +467,23 @@ TestBtn.MouseButton1Click:Connect(function()
     local startCF = CFrame.new(unpack(recordedData[1].CF))
     hum.WalkSpeed = 22
     hum:MoveTo(startCF.Position)
-    task.wait(0.6)
+
+    local reached = false
+    local conn
+    conn = hum.MoveToFinished:Connect(function()
+        reached = true
+        if conn then conn:Disconnect() end
+    end)
+
+    local timeout = tick() + 4
+    while not reached and tick() < timeout do
+        task.wait(0.1)
+    end
+    if conn then conn:Disconnect() end
 
     hum.AutoRotate = false
-
-    local attChar = Instance.new("Attachment", hrp)
-    local attTarget = Instance.new("Attachment")
-    attTarget.WorldPosition = hrp.Position
-    attTarget.Parent = workspace.Terrain
-
-    local alignPos = Instance.new("AlignPosition")
-    alignPos.Attachment0 = attChar
-    alignPos.Attachment1 = attTarget
-    alignPos.MaxForce = math.huge
-    alignPos.Responsiveness = 30
-    alignPos.ApplyAtCenterOfMass = false
-    alignPos.Parent = hrp
-
-    local alignOrient = Instance.new("AlignOrientation")
-    alignOrient.Attachment0 = attChar
-    alignOrient.Mode = Enum.OrientationAlignmentMode.OneAttachment
-    alignOrient.MaxTorque = math.huge
-    alignOrient.Responsiveness = 20
-    alignOrient.Parent = hrp
-
-    local lv = Instance.new("LinearVelocity")
-    lv.Attachment0 = attChar
-    lv.MaxForce = math.huge
-    lv.VectorVelocity = Vector3.zero
-    lv.RelativeTo = Enum.ActuatorRelativeTo.World
-    lv.Parent = hrp
-
-    table.insert(stealthInstances, attChar)
-    table.insert(stealthInstances, attTarget)
-    table.insert(stealthInstances, alignPos)
-    table.insert(stealthInstances, alignOrient)
-    table.insert(stealthInstances, lv)
+    antigravidade = Instance.new("BodyForce", hrp)
+    antigravidade.Force = Vector3.new(0, 0, 0)
 
     for _, parte in ipairs(char:GetChildren()) do
         if parte:IsA("BasePart") then
@@ -531,38 +500,45 @@ TestBtn.MouseButton1Click:Connect(function()
     local currentIndex = 1
     activeTracks = {}
 
-    local frameCount = 0
-    local frameSkip = 2
-
-    -- Reinicia o timer pro tempo da rota
     startTimer()
 
     playbackConnection = RunService.Heartbeat:Connect(function()
-        frameCount += 1
-        if frameCount % frameSkip ~= 0 then return end
-
         local elapsedTime = os.clock() - pstartTime
         while currentIndex < totalPoints and elapsedTime >= recordedData[currentIndex + 1].Time do
-            currentIndex += 1
+            currentIndex = currentIndex + 1
         end
         if currentIndex >= totalPoints then
             stopPlayback()
             stopTimer()
-            StatusLabel.Text = string.format("Status: Teste concluído! (%s)", formatTime(timerFrozen))
+            StatusLabel.Text = string.format("OK! (%s)", formatTime(timerFrozen))
             return
         end
 
         local p0 = recordedData[currentIndex]
         local p1 = recordedData[currentIndex + 1]
+        local alpha = (p1.Time - p0.Time > 0) and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
 
-        local targetCF = CFrame.new(unpack(p1.CF))
-        attTarget.WorldPosition = attTarget.WorldPosition:Lerp(targetCF.Position, 0.4)
-        attTarget.WorldCFrame = CFrame.new(attTarget.WorldPosition) * (targetCF - targetCF.Position)
+        local cf0 = CFrame.new(unpack(p0.CF))
+        local cf1 = CFrame.new(unpack(p1.CF))
+        hrp.CFrame = cf0:Lerp(cf1, alpha)
 
-        if lv and lv.Parent then
-            lv.VectorVelocity = Vector3.zero
+        local totalMass = 0
+        for _, parte in ipairs(char:GetChildren()) do
+            if parte:IsA("BasePart") then
+                totalMass = totalMass + parte:GetMass()
+            end
+        end
+        if antigravidade and antigravidade.Parent then
+            antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
+        end
+        if p1.Velocity then
+            hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
+        end
+        if p0.State then
+            pcall(function() hum:ChangeState(p0.State) end)
         end
 
+        -- Sincronização de animações
         if p1.Animations then
             local wanted = {}
             for _, animData in ipairs(p1.Animations) do
@@ -597,7 +573,7 @@ end)
 -- ===== COPIAR =====
 CopyBtn.MouseButton1Click:Connect(function()
     if #recordedData == 0 then
-        StatusLabel.Text = "Status: Nada gravado ainda!"
+        StatusLabel.Text = "Nada gravado!"
         return
     end
 
@@ -630,9 +606,9 @@ CopyBtn.MouseButton1Click:Connect(function()
 
     if setclipboard then
         setclipboard(result)
-        StatusLabel.Text = "Status: Copiado com sucesso!"
+        StatusLabel.Text = "Copiado!"
     else
-        StatusLabel.Text = "Status: Sem suporte a clipboard (veja F9)."
+        StatusLabel.Text = "Sem clipboard (F9)"
         print(result)
     end
 end)
