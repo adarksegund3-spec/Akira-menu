@@ -1,7 +1,6 @@
 -- ======================================================================== --
--- GRAVADOR DE ROTA - VERSÃO SLOW-MOTION RECORDING
--- Abas: GRAVAR | DADOS
--- Grava em câmera lenta (você controla o fator) e reproduz em velocidade normal
+-- ✦ angel • gravar rota
+-- Menu redesenhado do zero - tema turquesa/anjo
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -11,309 +10,378 @@ local LocalPlayer = Players.LocalPlayer
 
 local savedRoutes = {}
 
--- ======================================================================== --
--- SLOW MOTION STATE
--- ======================================================================== --
-local slowFactor = 0.7
-local SLOW_MIN, SLOW_MAX, SLOW_STEP = 0.5, 1.0, 0.05
-local slowOriginals = nil
-
-local function applySlowMotion()
-    if slowFactor >= 0.99 then return end
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if not hum then return end
-
-    slowOriginals = {
-        WalkSpeed = hum.WalkSpeed,
-        JumpPower = hum.JumpPower,
-        JumpHeight = hum.JumpHeight,
-        UseJumpPower = hum.UseJumpPower,
-        Gravity = workspace.Gravity,
-    }
-
-    hum.WalkSpeed = slowOriginals.WalkSpeed * slowFactor
-    if slowOriginals.UseJumpPower then
-        hum.JumpPower = slowOriginals.JumpPower * slowFactor
-    end
-    -- Gravity escalado por fator² → altura do pulo se mantém, tempo dobra
-    workspace.Gravity = slowOriginals.Gravity * (slowFactor * slowFactor)
-end
-
-local function removeSlowMotion()
-    if not slowOriginals then return end
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if hum then
-        hum.WalkSpeed = slowOriginals.WalkSpeed
-        hum.JumpPower = slowOriginals.JumpPower
-    end
-    workspace.Gravity = slowOriginals.Gravity
-    slowOriginals = nil
-end
+-- Paleta de cores
+local C_TURQ       = Color3.fromRGB(0, 210, 210)
+local C_TURQ_BRIGHT= Color3.fromRGB(120, 245, 255)
+local C_TURQ_DARK  = Color3.fromRGB(0, 130, 140)
+local C_BG         = Color3.fromRGB(14, 22, 24)
+local C_BG_2       = Color3.fromRGB(22, 32, 35)
+local C_BG_3       = Color3.fromRGB(30, 44, 48)
+local C_TXT        = Color3.fromRGB(230, 245, 250)
+local C_TXT_DIM    = Color3.fromRGB(120, 150, 160)
 
 -- ======================================================================== --
 -- GUI
 -- ======================================================================== --
 local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "PathRecorderGui"
+ScreenGui.Name = "AngelRecorder"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 
+-- ===== LOGO FLUTUANTE =====
 local FloatButton = Instance.new("TextButton", ScreenGui)
-FloatButton.Size = UDim2.new(0, 42, 0, 42)
-FloatButton.Position = UDim2.new(0, 15, 0.5, -21)
-FloatButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-FloatButton.Text = "🎬"
-FloatButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-FloatButton.TextSize = 20
+FloatButton.Size = UDim2.new(0, 46, 0, 46)
+FloatButton.Position = UDim2.new(0, 16, 0.5, -23)
+FloatButton.BackgroundColor3 = C_BG_2
+FloatButton.Text = "✦"
+FloatButton.TextColor3 = C_TURQ_BRIGHT
+FloatButton.TextSize = 24
 FloatButton.Font = Enum.Font.GothamBold
 FloatButton.BorderSizePixel = 0
 FloatButton.Active = true
 FloatButton.AutoButtonColor = false
 Instance.new("UICorner", FloatButton).CornerRadius = UDim.new(1, 0)
 local FloatStroke = Instance.new("UIStroke", FloatButton)
-FloatStroke.Color = Color3.fromRGB(0, 170, 0)
-FloatStroke.Thickness = 1.5
+FloatStroke.Color = C_TURQ
+FloatStroke.Thickness = 2
 
+-- Brilho interno do logo (glow)
+local FloatInner = Instance.new("Frame", FloatButton)
+FloatInner.Size = UDim2.new(1, -10, 1, -10)
+FloatInner.Position = UDim2.new(0, 5, 0, 5)
+FloatInner.BackgroundTransparency = 1
+FloatInner.ZIndex = 0
+Instance.new("UICorner", FloatInner).CornerRadius = UDim.new(1, 0)
+local FloatInnerStroke = Instance.new("UIStroke", FloatInner)
+FloatInnerStroke.Color = Color3.fromRGB(255, 255, 255)
+FloatInnerStroke.Transparency = 0.75
+FloatInnerStroke.Thickness = 1
+
+-- ===== JANELA =====
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 165, 0, 197)
-MainFrame.Position = UDim2.new(0.5, -82, 0.5, -98)
-MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MainFrame.Size = UDim2.new(0, 180, 0, 215)
+MainFrame.Position = UDim2.new(0.5, -90, 0.5, -107)
+MainFrame.BackgroundColor3 = C_BG
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Visible = false
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
 local MainStroke = Instance.new("UIStroke", MainFrame)
-MainStroke.Color = Color3.fromRGB(0, 170, 0)
-MainStroke.Thickness = 1
+MainStroke.Color = C_TURQ
+MainStroke.Thickness = 1.5
+MainStroke.Transparency = 0.15
 
+-- TitleBar
 local TitleBar = Instance.new("Frame", MainFrame)
-TitleBar.Size = UDim2.new(1, 0, 0, 20)
-TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.Size = UDim2.new(1, 0, 0, 26)
+TitleBar.BackgroundColor3 = C_BG_3
 TitleBar.BorderSizePixel = 0
 TitleBar.Active = true
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
 
-local Title = Instance.new("TextLabel", TitleBar)
-Title.Size = UDim2.new(1, -30, 1, 0)
-Title.Position = UDim2.new(0, 8, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.GothamBold
-Title.Text = "DRIP REC"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 10
-Title.TextXAlignment = Enum.TextXAlignment.Left
+local titleGrad = Instance.new("UIGradient", TitleBar)
+titleGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 45, 52)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 90, 105)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 45, 52)),
+})
+titleGrad.Rotation = 0
 
+-- Ícone
+local TitleIcon = Instance.new("TextLabel", TitleBar)
+TitleIcon.Size = UDim2.new(0, 20, 1, 0)
+TitleIcon.Position = UDim2.new(0, 8, 0, 0)
+TitleIcon.BackgroundTransparency = 1
+TitleIcon.Text = "✦"
+TitleIcon.TextColor3 = C_TURQ_BRIGHT
+TitleIcon.TextSize = 16
+TitleIcon.Font = Enum.Font.GothamBold
+TitleIcon.TextXAlignment = Enum.TextXAlignment.Left
+
+-- "angel"
+local TitleMain = Instance.new("TextLabel", TitleBar)
+TitleMain.Size = UDim2.new(0, 60, 1, 0)
+TitleMain.Position = UDim2.new(0, 28, 0, 0)
+TitleMain.BackgroundTransparency = 1
+TitleMain.Text = "angel"
+TitleMain.TextColor3 = C_TURQ_BRIGHT
+TitleMain.TextSize = 13
+TitleMain.Font = Enum.Font.GothamBold
+TitleMain.TextXAlignment = Enum.TextXAlignment.Left
+
+-- "• gravar rota"
+local TitleSub = Instance.new("TextLabel", TitleBar)
+TitleSub.Size = UDim2.new(1, -110, 1, 0)
+TitleSub.Position = UDim2.new(0, 76, 0, 0)
+TitleSub.BackgroundTransparency = 1
+TitleSub.Text = "• gravar rota"
+TitleSub.TextColor3 = C_TXT_DIM
+TitleSub.TextSize = 9
+TitleSub.Font = Enum.Font.Gotham
+TitleSub.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Fechar
 local CloseBtn = Instance.new("TextButton", TitleBar)
 CloseBtn.Size = UDim2.new(0, 16, 0, 16)
-CloseBtn.Position = UDim2.new(1, -20, 0, 2)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+CloseBtn.Position = UDim2.new(1, -22, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 50)
 CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextColor3 = Color3.fromRGB(255, 230, 230)
 CloseBtn.TextSize = 9
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
--- Tab Bar (2 abas)
+-- ===== TAB BAR =====
 local TabBar = Instance.new("Frame", MainFrame)
-TabBar.Size = UDim2.new(1, -12, 0, 15)
-TabBar.Position = UDim2.new(0, 6, 0, 22)
-TabBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+TabBar.Size = UDim2.new(1, -16, 0, 16)
+TabBar.Position = UDim2.new(0, 8, 0, 32)
+TabBar.BackgroundColor3 = C_BG
 TabBar.BorderSizePixel = 0
-Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 4)
+Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 5)
 
-local TabRecord = Instance.new("TextButton", TabBar)
-TabRecord.Size = UDim2.new(0.5, -2, 1, 0)
-TabRecord.Position = UDim2.new(0, 2, 0, 0)
-TabRecord.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-TabRecord.Font = Enum.Font.GothamBold
-TabRecord.Text = "GRAVAR"
-TabRecord.TextColor3 = Color3.fromRGB(255, 255, 255)
-TabRecord.TextSize = 8
-TabRecord.BorderSizePixel = 0
-Instance.new("UICorner", TabRecord).CornerRadius = UDim.new(0, 3)
+local function makeTab(text, xScale)
+    local t = Instance.new("TextButton", TabBar)
+    t.Size = UDim2.new(0.333, -2, 1, 0)
+    t.Position = UDim2.new(xScale, 1, 0, 0)
+    t.BackgroundColor3 = C_BG_2
+    t.Font = Enum.Font.GothamBold
+    t.Text = text
+    t.TextColor3 = C_TXT_DIM
+    t.TextSize = 9
+    t.BorderSizePixel = 0
+    Instance.new("UICorner", t).CornerRadius = UDim.new(0, 4)
+    return t
+end
 
-local TabData = Instance.new("TextButton", TabBar)
-TabData.Size = UDim2.new(0.5, -2, 1, 0)
-TabData.Position = UDim2.new(0.5, 0, 0, 0)
-TabData.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-TabData.Font = Enum.Font.GothamBold
-TabData.Text = "DADOS"
-TabData.TextColor3 = Color3.fromRGB(180, 180, 180)
-TabData.TextSize = 8
-TabData.BorderSizePixel = 0
-Instance.new("UICorner", TabData).CornerRadius = UDim.new(0, 3)
+local TabRota   = makeTab("rota",   0)
+local TabDados  = makeTab("dados",  0.333)
+local TabVisual = makeTab("visual", 0.666)
 
--- Aba GRAVAÇÃO
-local RecordPage = Instance.new("Frame", MainFrame)
-RecordPage.Size = UDim2.new(1, 0, 1, -40)
-RecordPage.Position = UDim2.new(0, 0, 0, 40)
-RecordPage.BackgroundTransparency = 1
-RecordPage.Visible = true
+local function setTabActive(t, active)
+    if active then
+        t.BackgroundColor3 = C_TURQ_DARK
+        t.TextColor3 = C_TURQ_BRIGHT
+    else
+        t.BackgroundColor3 = C_BG_2
+        t.TextColor3 = C_TXT_DIM
+    end
+end
+setTabActive(TabRota, true)
 
-local TimerFrame = Instance.new("Frame", RecordPage)
-TimerFrame.Size = UDim2.new(1, -12, 0, 26)
-TimerFrame.Position = UDim2.new(0, 6, 0, 0)
-TimerFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+-- ======================================================================== --
+-- PÁGINA: ROTA
+-- ======================================================================== --
+local RotaPage = Instance.new("Frame", MainFrame)
+RotaPage.Size = UDim2.new(1, 0, 1, -52)
+RotaPage.Position = UDim2.new(0, 0, 0, 52)
+RotaPage.BackgroundTransparency = 1
+RotaPage.Visible = true
+
+-- Timer display
+local TimerFrame = Instance.new("Frame", RotaPage)
+TimerFrame.Size = UDim2.new(1, -16, 0, 36)
+TimerFrame.Position = UDim2.new(0, 8, 0, 0)
+TimerFrame.BackgroundColor3 = C_BG_2
 TimerFrame.BorderSizePixel = 0
-Instance.new("UICorner", TimerFrame).CornerRadius = UDim.new(0, 5)
-local TimerFrameStroke = Instance.new("UIStroke", TimerFrame)
-TimerFrameStroke.Color = Color3.fromRGB(0, 170, 0)
-TimerFrameStroke.Thickness = 1
+Instance.new("UICorner", TimerFrame).CornerRadius = UDim.new(0, 8)
+local TimerStroke = Instance.new("UIStroke", TimerFrame)
+TimerStroke.Color = C_TURQ_DARK
+TimerStroke.Thickness = 1
+
+local timerGrad = Instance.new("UIGradient", TimerFrame)
+timerGrad.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, C_BG_2),
+    ColorSequenceKeypoint.new(1, C_BG_3),
+})
+timerGrad.Rotation = 90
 
 local TimerLabel = Instance.new("TextLabel", TimerFrame)
 TimerLabel.Size = UDim2.new(1, 0, 1, 0)
 TimerLabel.BackgroundTransparency = 1
 TimerLabel.Font = Enum.Font.Code
 TimerLabel.Text = "00:00.000"
-TimerLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
-TimerLabel.TextSize = 14
+TimerLabel.TextColor3 = C_TURQ_BRIGHT
+TimerLabel.TextSize = 17
 
-local StatusLabel = Instance.new("TextLabel", RecordPage)
-StatusLabel.Size = UDim2.new(1, -12, 0, 12)
-StatusLabel.Position = UDim2.new(0, 6, 0, 28)
+-- Status
+local StatusLabel = Instance.new("TextLabel", RotaPage)
+StatusLabel.Size = UDim2.new(1, -16, 0, 12)
+StatusLabel.Position = UDim2.new(0, 8, 0, 40)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.Text = "Parado"
-StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+StatusLabel.Text = "◦ parado"
+StatusLabel.TextColor3 = C_TXT_DIM
 StatusLabel.TextSize = 9
+StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 
--- ===== SLOW REC CONTROL =====
-local SlowRow = Instance.new("Frame", RecordPage)
-SlowRow.Size = UDim2.new(1, -12, 0, 18)
-SlowRow.Position = UDim2.new(0, 6, 0, 43)
-SlowRow.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-SlowRow.BorderSizePixel = 0
-Instance.new("UICorner", SlowRow).CornerRadius = UDim.new(0, 4)
-
-local SlowLbl = Instance.new("TextLabel", SlowRow)
-SlowLbl.Size = UDim2.new(0, 36, 1, 0)
-SlowLbl.Position = UDim2.new(0, 4, 0, 0)
-SlowLbl.BackgroundTransparency = 1
-SlowLbl.Text = "SLOW:"
-SlowLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
-SlowLbl.Font = Enum.Font.GothamBold
-SlowLbl.TextSize = 9
-SlowLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-local SlowMinus = Instance.new("TextButton", SlowRow)
-SlowMinus.Size = UDim2.new(0, 20, 1, -4)
-SlowMinus.Position = UDim2.new(0, 36, 0, 2)
-SlowMinus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-SlowMinus.Text = "-"
-SlowMinus.TextColor3 = Color3.fromRGB(255, 255, 255)
-SlowMinus.TextSize = 12
-SlowMinus.Font = Enum.Font.GothamBold
-SlowMinus.BorderSizePixel = 0
-Instance.new("UICorner", SlowMinus).CornerRadius = UDim.new(0, 3)
-
-local SlowValue = Instance.new("TextLabel", SlowRow)
-SlowValue.Size = UDim2.new(0, 46, 1, 0)
-SlowValue.Position = UDim2.new(0, 57, 0, 0)
-SlowValue.BackgroundTransparency = 1
-SlowValue.Text = "0.70x"
-SlowValue.TextColor3 = Color3.fromRGB(120, 180, 255)
-SlowValue.Font = Enum.Font.Code
-SlowValue.TextSize = 11
-
-local SlowPlus = Instance.new("TextButton", SlowRow)
-SlowPlus.Size = UDim2.new(0, 20, 1, -4)
-SlowPlus.Position = UDim2.new(0, 104, 0, 2)
-SlowPlus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-SlowPlus.Text = "+"
-SlowPlus.TextColor3 = Color3.fromRGB(255, 255, 255)
-SlowPlus.TextSize = 12
-SlowPlus.Font = Enum.Font.GothamBold
-SlowPlus.BorderSizePixel = 0
-Instance.new("UICorner", SlowPlus).CornerRadius = UDim.new(0, 3)
-
-local function updateSlowUI()
-    SlowValue.Text = string.format("%.2fx", slowFactor)
-    if slowFactor >= 0.99 then
-        SlowValue.TextColor3 = Color3.fromRGB(150, 150, 150)
-    elseif slowFactor >= 0.7 then
-        SlowValue.TextColor3 = Color3.fromRGB(120, 180, 255)
-    elseif slowFactor >= 0.6 then
-        SlowValue.TextColor3 = Color3.fromRGB(255, 200, 100)
-    else
-        SlowValue.TextColor3 = Color3.fromRGB(255, 120, 120)
-    end
-end
-
-SlowMinus.MouseButton1Click:Connect(function()
-    if isRecording then return end
-    slowFactor = math.max(SLOW_MIN, slowFactor - SLOW_STEP)
-    slowFactor = math.floor(slowFactor * 100 + 0.5) / 100
-    updateSlowUI()
-end)
-
-SlowPlus.MouseButton1Click:Connect(function()
-    if isRecording then return end
-    slowFactor = math.min(SLOW_MAX, slowFactor + SLOW_STEP)
-    slowFactor = math.floor(slowFactor * 100 + 0.5) / 100
-    updateSlowUI()
-end)
-
-updateSlowUI()
-
--- Botões
-local RecordBtn = Instance.new("TextButton", RecordPage)
-RecordBtn.Size = UDim2.new(1, -12, 0, 22)
-RecordBtn.Position = UDim2.new(0, 6, 0, 66)
-RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+-- Botão Gravar
+local RecordBtn = Instance.new("TextButton", RotaPage)
+RecordBtn.Size = UDim2.new(1, -16, 0, 26)
+RecordBtn.Position = UDim2.new(0, 8, 0, 58)
+RecordBtn.BackgroundColor3 = C_TURQ_DARK
 RecordBtn.Font = Enum.Font.GothamBold
-RecordBtn.Text = "● GRAVAR"
-RecordBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-RecordBtn.TextSize = 9
+RecordBtn.Text = "✦  gravar"
+RecordBtn.TextColor3 = C_TURQ_BRIGHT
+RecordBtn.TextSize = 10
 RecordBtn.BorderSizePixel = 0
-Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 5)
+Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 7)
 
-local TestBtn = Instance.new("TextButton", RecordPage)
-TestBtn.Size = UDim2.new(1, -12, 0, 22)
-TestBtn.Position = UDim2.new(0, 6, 0, 91)
-TestBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 180)
+-- Botão Testar
+local TestBtn = Instance.new("TextButton", RotaPage)
+TestBtn.Size = UDim2.new(1, -16, 0, 26)
+TestBtn.Position = UDim2.new(0, 8, 0, 88)
+TestBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
 TestBtn.Font = Enum.Font.GothamBold
-TestBtn.Text = "▶ TESTAR"
-TestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-TestBtn.TextSize = 9
+TestBtn.Text = "▸  testar"
+TestBtn.TextColor3 = Color3.fromRGB(180, 220, 255)
+TestBtn.TextSize = 10
 TestBtn.BorderSizePixel = 0
-Instance.new("UICorner", TestBtn).CornerRadius = UDim.new(0, 5)
+Instance.new("UICorner", TestBtn).CornerRadius = UDim.new(0, 7)
 
-local SaveRenameBtn = Instance.new("TextButton", RecordPage)
-SaveRenameBtn.Size = UDim2.new(1, -12, 0, 22)
-SaveRenameBtn.Position = UDim2.new(0, 6, 0, 116)
-SaveRenameBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 160)
+-- Botão Guardar
+local SaveRenameBtn = Instance.new("TextButton", RotaPage)
+SaveRenameBtn.Size = UDim2.new(1, -16, 0, 26)
+SaveRenameBtn.Position = UDim2.new(0, 8, 0, 118)
+SaveRenameBtn.BackgroundColor3 = Color3.fromRGB(70, 45, 110)
 SaveRenameBtn.Font = Enum.Font.GothamBold
-SaveRenameBtn.Text = "💾 SALVAR & RENOMEAR"
-SaveRenameBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-SaveRenameBtn.TextSize = 8
+SaveRenameBtn.Text = "❖  guardar"
+SaveRenameBtn.TextColor3 = Color3.fromRGB(230, 210, 255)
+SaveRenameBtn.TextSize = 10
 SaveRenameBtn.BorderSizePixel = 0
-Instance.new("UICorner", SaveRenameBtn).CornerRadius = UDim.new(0, 5)
+Instance.new("UICorner", SaveRenameBtn).CornerRadius = UDim.new(0, 7)
 
--- Aba DADOS
-local DataPage = Instance.new("Frame", MainFrame)
-DataPage.Size = UDim2.new(1, 0, 1, -40)
-DataPage.Position = UDim2.new(0, 0, 0, 40)
-DataPage.BackgroundTransparency = 1
-DataPage.Visible = false
+-- ======================================================================== --
+-- PÁGINA: DADOS
+-- ======================================================================== --
+local DadosPage = Instance.new("Frame", MainFrame)
+DadosPage.Size = UDim2.new(1, 0, 1, -52)
+DadosPage.Position = UDim2.new(0, 0, 0, 52)
+DadosPage.BackgroundTransparency = 1
+DadosPage.Visible = false
 
-local DataScroll = Instance.new("ScrollingFrame", DataPage)
-DataScroll.Size = UDim2.new(1, -8, 1, -8)
-DataScroll.Position = UDim2.new(0, 4, 0, 4)
+local DataScroll = Instance.new("ScrollingFrame", DadosPage)
+DataScroll.Size = UDim2.new(1, -12, 1, -12)
+DataScroll.Position = UDim2.new(0, 6, 0, 6)
 DataScroll.BackgroundTransparency = 1
 DataScroll.BorderSizePixel = 0
 DataScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 DataScroll.ScrollBarThickness = 3
-DataScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 170, 0)
-Instance.new("UIListLayout", DataScroll).Padding = UDim.new(0, 3)
+DataScroll.ScrollBarImageColor3 = C_TURQ
+Instance.new("UIListLayout", DataScroll).Padding = UDim.new(0, 4)
+
+-- ======================================================================== --
+-- PÁGINA: VISUAL
+-- ======================================================================== --
+local VisualPage = Instance.new("Frame", MainFrame)
+VisualPage.Size = UDim2.new(1, 0, 1, -52)
+VisualPage.Position = UDim2.new(0, 0, 0, 52)
+VisualPage.BackgroundTransparency = 1
+VisualPage.Visible = false
+
+local VisualTitle = Instance.new("TextLabel", VisualPage)
+VisualTitle.Size = UDim2.new(1, -16, 0, 12)
+VisualTitle.Position = UDim2.new(0, 8, 0, 4)
+VisualTitle.BackgroundTransparency = 1
+VisualTitle.Font = Enum.Font.GothamBold
+VisualTitle.Text = "◦ efeitos visuais"
+VisualTitle.TextColor3 = C_TXT_DIM
+VisualTitle.TextSize = 9
+VisualTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Botão Rainbow
+local RainbowBtn = Instance.new("TextButton", VisualPage)
+RainbowBtn.Size = UDim2.new(1, -16, 0, 40)
+RainbowBtn.Position = UDim2.new(0, 8, 0, 22)
+RainbowBtn.BackgroundColor3 = C_BG_2
+RainbowBtn.Font = Enum.Font.GothamBold
+RainbowBtn.Text = "rainbow  •  off"
+RainbowBtn.TextColor3 = C_TXT_DIM
+RainbowBtn.TextSize = 11
+RainbowBtn.BorderSizePixel = 0
+Instance.new("UICorner", RainbowBtn).CornerRadius = UDim.new(0, 8)
+local RainbowStroke = Instance.new("UIStroke", RainbowBtn)
+RainbowStroke.Color = C_BG_3
+RainbowStroke.Thickness = 1.5
+
+-- Bolinha de estado
+local RainbowDot = Instance.new("Frame", RainbowBtn)
+RainbowDot.Size = UDim2.new(0, 8, 0, 8)
+RainbowDot.Position = UDim2.new(0, 14, 0.5, -4)
+RainbowDot.BackgroundColor3 = C_TXT_DIM
+RainbowDot.BorderSizePixel = 0
+Instance.new("UICorner", RainbowDot).CornerRadius = UDim.new(1, 0)
+
+-- Deslocar texto pro centro um pouco
+RainbowBtn.TextXAlignment = Enum.TextXAlignment.Center
+
+-- Info
+local VisualInfo = Instance.new("TextLabel", VisualPage)
+VisualInfo.Size = UDim2.new(1, -16, 0, 24)
+VisualInfo.Position = UDim2.new(0, 8, 0, 68)
+VisualInfo.BackgroundTransparency = 1
+VisualInfo.Font = Enum.Font.Gotham
+VisualInfo.Text = "aplica arco-íris animado\nnas bordas do menu e logo"
+VisualInfo.TextColor3 = C_TXT_DIM
+VisualInfo.TextSize = 8
+VisualInfo.TextWrapped = true
+VisualInfo.TextXAlignment = Enum.TextXAlignment.Left
+VisualInfo.TextYAlignment = Enum.TextYAlignment.Top
+
+-- ======================================================================== --
+-- SISTEMA RAINBOW
+-- ======================================================================== --
+local rainbowOn = false
+local rainbowHue = 0
+local rainbowConn = nil
+
+local function startRainbow()
+    rainbowHue = 0
+    if rainbowConn then rainbowConn:Disconnect() end
+    rainbowConn = RunService.RenderStepped:Connect(function(dt)
+        rainbowHue = (rainbowHue + dt * 0.35) % 1
+        local c1 = Color3.fromHSV(rainbowHue, 0.75, 1)
+        local c2 = Color3.fromHSV((rainbowHue + 0.5) % 1, 0.75, 1)
+        FloatStroke.Color = c1
+        MainStroke.Color = c1
+        RainbowStroke.Color = c1
+        RainbowDot.BackgroundColor3 = c1
+        FloatInnerStroke.Color = c2
+        FloatInnerStroke.Transparency = 0.4
+        RainbowBtn.TextColor3 = c1
+    end)
+end
+
+local function stopRainbow()
+    if rainbowConn then
+        rainbowConn:Disconnect()
+        rainbowConn = nil
+    end
+    FloatStroke.Color = C_TURQ
+    MainStroke.Color = C_TURQ
+    FloatInnerStroke.Color = Color3.fromRGB(255, 255, 255)
+    FloatInnerStroke.Transparency = 0.75
+    RainbowStroke.Color = C_BG_3
+    RainbowDot.BackgroundColor3 = C_TXT_DIM
+    RainbowBtn.TextColor3 = C_TXT_DIM
+end
+
+RainbowBtn.MouseButton1Click:Connect(function()
+    rainbowOn = not rainbowOn
+    if rainbowOn then
+        RainbowBtn.Text = "rainbow  •  on"
+        RainbowDot.BackgroundColor3 = C_TURQ
+        startRainbow()
+    else
+        RainbowBtn.Text = "rainbow  •  off"
+        stopRainbow()
+    end
+end)
 
 -- ======================================================================== --
 -- TIMER
 -- ======================================================================== --
 local timerStartTime, timerFrozen, timerRunning, timerConnection = 0, 0, false, nil
-local isRecording = false
 
 local function formatTime(t)
     if t < 0 then t = 0 end
@@ -323,16 +391,7 @@ local function formatTime(t)
 end
 
 local function updateTimerDisplay()
-    local elapsed
-    if timerRunning then
-        elapsed = os.clock() - timerStartTime
-        -- Se estiver gravando em slow-mo, mostra o tempo equivalente em velocidade normal
-        if isRecording and slowFactor < 0.99 then
-            elapsed = elapsed * slowFactor
-        end
-    else
-        elapsed = timerFrozen
-    end
+    local elapsed = timerRunning and (os.clock() - timerStartTime) or timerFrozen
     TimerLabel.Text = formatTime(elapsed)
 end
 
@@ -342,23 +401,17 @@ local function startTimer()
     timerFrozen = 0
     if timerConnection then timerConnection:Disconnect() end
     timerConnection = RunService.RenderStepped:Connect(updateTimerDisplay)
-    TimerFrameStroke.Color = Color3.fromRGB(0, 255, 120)
-    TimerLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+    TimerStroke.Color = C_TURQ
+    TimerLabel.TextColor3 = C_TURQ_BRIGHT
 end
 
 local function stopTimer()
-    if timerRunning then
-        local elapsed = os.clock() - timerStartTime
-        if isRecording and slowFactor < 0.99 then
-            elapsed = elapsed * slowFactor
-        end
-        timerFrozen = elapsed
-    end
+    if timerRunning then timerFrozen = os.clock() - timerStartTime end
     timerRunning = false
     if timerConnection then timerConnection:Disconnect() timerConnection = nil end
     updateTimerDisplay()
-    TimerFrameStroke.Color = Color3.fromRGB(255, 180, 0)
-    TimerLabel.TextColor3 = Color3.fromRGB(255, 180, 0)
+    TimerStroke.Color = Color3.fromRGB(160, 120, 60)
+    TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 130)
 end
 
 local function resetTimer()
@@ -366,8 +419,8 @@ local function resetTimer()
     timerRunning = false
     timerFrozen = 0
     TimerLabel.Text = "00:00.000"
-    TimerFrameStroke.Color = Color3.fromRGB(0, 170, 0)
-    TimerLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+    TimerStroke.Color = C_TURQ_DARK
+    TimerLabel.TextColor3 = C_TURQ_BRIGHT
 end
 
 -- ======================================================================== --
@@ -432,10 +485,10 @@ end)
 local function toggleMenu()
     MainFrame.Visible = not MainFrame.Visible
     if MainFrame.Visible then
-        MainFrame.Position = UDim2.new(0.5, -82, 0.5, -98)
-        FloatStroke.Color = Color3.fromRGB(0, 220, 0)
+        MainFrame.Position = UDim2.new(0.5, -90, 0.5, -107)
+        FloatStroke.Thickness = 3
     else
-        FloatStroke.Color = Color3.fromRGB(0, 170, 0)
+        FloatStroke.Thickness = 2
     end
 end
 
@@ -456,28 +509,30 @@ end)
 
 CloseBtn.MouseButton1Click:Connect(function()
     MainFrame.Visible = false
-    FloatStroke.Color = Color3.fromRGB(0, 170, 0)
+    FloatStroke.Thickness = 2
 end)
 
 -- ======================================================================== --
 -- ABAS
 -- ======================================================================== --
 local function switchTab(tab)
-    if tab == "record" then
-        RecordPage.Visible = true
-        DataPage.Visible = false
-        TabRecord.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        TabRecord.TextColor3 = Color3.fromRGB(255, 255, 255)
-        TabData.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        TabData.TextColor3 = Color3.fromRGB(180, 180, 180)
-    else
-        RecordPage.Visible = false
-        DataPage.Visible = true
-        TabData.BackgroundColor3 = Color3.fromRGB(100, 60, 160)
-        TabData.TextColor3 = Color3.fromRGB(255, 255, 255)
-        TabRecord.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        TabRecord.TextColor3 = Color3.fromRGB(180, 180, 180)
+    setTabActive(TabRota, false)
+    setTabActive(TabDados, false)
+    setTabActive(TabVisual, false)
+    RotaPage.Visible = false
+    DadosPage.Visible = false
+    VisualPage.Visible = false
+
+    if tab == "rota" then
+        RotaPage.Visible = true
+        setTabActive(TabRota, true)
+    elseif tab == "dados" then
+        DadosPage.Visible = true
+        setTabActive(TabDados, true)
         refreshDataList()
+    else
+        VisualPage.Visible = true
+        setTabActive(TabVisual, true)
     end
 end
 
@@ -485,6 +540,7 @@ end
 -- LÓGICA
 -- ======================================================================== --
 local recordedData = {}
+local isRecording = false
 local recordingConnection = nil
 local playbackConnection = nil
 local startTime = 0
@@ -563,17 +619,17 @@ end
 
 local function playRoute(data)
     if #data == 0 then
-        StatusLabel.Text = "Dados vazios!"
+        StatusLabel.Text = "◦ nada gravado"
         return
     end
     if playbackConnection then
         stopPlayback()
         stopTimer()
-        StatusLabel.Text = "Cancelado"
+        StatusLabel.Text = "◦ cancelado"
         return
     end
 
-    StatusLabel.Text = "Indo pro início..."
+    StatusLabel.Text = "◦ indo pro início..."
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChild("Humanoid")
@@ -665,20 +721,18 @@ local function playRoute(data)
     local currentIndex = 1
     activeTracks = {}
 
-    StatusLabel.Text = "Reproduzindo..."
+    StatusLabel.Text = "◦ reproduzindo..."
     startTimer()
 
     playbackConnection = RunService.Heartbeat:Connect(function()
-        -- Tempo já está em escala "normal" (pós-processado)
         local elapsedTime = os.clock() - pstartTime
-
         while currentIndex < totalPoints and elapsedTime >= data[currentIndex + 1].Time do
             currentIndex = currentIndex + 1
         end
         if currentIndex >= totalPoints then
             stopPlayback()
             stopTimer()
-            StatusLabel.Text = string.format("OK! em %.2fs", timerFrozen)
+            StatusLabel.Text = string.format("◦ concluído em %.2fs", timerFrozen)
             return
         end
 
@@ -744,8 +798,10 @@ RecordBtn.MouseButton1Click:Connect(function()
         recordedData = {}
         startTime = os.clock()
         startTimer()
-        RecordBtn.Text = "■ PARAR"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        RecordBtn.Text = "✧  parar"
+        RecordBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 55)
+        RecordBtn.TextColor3 = Color3.fromRGB(255, 210, 220)
+        StatusLabel.Text = "◦ gravando..."
 
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -753,22 +809,15 @@ RecordBtn.MouseButton1Click:Connect(function()
         if not hrp or not hum then
             isRecording = false
             stopTimer()
-            RecordBtn.Text = "● GRAVAR"
-            RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-            StatusLabel.Text = "Sem personagem!"
+            RecordBtn.Text = "✦  gravar"
+            RecordBtn.BackgroundColor3 = C_TURQ_DARK
+            RecordBtn.TextColor3 = C_TURQ_BRIGHT
+            StatusLabel.Text = "◦ sem personagem"
             return
         end
 
-        -- Aplica slow-motion (WalkSpeed + Gravity)
-        applySlowMotion()
-        if slowFactor < 0.99 then
-            StatusLabel.Text = string.format("Gravando %s", SlowValue.Text)
-        else
-            StatusLabel.Text = "Gravando..."
-        end
-
         recordingConnection = RunService.Heartbeat:Connect(function()
-            local currentTime = os.clock() - startTime  -- tempo REAL (slow) do gravação
+            local currentTime = os.clock() - startTime
             local cf = hrp.CFrame
             local vel = hrp.AssemblyLinearVelocity
             local state = hum:GetState()
@@ -799,33 +848,17 @@ RecordBtn.MouseButton1Click:Connect(function()
             recordingConnection:Disconnect()
             recordingConnection = nil
         end
-
-        -- Remove slow-motion (restaura WalkSpeed/Gravity originais)
-        removeSlowMotion()
-
-        -- Pós-processa: converte timestamps e velocidades de slow → normal
-        local factor = slowFactor
-        if factor < 0.99 then
-            for _, node in ipairs(recordedData) do
-                node.Time = node.Time * factor
-                if node.Velocity then
-                    node.Velocity[1] = node.Velocity[1] / factor
-                    node.Velocity[2] = node.Velocity[2] / factor
-                    node.Velocity[3] = node.Velocity[3] / factor
-                end
-            end
-        end
-
         stopTimer()
-        RecordBtn.Text = "● GRAVAR"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        StatusLabel.Text = string.format("OK! %.2fs (%d pts)", timerFrozen, #recordedData)
+        RecordBtn.Text = "✦  gravar"
+        RecordBtn.BackgroundColor3 = C_TURQ_DARK
+        RecordBtn.TextColor3 = C_TURQ_BRIGHT
+        StatusLabel.Text = string.format("◦ %.2fs • %d pts", timerFrozen, #recordedData)
     end
 end)
 
 TestBtn.MouseButton1Click:Connect(function()
-    if isRecording then StatusLabel.Text = "Pare gravação!" return end
-    if #recordedData == 0 then StatusLabel.Text = "Nada gravado!" return end
+    if isRecording then StatusLabel.Text = "◦ pare a gravação" return end
+    if #recordedData == 0 then StatusLabel.Text = "◦ nada gravado" return end
     playRoute(recordedData)
 end)
 
@@ -833,70 +866,73 @@ end)
 -- POPUP RENOMEAR
 -- ======================================================================== --
 local RenamePopup = Instance.new("Frame", ScreenGui)
-RenamePopup.Size = UDim2.new(0, 180, 0, 78)
-RenamePopup.Position = UDim2.new(0.5, -90, 0.5, -39)
-RenamePopup.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+RenamePopup.Size = UDim2.new(0, 190, 0, 84)
+RenamePopup.Position = UDim2.new(0.5, -95, 0.5, -42)
+RenamePopup.BackgroundColor3 = C_BG
 RenamePopup.BorderSizePixel = 0
 RenamePopup.Visible = false
 RenamePopup.ZIndex = 10
-Instance.new("UICorner", RenamePopup).CornerRadius = UDim.new(0, 8)
+Instance.new("UICorner", RenamePopup).CornerRadius = UDim.new(0, 10)
 local RenameStroke = Instance.new("UIStroke", RenamePopup)
-RenameStroke.Color = Color3.fromRGB(100, 60, 160)
+RenameStroke.Color = Color3.fromRGB(150, 100, 220)
 RenameStroke.Thickness = 1.5
 
 local RenameTitle = Instance.new("TextLabel", RenamePopup)
-RenameTitle.Size = UDim2.new(1, -12, 0, 18)
-RenameTitle.Position = UDim2.new(0, 6, 0, 4)
+RenameTitle.Size = UDim2.new(1, -16, 0, 20)
+RenameTitle.Position = UDim2.new(0, 8, 0, 6)
 RenameTitle.BackgroundTransparency = 1
 RenameTitle.Font = Enum.Font.GothamBold
-RenameTitle.Text = "Nome da rota:"
-RenameTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
+RenameTitle.Text = "❖  nome da rota"
+RenameTitle.TextColor3 = Color3.fromRGB(220, 200, 255)
 RenameTitle.TextSize = 10
 RenameTitle.TextXAlignment = Enum.TextXAlignment.Left
 RenameTitle.ZIndex = 11
 
 local RenameBox = Instance.new("TextBox", RenamePopup)
-RenameBox.Size = UDim2.new(1, -12, 0, 24)
-RenameBox.Position = UDim2.new(0, 6, 0, 24)
-RenameBox.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+RenameBox.Size = UDim2.new(1, -16, 0, 26)
+RenameBox.Position = UDim2.new(0, 8, 0, 28)
+RenameBox.BackgroundColor3 = C_BG_2
 RenameBox.BorderSizePixel = 0
 RenameBox.Font = Enum.Font.Gotham
 RenameBox.Text = ""
-RenameBox.PlaceholderText = "ex: Rota_Fase1"
-RenameBox.PlaceholderColor3 = Color3.fromRGB(100, 100, 100)
-RenameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+RenameBox.PlaceholderText = "ex: rota_fase1"
+RenameBox.PlaceholderColor3 = Color3.fromRGB(90, 120, 130)
+RenameBox.TextColor3 = C_TXT
 RenameBox.TextSize = 10
 RenameBox.ClearTextOnFocus = false
 RenameBox.ZIndex = 11
-Instance.new("UICorner", RenameBox).CornerRadius = UDim.new(0, 4)
+Instance.new("UICorner", RenameBox).CornerRadius = UDim.new(0, 6)
+local RenameBoxStroke = Instance.new("UIStroke", RenameBox)
+RenameBoxStroke.Color = C_TURQ_DARK
+RenameBoxStroke.Thickness = 1
 
 local RenameOK = Instance.new("TextButton", RenamePopup)
-RenameOK.Size = UDim2.new(0.5, -8, 0, 22)
-RenameOK.Position = UDim2.new(0, 6, 0, 52)
-RenameOK.BackgroundColor3 = Color3.fromRGB(100, 60, 160)
+RenameOK.Size = UDim2.new(0.5, -10, 0, 22)
+RenameOK.Position = UDim2.new(0, 8, 0, 58)
+RenameOK.BackgroundColor3 = Color3.fromRGB(70, 45, 110)
 RenameOK.Font = Enum.Font.GothamBold
-RenameOK.Text = "SALVAR"
-RenameOK.TextColor3 = Color3.fromRGB(255, 255, 255)
+RenameOK.Text = "guardar"
+RenameOK.TextColor3 = Color3.fromRGB(230, 210, 255)
 RenameOK.TextSize = 9
 RenameOK.BorderSizePixel = 0
 RenameOK.ZIndex = 11
-Instance.new("UICorner", RenameOK).CornerRadius = UDim.new(0, 4)
+Instance.new("UICorner", RenameOK).CornerRadius = UDim.new(0, 6)
 
 local RenameCancel = Instance.new("TextButton", RenamePopup)
-RenameCancel.Size = UDim2.new(0.5, -8, 0, 22)
-RenameCancel.Position = UDim2.new(0.5, 2, 0, 52)
-RenameCancel.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+RenameCancel.Size = UDim2.new(0.5, -10, 0, 22)
+RenameCancel.Position = UDim2.new(0.5, 2, 0, 58)
+RenameCancel.BackgroundColor3 = C_BG_3
 RenameCancel.Font = Enum.Font.GothamBold
-RenameCancel.Text = "CANCELAR"
-RenameCancel.TextColor3 = Color3.fromRGB(220, 220, 220)
+RenameCancel.Text = "cancelar"
+RenameCancel.TextColor3 = C_TXT_DIM
 RenameCancel.TextSize = 9
 RenameCancel.BorderSizePixel = 0
 RenameCancel.ZIndex = 11
-Instance.new("UICorner", RenameCancel).CornerRadius = UDim.new(0, 4)
+Instance.new("UICorner", RenameCancel).CornerRadius = UDim.new(0, 6)
 
 SaveRenameBtn.MouseButton1Click:Connect(function()
-    if #recordedData == 0 then StatusLabel.Text = "Nada gravado!" return end
-    RenameBox.Text = "Rota_" .. os.date("%H%M%S")
+    if #recordedData == 0 then StatusLabel.Text = "◦ nada gravado" return end
+    RenameBox.Text = "rota_" .. os.date("%H%M%S")
     RenamePopup.Visible = true
     RenameBox:CaptureFocus()
 end)
@@ -907,7 +943,7 @@ end)
 
 RenameOK.MouseButton1Click:Connect(function()
     local name = RenameBox.Text
-    if name == "" then name = "Rota_" .. os.date("%H%M%S") end
+    if name == "" then name = "rota_" .. os.date("%H%M%S") end
     local baseName = name
     local counter = 2
     while savedRoutes[name] do
@@ -920,22 +956,22 @@ RenameOK.MouseButton1Click:Connect(function()
         Data = recordedData
     }
     RenamePopup.Visible = false
-    StatusLabel.Text = "Salvo: " .. name
-    switchTab("data")
+    StatusLabel.Text = "◦ guardado: " .. name
+    switchTab("dados")
 end)
 
 -- ======================================================================== --
 -- LISTA DE ROTAS
 -- ======================================================================== --
-local function makeRouteButton(parent, text, color, onClick)
+local function makeRouteButton(parent, text, bg, fg, onClick)
     local b = Instance.new("TextButton", parent)
-    b.BackgroundColor3 = color
+    b.BackgroundColor3 = bg
     b.Font = Enum.Font.GothamBold
     b.Text = text
-    b.TextColor3 = Color3.fromRGB(255, 255, 255)
-    b.TextSize = 9
+    b.TextColor3 = fg
+    b.TextSize = 10
     b.BorderSizePixel = 0
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
     b.MouseButton1Click:Connect(onClick)
     return b
 end
@@ -950,57 +986,59 @@ function refreshDataList()
 
     if #names == 0 then
         local empty = Instance.new("TextLabel", DataScroll)
-        empty.Size = UDim2.new(1, 0, 0, 40)
+        empty.Size = UDim2.new(1, 0, 0, 50)
         empty.BackgroundTransparency = 1
         empty.Font = Enum.Font.Gotham
-        empty.Text = "Nenhuma rota salva.\nGrave uma e salve!"
-        empty.TextColor3 = Color3.fromRGB(120, 120, 120)
+        empty.Text = "◦ sem rotas guardadas\n\ngrave uma rota e toque\nem ❖ guardar"
+        empty.TextColor3 = C_TXT_DIM
         empty.TextSize = 9
         empty.TextWrapped = true
-        DataScroll.CanvasSize = UDim2.new(0, 0, 0, 40)
+        DataScroll.CanvasSize = UDim2.new(0, 0, 0, 50)
         return
     end
 
     for _, name in ipairs(names) do
         local entry = savedRoutes[name]
         local item = Instance.new("Frame", DataScroll)
-        item.Size = UDim2.new(1, 0, 0, 32)
-        item.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        item.Size = UDim2.new(1, 0, 0, 36)
+        item.BackgroundColor3 = C_BG_2
         item.BorderSizePixel = 0
-        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
+        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
+        local itemStroke = Instance.new("UIStroke", item)
+        itemStroke.Color = C_BG_3
+        itemStroke.Thickness = 1
 
         local nameLbl = Instance.new("TextLabel", item)
-        nameLbl.Size = UDim2.new(1, -66, 0, 12)
-        nameLbl.Position = UDim2.new(0, 4, 0, 2)
+        nameLbl.Size = UDim2.new(1, -76, 0, 12)
+        nameLbl.Position = UDim2.new(0, 8, 0, 4)
         nameLbl.BackgroundTransparency = 1
         nameLbl.Font = Enum.Font.GothamBold
         nameLbl.Text = name
-        nameLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+        nameLbl.TextColor3 = C_TXT
         nameLbl.TextSize = 9
         nameLbl.TextXAlignment = Enum.TextXAlignment.Left
         nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
         local infoLbl = Instance.new("TextLabel", item)
-        infoLbl.Size = UDim2.new(1, -66, 0, 10)
-        infoLbl.Position = UDim2.new(0, 4, 0, 13)
+        infoLbl.Size = UDim2.new(1, -76, 0, 10)
+        infoLbl.Position = UDim2.new(0, 8, 0, 18)
         infoLbl.BackgroundTransparency = 1
         infoLbl.Font = Enum.Font.Code
-        infoLbl.Text = string.format("⏱ %.3fs • %d pts", entry.Duracao, entry.Pontos)
-        infoLbl.TextColor3 = Color3.fromRGB(0, 200, 100)
+        infoLbl.Text = string.format("%.3fs  ·  %d pts", entry.Duracao, entry.Pontos)
+        infoLbl.TextColor3 = C_TURQ
         infoLbl.TextSize = 8
         infoLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-        local playBtn = makeRouteButton(item, "▶", Color3.fromRGB(40, 100, 180), function()
+        local playBtn = makeRouteButton(item, "▸", Color3.fromRGB(30, 80, 130),
+            Color3.fromRGB(180, 220, 255), function()
             playRoute(entry.Data)
         end)
-        playBtn.Size = UDim2.new(0, 18, 0, 20)
-        playBtn.Position = UDim2.new(1, -62, 0, 6)
+        playBtn.Size = UDim2.new(0, 18, 0, 22)
+        playBtn.Position = UDim2.new(1, -66, 0, 7)
 
-        local copyBtn = makeRouteButton(item, "📋", Color3.fromRGB(80, 80, 80), function()
+        local copyBtn = makeRouteButton(item, "⧉", C_BG_3, C_TXT, function()
             local result = string.format(
-                "-- ==================== ROTA: %s ====================\n" ..
-                "-- DURAÇÃO: %s\n-- PONTOS: %d\n" ..
-                "-- ================================================\nreturn {\n",
+                "-- ✦ angel • rota: %s\n-- duração: %s  ·  pontos: %d\nreturn {\n",
                 name, formatTime(entry.Duracao), entry.Pontos
             )
             for _, node in ipairs(entry.Data) do
@@ -1026,41 +1064,34 @@ function refreshDataList()
             result = result .. "}"
             if setclipboard then
                 setclipboard(result)
-                StatusLabel.Text = "Copiado: " .. name
+                StatusLabel.Text = "◦ copiado: " .. name
             else
                 print(result)
-                StatusLabel.Text = "F9 (sem clipboard)"
             end
         end)
-        copyBtn.Size = UDim2.new(0, 18, 0, 20)
-        copyBtn.Position = UDim2.new(1, -42, 0, 6)
+        copyBtn.Size = UDim2.new(0, 18, 0, 22)
+        copyBtn.Position = UDim2.new(1, -46, 0, 7)
 
-        local delBtn = makeRouteButton(item, "🗑", Color3.fromRGB(170, 0, 0), function()
+        local delBtn = makeRouteButton(item, "✕", Color3.fromRGB(120, 35, 45),
+            Color3.fromRGB(255, 190, 200), function()
             savedRoutes[name] = nil
-            StatusLabel.Text = "Deletado: " .. name
+            StatusLabel.Text = "◦ apagado: " .. name
             refreshDataList()
         end)
-        delBtn.Size = UDim2.new(0, 18, 0, 20)
-        delBtn.Position = UDim2.new(1, -22, 0, 6)
+        delBtn.Size = UDim2.new(0, 18, 0, 22)
+        delBtn.Position = UDim2.new(1, -26, 0, 7)
     end
 
-    DataScroll.CanvasSize = UDim2.new(0, 0, 0, #names * 35)
+    DataScroll.CanvasSize = UDim2.new(0, 0, 0, #names * 40)
 end
 
-TabRecord.MouseButton1Click:Connect(function() switchTab("record") end)
-TabData.MouseButton1Click:Connect(function() switchTab("data") end)
+-- Conectar abas
+TabRota.MouseButton1Click:Connect(function() switchTab("rota") end)
+TabDados.MouseButton1Click:Connect(function() switchTab("dados") end)
+TabVisual.MouseButton1Click:Connect(function() switchTab("visual") end)
 
+-- Ao morrer
 LocalPlayer.CharacterAdded:Connect(function()
     stopPlayback()
     animationCache = {}
-    -- Se estava gravando e o char morreu, remove slow-motion
-    if isRecording then
-        removeSlowMotion()
-        isRecording = false
-        if recordingConnection then recordingConnection:Disconnect() recordingConnection = nil end
-        stopTimer()
-        RecordBtn.Text = "● GRAVAR"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-        StatusLabel.Text = "Morreu durante gravação!"
-    end
 end)
