@@ -1,6 +1,5 @@
 -- ======================================================================== --
 -- ⚡ angel • gravar rota
--- Menu compacto equilibrado + scroll correto + walkspeed restaurado
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -10,7 +9,6 @@ local LocalPlayer = Players.LocalPlayer
 
 local savedRoutes = {}
 
--- Paleta
 local C_TURQ       = Color3.fromRGB(0, 210, 210)
 local C_TURQ_BRIGHT= Color3.fromRGB(120, 245, 255)
 local C_TURQ_DARK  = Color3.fromRGB(0, 130, 140)
@@ -28,7 +26,6 @@ ScreenGui.Name = "AngelRecorder"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 
--- ===== BOTÃO FLUTUANTE (tamanho normal) =====
 local FloatButton = Instance.new("TextButton", ScreenGui)
 FloatButton.Size = UDim2.new(0, 46, 0, 46)
 FloatButton.Position = UDim2.new(0, 14, 0.5, -23)
@@ -45,7 +42,6 @@ local FloatStroke = Instance.new("UIStroke", FloatButton)
 FloatStroke.Color = C_TURQ
 FloatStroke.Thickness = 2
 
--- ===== MENU (equilibrado) =====
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 158, 0, 196)
 MainFrame.Position = UDim2.new(0.5, -79, 0.5, -98)
@@ -59,7 +55,6 @@ MainStroke.Color = C_TURQ
 MainStroke.Thickness = 1
 MainStroke.Transparency = 0.15
 
--- TitleBar
 local TitleBar = Instance.new("Frame", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 22)
 TitleBar.BackgroundColor3 = C_BG_3
@@ -88,7 +83,6 @@ CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
 
--- Tabs
 local TabBar = Instance.new("Frame", MainFrame)
 TabBar.Size = UDim2.new(1, -14, 0, 16)
 TabBar.Position = UDim2.new(0, 7, 0, 26)
@@ -118,9 +112,7 @@ TabDados.TextSize = 9
 TabDados.BorderSizePixel = 0
 Instance.new("UICorner", TabDados).CornerRadius = UDim.new(0, 3)
 
--- ======================================================================== --
--- PÁGINA ROTA
--- ======================================================================== --
+-- Página ROTA
 local RotaPage = Instance.new("Frame", MainFrame)
 RotaPage.Size = UDim2.new(1, 0, 1, -48)
 RotaPage.Position = UDim2.new(0, 0, 0, 48)
@@ -188,9 +180,7 @@ SaveRenameBtn.TextSize = 10
 SaveRenameBtn.BorderSizePixel = 0
 Instance.new("UICorner", SaveRenameBtn).CornerRadius = UDim.new(0, 6)
 
--- ======================================================================== --
--- PÁGINA DADOS
--- ======================================================================== --
+-- Página DADOS
 local DadosPage = Instance.new("Frame", MainFrame)
 DadosPage.Size = UDim2.new(1, 0, 1, -48)
 DadosPage.Position = UDim2.new(0, 0, 0, 48)
@@ -213,7 +203,6 @@ local DataLayout = Instance.new("UIListLayout", DataScroll)
 DataLayout.Padding = UDim.new(0, 4)
 DataLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
--- Atualiza canvas automaticamente quando o conteúdo muda
 DataLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     DataScroll.CanvasSize = UDim2.new(0, 0, 0, DataLayout.AbsoluteContentSize.Y + 8)
 end)
@@ -378,7 +367,6 @@ local animationCache = {}
 local activeTracks = {}
 local preWalkTracks = {}
 
--- ★ WalkSpeed padrão do Roblox (o que usamos durante o MoveTo)
 local DEFAULT_WALKSPEED = 16
 local savedWalkSpeed = nil
 
@@ -475,7 +463,6 @@ local function playRoute(data)
     local hum = char and char:FindFirstChild("Humanoid")
     if not hrp or not hum then return end
 
-    -- ★ Guarda o WalkSpeed atual e usa o padrão do Roblox durante o MoveTo
     savedWalkSpeed = hum.WalkSpeed
 
     local animator = hum:FindFirstChildOfClass("Animator")
@@ -488,7 +475,6 @@ local function playRoute(data)
         animateWasDisabled = true
     end
 
-    -- Detecta e toca as animações do jogo (a de correr, normalmente)
     local detectedAnims = getStartAnimations(data)
     preWalkTracks = {}
     for _, animData in ipairs(detectedAnims) do
@@ -504,7 +490,6 @@ local function playRoute(data)
         end
     end
 
-    -- Fallback: pega qualquer animação Movement
     if #preWalkTracks == 0 then
         for i = 1, math.min(20, #data) do
             local anims = data[i].Animations
@@ -531,7 +516,6 @@ local function playRoute(data)
         end
     end
 
-    -- ★ SEMPRE walk normal (padrão do Roblox)
     hum.WalkSpeed = DEFAULT_WALKSPEED
 
     local startCF = CFrame.new(unpack(data[1].CF))
@@ -548,7 +532,7 @@ local function playRoute(data)
     if conn then conn:Disconnect() end
 
     stopPreWalkAnimations()
-    restoreWalkSpeed()  -- ★ restaura o WalkSpeed original antes do playback
+    restoreWalkSpeed()
 
     if animateWasDisabled and animateScript then
         pcall(function() animateScript.Disabled = false end)
@@ -638,7 +622,6 @@ local function playRoute(data)
     end)
 end
 
--- GRAVAR
 RecordBtn.MouseButton1Click:Connect(function()
     if playbackConnection then stopPlayback() end
     isRecording = not isRecording
@@ -809,14 +792,15 @@ end)
 -- ======================================================================== --
 -- LISTA DE ROTAS
 -- ======================================================================== --
-local function makeBtn(parent, text, bg, fg, onClick)
+local function makeTextBtn(parent, text, bg, fg, onClick)
     local b = Instance.new("TextButton", parent)
     b.BackgroundColor3 = bg
     b.Font = Enum.Font.GothamBold
     b.Text = text
     b.TextColor3 = fg
-    b.TextSize = 10
+    b.TextSize = 8
     b.BorderSizePixel = 0
+    b.AutoButtonColor = true
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
     b.MouseButton1Click:Connect(onClick)
     return b
@@ -845,19 +829,22 @@ function refreshDataList()
 
     for i, name in ipairs(names) do
         local entry = savedRoutes[name]
+
+        -- Item mais alto pra caber nome + info + 3 botões
         local item = Instance.new("Frame", DataScroll)
-        item.Size = UDim2.new(1, 0, 0, 34)
+        item.Size = UDim2.new(1, 0, 0, 52)
         item.BackgroundColor3 = C_BG_2
         item.BorderSizePixel = 0
         item.LayoutOrder = i
-        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 5)
+        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
         local s = Instance.new("UIStroke", item)
         s.Color = C_BG_3
         s.Thickness = 1
 
+        -- Nome (largura total)
         local nameLbl = Instance.new("TextLabel", item)
-        nameLbl.Size = UDim2.new(1, -66, 0, 12)
-        nameLbl.Position = UDim2.new(0, 6, 0, 3)
+        nameLbl.Size = UDim2.new(1, -12, 0, 13)
+        nameLbl.Position = UDim2.new(0, 6, 0, 4)
         nameLbl.BackgroundTransparency = 1
         nameLbl.Font = Enum.Font.GothamBold
         nameLbl.Text = name
@@ -866,64 +853,77 @@ function refreshDataList()
         nameLbl.TextXAlignment = Enum.TextXAlignment.Left
         nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
+        -- Info
         local infoLbl = Instance.new("TextLabel", item)
-        infoLbl.Size = UDim2.new(1, -66, 0, 10)
+        infoLbl.Size = UDim2.new(1, -12, 0, 10)
         infoLbl.Position = UDim2.new(0, 6, 0, 17)
         infoLbl.BackgroundTransparency = 1
         infoLbl.Font = Enum.Font.Code
-        infoLbl.Text = string.format("%.2fs · %d pts", entry.Duracao, entry.Pontos)
+        infoLbl.Text = string.format("%.2fs  ·  %d pts", entry.Duracao, entry.Pontos)
         infoLbl.TextColor3 = C_TURQ
         infoLbl.TextSize = 8
         infoLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-        local playBtn = makeBtn(item, "▸", Color3.fromRGB(30, 80, 130),
-            Color3.fromRGB(180, 220, 255), function()
-            playRoute(entry.Data)
-        end)
-        playBtn.Size = UDim2.new(0, 18, 0, 20)
-        playBtn.Position = UDim2.new(1, -60, 0, 7)
+        -- ===== 3 BOTÕES DE TEXTO =====
+        local btnY = 30
+        local btnH = 18
+        local pad = 4
+        local available = 144 - pad * 2  -- 144 = largura interna
+        local btnW = (available - pad * 2) / 3
 
-        local copyBtn = makeBtn(item, "⧉", C_BG_3, C_TXT, function()
-            local result = string.format("-- ⚡ angel • %s (%.3fs)\nreturn {\n", name, entry.Duracao)
-            for _, node in ipairs(entry.Data) do
-                local cfStr = table.concat(node.CF, ", ")
-                local velStr = table.concat(node.Velocity, ", ")
-                local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
-                local animStr = ""
-                if node.Animations and #node.Animations > 0 then
-                    local parts = {}
-                    for _, a in ipairs(node.Animations) do
-                        table.insert(parts, string.format(
-                            "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\"}",
-                            a.Id, a.Speed, a.Weight, a.Priority))
+        -- Testar
+        local testBtn = makeTextBtn(item, "testar",
+            Color3.fromRGB(30, 80, 130), Color3.fromRGB(200, 230, 255),
+            function() playRoute(entry.Data) end)
+        testBtn.Size = UDim2.new(0, btnW, 0, btnH)
+        testBtn.Position = UDim2.new(0, pad, 0, btnY)
+
+        -- Copiar
+        local copyBtn = makeTextBtn(item, "copiar",
+            C_BG_3, C_TXT,
+            function()
+                local result = string.format("-- ⚡ angel • %s (%.3fs)\nreturn {\n", name, entry.Duracao)
+                for _, node in ipairs(entry.Data) do
+                    local cfStr = table.concat(node.CF, ", ")
+                    local velStr = table.concat(node.Velocity, ", ")
+                    local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
+                    local animStr = ""
+                    if node.Animations and #node.Animations > 0 then
+                        local parts = {}
+                        for _, a in ipairs(node.Animations) do
+                            table.insert(parts, string.format(
+                                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\"}",
+                                a.Id, a.Speed, a.Weight, a.Priority))
+                        end
+                        animStr = ",Animations={" .. table.concat(parts, ",") .. "}"
+                    else
+                        animStr = ",Animations={}"
                     end
-                    animStr = ",Animations={" .. table.concat(parts, ",") .. "}"
-                else
-                    animStr = ",Animations={}"
+                    result = result .. string.format(
+                        "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s%s},\n",
+                        node.Time, cfStr, velStr, stateName, animStr)
                 end
-                result = result .. string.format(
-                    "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s%s},\n",
-                    node.Time, cfStr, velStr, stateName, animStr)
-            end
-            result = result .. "}"
-            if setclipboard then
-                setclipboard(result)
-                StatusLabel.Text = "◦ copiado"
-            else
-                print(result)
-            end
-        end)
-        copyBtn.Size = UDim2.new(0, 18, 0, 20)
-        copyBtn.Position = UDim2.new(1, -40, 0, 7)
+                result = result .. "}"
+                if setclipboard then
+                    setclipboard(result)
+                    StatusLabel.Text = "◦ copiado"
+                else
+                    print(result)
+                end
+            end)
+        copyBtn.Size = UDim2.new(0, btnW, 0, btnH)
+        copyBtn.Position = UDim2.new(0, pad + btnW + pad, 0, btnY)
 
-        local delBtn = makeBtn(item, "✕", Color3.fromRGB(120, 35, 45),
-            Color3.fromRGB(255, 190, 200), function()
-            savedRoutes[name] = nil
-            StatusLabel.Text = "◦ apagado: " .. name
-            refreshDataList()
-        end)
-        delBtn.Size = UDim2.new(0, 18, 0, 20)
-        delBtn.Position = UDim2.new(1, -20, 0, 7)
+        -- Apagar
+        local delBtn = makeTextBtn(item, "apagar",
+            Color3.fromRGB(120, 35, 45), Color3.fromRGB(255, 200, 210),
+            function()
+                savedRoutes[name] = nil
+                StatusLabel.Text = "◦ apagado: " .. name
+                refreshDataList()
+            end)
+        delBtn.Size = UDim2.new(0, btnW, 0, btnH)
+        delBtn.Position = UDim2.new(0, pad + (btnW + pad) * 2, 0, btnY)
     end
 end
 
