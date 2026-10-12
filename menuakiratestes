@@ -1,6 +1,6 @@
 -- ======================================================================== --
--- GRAVADOR DE ROTA - VERSÃO COM ABAS + SALVAMENTO EM MEMÓRIA
--- Abas: GRAVAR | DADOS (rotas salvas na sessão)
+-- GRAVADOR DE ROTA - VERSÃO COM ABA CONFIG (timeline arrastável)
+-- Abas: GRAVAR | DADOS | CONFIG
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -8,10 +8,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- ======================================================================== --
--- SISTEMA DE SALVAMENTO (só em memória - sessão)
--- ======================================================================== --
-local savedRoutes = {}  -- { [nome] = {Duracao, Pontos, Data = {...}} }
+local savedRoutes = {}
 
 -- ======================================================================== --
 -- GUI
@@ -21,7 +18,6 @@ ScreenGui.Name = "PathRecorderGui"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.IgnoreGuiInset = true
 
--- Botão flutuante
 local FloatButton = Instance.new("TextButton", ScreenGui)
 FloatButton.Size = UDim2.new(0, 42, 0, 42)
 FloatButton.Position = UDim2.new(0, 15, 0.5, -21)
@@ -38,10 +34,9 @@ local FloatStroke = Instance.new("UIStroke", FloatButton)
 FloatStroke.Color = Color3.fromRGB(0, 170, 0)
 FloatStroke.Thickness = 1.5
 
--- Menu principal (quadrado)
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 165, 0, 175)
-MainFrame.Position = UDim2.new(0.5, -82, 0.5, -87)
+MainFrame.Size = UDim2.new(0, 165, 0, 197)
+MainFrame.Position = UDim2.new(0.5, -82, 0.5, -98)
 MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -51,7 +46,6 @@ local MainStroke = Instance.new("UIStroke", MainFrame)
 MainStroke.Color = Color3.fromRGB(0, 170, 0)
 MainStroke.Thickness = 1
 
--- TitleBar
 local TitleBar = Instance.new("Frame", MainFrame)
 TitleBar.Size = UDim2.new(1, 0, 0, 20)
 TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
@@ -80,7 +74,7 @@ CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.BorderSizePixel = 0
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
--- ===== TAB BAR =====
+-- ===== TAB BAR (3 abas) =====
 local TabBar = Instance.new("Frame", MainFrame)
 TabBar.Size = UDim2.new(1, -12, 0, 15)
 TabBar.Position = UDim2.new(0, 6, 0, 22)
@@ -88,27 +82,26 @@ TabBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
 TabBar.BorderSizePixel = 0
 Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 4)
 
-local TabRecord = Instance.new("TextButton", TabBar)
-TabRecord.Size = UDim2.new(0.5, -2, 1, 0)
-TabRecord.Position = UDim2.new(0, 2, 0, 0)
-TabRecord.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-TabRecord.Font = Enum.Font.GothamBold
-TabRecord.Text = "GRAVAR"
-TabRecord.TextColor3 = Color3.fromRGB(255, 255, 255)
-TabRecord.TextSize = 8
-TabRecord.BorderSizePixel = 0
-Instance.new("UICorner", TabRecord).CornerRadius = UDim.new(0, 3)
+local function makeTab(name, xOffset, wScale)
+    local t = Instance.new("TextButton", TabBar)
+    t.Size = UDim2.new(wScale, -1.5, 1, 0)
+    t.Position = UDim2.new(xOffset, 1, 0, 0)
+    t.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    t.Font = Enum.Font.GothamBold
+    t.Text = name
+    t.TextColor3 = Color3.fromRGB(180, 180, 180)
+    t.TextSize = 8
+    t.BorderSizePixel = 0
+    Instance.new("UICorner", t).CornerRadius = UDim.new(0, 3)
+    return t
+end
 
-local TabData = Instance.new("TextButton", TabBar)
-TabData.Size = UDim2.new(0.5, -2, 1, 0)
-TabData.Position = UDim2.new(0.5, 0, 0, 0)
-TabData.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-TabData.Font = Enum.Font.GothamBold
-TabData.Text = "DADOS"
-TabData.TextColor3 = Color3.fromRGB(180, 180, 180)
-TabData.TextSize = 8
-TabData.BorderSizePixel = 0
-Instance.new("UICorner", TabData).CornerRadius = UDim.new(0, 3)
+local TabRecord = makeTab("GRAVAR", 0, 0.333)
+local TabData = makeTab("DADOS", 0.333, 0.333)
+local TabConfig = makeTab("CONFIG", 0.666, 0.333)
+
+TabRecord.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+TabRecord.TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ===== ABA GRAVAÇÃO =====
 local RecordPage = Instance.new("Frame", MainFrame)
@@ -144,9 +137,57 @@ StatusLabel.Text = "Parado"
 StatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
 StatusLabel.TextSize = 9
 
+local SpeedRow = Instance.new("Frame", RecordPage)
+SpeedRow.Size = UDim2.new(1, -12, 0, 18)
+SpeedRow.Position = UDim2.new(0, 6, 0, 43)
+SpeedRow.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+SpeedRow.BorderSizePixel = 0
+Instance.new("UICorner", SpeedRow).CornerRadius = UDim.new(0, 4)
+
+local SpeedLbl = Instance.new("TextLabel", SpeedRow)
+SpeedLbl.Size = UDim2.new(0, 30, 1, 0)
+SpeedLbl.Position = UDim2.new(0, 4, 0, 0)
+SpeedLbl.BackgroundTransparency = 1
+SpeedLbl.Text = "VEL:"
+SpeedLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+SpeedLbl.Font = Enum.Font.GothamBold
+SpeedLbl.TextSize = 9
+SpeedLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local SpeedMinus = Instance.new("TextButton", SpeedRow)
+SpeedMinus.Size = UDim2.new(0, 20, 1, -4)
+SpeedMinus.Position = UDim2.new(0, 36, 0, 2)
+SpeedMinus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+SpeedMinus.Text = "-"
+SpeedMinus.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedMinus.TextSize = 12
+SpeedMinus.Font = Enum.Font.GothamBold
+SpeedMinus.BorderSizePixel = 0
+Instance.new("UICorner", SpeedMinus).CornerRadius = UDim.new(0, 3)
+
+local SpeedValue = Instance.new("TextLabel", SpeedRow)
+SpeedValue.Size = UDim2.new(0, 44, 1, 0)
+SpeedValue.Position = UDim2.new(0, 58, 0, 0)
+SpeedValue.BackgroundTransparency = 1
+SpeedValue.Text = "1.0x"
+SpeedValue.TextColor3 = Color3.fromRGB(0, 255, 120)
+SpeedValue.Font = Enum.Font.Code
+SpeedValue.TextSize = 11
+
+local SpeedPlus = Instance.new("TextButton", SpeedRow)
+SpeedPlus.Size = UDim2.new(0, 20, 1, -4)
+SpeedPlus.Position = UDim2.new(0, 104, 0, 2)
+SpeedPlus.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+SpeedPlus.Text = "+"
+SpeedPlus.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedPlus.TextSize = 12
+SpeedPlus.Font = Enum.Font.GothamBold
+SpeedPlus.BorderSizePixel = 0
+Instance.new("UICorner", SpeedPlus).CornerRadius = UDim.new(0, 3)
+
 local RecordBtn = Instance.new("TextButton", RecordPage)
 RecordBtn.Size = UDim2.new(1, -12, 0, 22)
-RecordBtn.Position = UDim2.new(0, 6, 0, 43)
+RecordBtn.Position = UDim2.new(0, 6, 0, 66)
 RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
 RecordBtn.Font = Enum.Font.GothamBold
 RecordBtn.Text = "● GRAVAR"
@@ -157,7 +198,7 @@ Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 5)
 
 local TestBtn = Instance.new("TextButton", RecordPage)
 TestBtn.Size = UDim2.new(1, -12, 0, 22)
-TestBtn.Position = UDim2.new(0, 6, 0, 68)
+TestBtn.Position = UDim2.new(0, 6, 0, 91)
 TestBtn.BackgroundColor3 = Color3.fromRGB(40, 100, 180)
 TestBtn.Font = Enum.Font.GothamBold
 TestBtn.Text = "▶ TESTAR"
@@ -168,7 +209,7 @@ Instance.new("UICorner", TestBtn).CornerRadius = UDim.new(0, 5)
 
 local SaveRenameBtn = Instance.new("TextButton", RecordPage)
 SaveRenameBtn.Size = UDim2.new(1, -12, 0, 22)
-SaveRenameBtn.Position = UDim2.new(0, 6, 0, 93)
+SaveRenameBtn.Position = UDim2.new(0, 6, 0, 116)
 SaveRenameBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 160)
 SaveRenameBtn.Font = Enum.Font.GothamBold
 SaveRenameBtn.Text = "💾 SALVAR & RENOMEAR"
@@ -193,6 +234,351 @@ DataScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 DataScroll.ScrollBarThickness = 3
 DataScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 170, 0)
 Instance.new("UIListLayout", DataScroll).Padding = UDim.new(0, 3)
+
+-- ===== ABA CONFIG =====
+local ConfigPage = Instance.new("Frame", MainFrame)
+ConfigPage.Size = UDim2.new(1, 0, 1, -40)
+ConfigPage.Position = UDim2.new(0, 0, 0, 40)
+ConfigPage.BackgroundTransparency = 1
+ConfigPage.Visible = false
+
+local ConfigHint = Instance.new("TextLabel", ConfigPage)
+ConfigHint.Size = UDim2.new(1, -12, 0, 10)
+ConfigHint.Position = UDim2.new(0, 6, 0, 0)
+ConfigHint.BackgroundTransparency = 1
+ConfigHint.Font = Enum.Font.Gotham
+ConfigHint.Text = "Arraste os handles • Clique p/ trocar vel"
+ConfigHint.TextColor3 = Color3.fromRGB(120, 120, 120)
+ConfigHint.TextSize = 7
+ConfigHint.TextXAlignment = Enum.TextXAlignment.Left
+
+local TimelineFrame = Instance.new("Frame", ConfigPage)
+TimelineFrame.Size = UDim2.new(1, -12, 0, 22)
+TimelineFrame.Position = UDim2.new(0, 6, 0, 12)
+TimelineFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+TimelineFrame.BorderSizePixel = 0
+Instance.new("UICorner", TimelineFrame).CornerRadius = UDim.new(0, 4)
+
+-- Container interno da timeline (onde ficam segmentos e handles)
+local TimelineInner = Instance.new("Frame", TimelineFrame)
+TimelineInner.Size = UDim2.new(1, -4, 1, -4)
+TimelineInner.Position = UDim2.new(0, 2, 0, 2)
+TimelineInner.BackgroundTransparency = 1
+TimelineInner.ClipsDescendants = false
+
+-- Duração total de referência (pra desenhar)
+local timelineTotalDuration = 1
+
+local SegInfoLabel = Instance.new("TextLabel", ConfigPage)
+SegInfoLabel.Size = UDim2.new(1, -12, 0, 10)
+SegInfoLabel.Position = UDim2.new(0, 6, 0, 36)
+SegInfoLabel.BackgroundTransparency = 1
+SegInfoLabel.Font = Enum.Font.Code
+SegInfoLabel.Text = "Sem segmentos"
+SegInfoLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+SegInfoLabel.TextSize = 7
+SegInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Lista de segmentos (scroll)
+local SegScroll = Instance.new("ScrollingFrame", ConfigPage)
+SegScroll.Size = UDim2.new(1, -12, 0, 60)
+SegScroll.Position = UDim2.new(0, 6, 0, 48)
+SegScroll.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+SegScroll.BorderSizePixel = 0
+SegScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+SegScroll.ScrollBarThickness = 3
+SegScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 170, 0)
+Instance.new("UICorner", SegScroll).CornerRadius = UDim.new(0, 4)
+Instance.new("UIListLayout", SegScroll).Padding = UDim.new(0, 2)
+
+-- Botões da config
+local AddSegBtn = Instance.new("TextButton", ConfigPage)
+AddSegBtn.Size = UDim2.new(0.32, -4, 0, 18)
+AddSegBtn.Position = UDim2.new(0, 6, 0, 111)
+AddSegBtn.BackgroundColor3 = Color3.fromRGB(0, 130, 200)
+AddSegBtn.Font = Enum.Font.GothamBold
+AddSegBtn.Text = "+ ADD"
+AddSegBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AddSegBtn.TextSize = 8
+AddSegBtn.BorderSizePixel = 0
+Instance.new("UICorner", AddSegBtn).CornerRadius = UDim.new(0, 4)
+
+local ResetSegBtn = Instance.new("TextButton", ConfigPage)
+ResetSegBtn.Size = UDim2.new(0.32, -4, 0, 18)
+ResetSegBtn.Position = UDim2.new(0.33, 0, 0, 111)
+ResetSegBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+ResetSegBtn.Font = Enum.Font.GothamBold
+ResetSegBtn.Text = "🗑 LIMPAR"
+ResetSegBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ResetSegBtn.TextSize = 8
+ResetSegBtn.BorderSizePixel = 0
+Instance.new("UICorner", ResetSegBtn).CornerRadius = UDim.new(0, 4)
+
+local ApplySegBtn = Instance.new("TextButton", ConfigPage)
+ApplySegBtn.Size = UDim2.new(0.32, -4, 0, 18)
+ApplySegBtn.Position = UDim2.new(0.66, -2, 0, 111)
+ApplySegBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 70)
+ApplySegBtn.Font = Enum.Font.GothamBold
+ApplySegBtn.Text = "✓ OK"
+ApplySegBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ApplySegBtn.TextSize = 8
+ApplySegBtn.BorderSizePixel = 0
+Instance.new("UICorner", ApplySegBtn).CornerRadius = UDim.new(0, 4)
+
+-- ======================================================================== --
+-- SISTEMA DE SEGMENTOS
+-- ======================================================================== --
+local segmentSpeeds = {}  -- { {Inicio, Fim, Mult} }
+
+local SEG_COLORS = {
+    [1.0] = Color3.fromRGB(80, 80, 80),
+    [1.5] = Color3.fromRGB(80, 160, 60),
+    [2.0] = Color3.fromRGB(200, 180, 40),
+    [2.5] = Color3.fromRGB(220, 120, 30),
+    [3.0] = Color3.fromRGB(200, 50, 50),
+}
+local SEG_STEPS = {1.0, 1.5, 2.0, 2.5, 3.0}
+
+local function getSegColor(m)
+    -- Cor mais próxima
+    local closest = 1.0
+    local minDiff = math.huge
+    for _, v in ipairs(SEG_STEPS) do
+        local d = math.abs(v - m)
+        if d < minDiff then minDiff = d closest = v end
+    end
+    return SEG_COLORS[closest] or Color3.fromRGB(80, 80, 80)
+end
+
+local function getTotalDuration()
+    if #recordedData > 0 then return recordedData[#recordedData].Time end
+    return timelineTotalDuration
+end
+
+local function getSpeedAtTime(t)
+    if #segmentSpeeds == 0 then return 1.0 end
+    for _, seg in ipairs(segmentSpeeds) do
+        if t >= seg.Inicio and t < seg.Fim then return seg.Mult end
+    end
+    return 1.0
+end
+
+-- Reconstrói a timeline visual
+local function rebuildSegList()
+    for _, c in ipairs(SegScroll:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    for _, c in ipairs(TimelineInner:GetChildren()) do
+        c:Destroy()
+    end
+
+    local total = getTotalDuration()
+    if total <= 0 then total = 1 end
+
+    -- Timeline
+    for i, seg in ipairs(segmentSpeeds) do
+        local w = (seg.Fim - seg.Inicio) / total
+        local x = seg.Inicio / total
+        local f = Instance.new("Frame", TimelineInner)
+        f.Size = UDim2.new(w, 0, 1, 0)
+        f.Position = UDim2.new(x, 0, 0, 0)
+        f.BackgroundColor3 = getSegColor(seg.Mult)
+        f.BorderSizePixel = 0
+        f.ZIndex = 2
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 3)
+
+        -- Label da velocidade
+        if w > 0.08 then
+            local lbl = Instance.new("TextLabel", f)
+            lbl.Size = UDim2.new(1, 0, 1, 0)
+            lbl.BackgroundTransparency = 1
+            lbl.Font = Enum.Font.Code
+            lbl.Text = string.format("%.1fx", seg.Mult)
+            lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+            lbl.TextSize = 8
+            lbl.ZIndex = 3
+        end
+    end
+
+    -- Handles (divisórias arrastáveis)
+    for i = 2, #segmentSpeeds do
+        local t = segmentSpeeds[i].Inicio
+        local x = t / total
+        local h = Instance.new("TextButton", TimelineInner)
+        h.Size = UDim2.new(0, 6, 1, 4)
+        h.Position = UDim2.new(x, -3, 0, -2)
+        h.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        h.Text = ""
+        h.BorderSizePixel = 0
+        h.ZIndex = 5
+        h.Name = "Handle_" .. i
+        Instance.new("UICorner", h).CornerRadius = UDim.new(0, 2)
+
+        -- Drag do handle
+        local draggingH = false
+        local hDragI = i  -- índice do segmento que começa nesse handle
+        h.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or
+               input.UserInputType == Enum.UserInputType.Touch then
+                draggingH = true
+                h.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+            end
+        end)
+        h.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or
+               input.UserInputType == Enum.UserInputType.Touch then
+                draggingH = false
+                h.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if not draggingH then return end
+            if input.UserInputType ~= Enum.UserInputType.MouseMovement and
+               input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+            local total = getTotalDuration()
+            local tlAbsX = TimelineInner.AbsolutePosition.X
+            local tlAbsW = TimelineInner.AbsoluteSize.X
+            local mouseX = UserInputService:GetMouseLocation().X
+            local rel = math.clamp((mouseX - tlAbsX) / tlAbsW, 0, 1)
+            local newTime = rel * total
+
+            -- Limita entre vizinhos
+            local minT = segmentSpeeds[hDragI - 1].Inicio + 0.05
+            local maxT = segmentSpeeds[hDragI].Fim - 0.05
+            newTime = math.clamp(newTime, minT, maxT)
+
+            segmentSpeeds[hDragI - 1].Fim = newTime
+            segmentSpeeds[hDragI].Inicio = newTime
+            rebuildSegList()
+        end)
+    end
+
+    -- Lista de segmentos
+    for i, seg in ipairs(segmentSpeeds) do
+        local row = Instance.new("Frame", SegScroll)
+        row.Size = UDim2.new(1, -2, 0, 14)
+        row.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        row.BorderSizePixel = 0
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 3)
+
+        local info = Instance.new("TextLabel", row)
+        info.Size = UDim2.new(1, -40, 1, 0)
+        info.Position = UDim2.new(0, 4, 0, 0)
+        info.BackgroundTransparency = 1
+        info.Font = Enum.Font.Code
+        info.Text = string.format("%.2f→%.2f = %.1fx", seg.Inicio, seg.Fim, seg.Mult)
+        info.TextColor3 = Color3.fromRGB(220, 220, 220)
+        info.TextSize = 8
+        info.TextXAlignment = Enum.TextXAlignment.Left
+
+        -- Botão ciclar velocidade
+        local vBtn = Instance.new("TextButton", row)
+        vBtn.Size = UDim2.new(0, 22, 1, -2)
+        vBtn.Position = UDim2.new(1, -46, 0, 1)
+        vBtn.BackgroundColor3 = getSegColor(seg.Mult)
+        vBtn.Text = string.format("%.1f", seg.Mult)
+        vBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        vBtn.Font = Enum.Font.GothamBold
+        vBtn.TextSize = 8
+        vBtn.BorderSizePixel = 0
+        Instance.new("UICorner", vBtn).CornerRadius = UDim.new(0, 3)
+        vBtn.MouseButton1Click:Connect(function()
+            -- Cicla: 1.0 → 1.5 → 2.0 → 2.5 → 3.0 → 1.0
+            local cur = seg.Mult
+            local nextIdx = 1
+            for idx, v in ipairs(SEG_STEPS) do
+                if math.abs(v - cur) < 0.01 then
+                    nextIdx = idx + 1
+                    if nextIdx > #SEG_STEPS then nextIdx = 1 end
+                    break
+                end
+            end
+            segmentSpeeds[i].Mult = SEG_STEPS[nextIdx]
+            rebuildSegList()
+        end)
+
+        -- Deletar segmento (só se tiver mais de 1)
+        if #segmentSpeeds > 1 then
+            local dBtn = Instance.new("TextButton", row)
+            dBtn.Size = UDim2.new(0, 16, 1, -2)
+            dBtn.Position = UDim2.new(1, -22, 0, 1)
+            dBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 40)
+            dBtn.Text = "🗑"
+            dBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            dBtn.TextSize = 8
+            dBtn.Font = Enum.Font.GothamBold
+            dBtn.BorderSizePixel = 0
+            Instance.new("UICorner", dBtn).CornerRadius = UDim.new(0, 3)
+            dBtn.MouseButton1Click:Connect(function()
+                table.remove(segmentSpeeds, i)
+                -- Funde com o anterior (se houver)
+                if i > 1 then
+                    segmentSpeeds[i - 1].Fim = segmentSpeeds[i].Fim
+                end
+                rebuildSegList()
+            end)
+        end
+    end
+
+    SegScroll.CanvasSize = UDim2.new(0, 0, 0, #segmentSpeeds * 16)
+
+    -- Info resumida
+    if #segmentSpeeds == 0 then
+        SegInfoLabel.Text = "Sem segmentos (1.0x padrão)"
+    else
+        local sum = 0
+        local parts = {}
+        for _, s in ipairs(segmentSpeeds) do
+            sum = sum + (s.Fim - s.Inicio) / s.Mult
+            table.insert(parts, string.format("%.1f", s.Mult))
+        end
+        SegInfoLabel.Text = string.format("Tempo final: %.2fs (%s)", sum, table.concat(parts, "→"))
+    end
+end
+
+-- Botão ADD: divide o maior segmento no meio
+AddSegBtn.MouseButton1Click:Connect(function()
+    if #recordedData == 0 then
+        SegInfoLabel.Text = "Grave uma rota primeiro!"
+        return
+    end
+    local total = getTotalDuration()
+    if #segmentSpeeds == 0 then
+        segmentSpeeds = {{Inicio = 0, Fim = total, Mult = 1.5}}
+    else
+        -- Acha o maior segmento
+        local biggest = 1
+        local biggestLen = 0
+        for i, s in ipairs(segmentSpeeds) do
+            local len = s.Fim - s.Inicio
+            if len > biggestLen then biggestLen = len biggest = i end
+        end
+        local s = segmentSpeeds[biggest]
+        local mid = (s.Inicio + s.Fim) / 2
+        local m = s.Mult
+        -- Divide em dois
+        segmentSpeeds[biggest] = {Inicio = s.Inicio, Fim = mid, Mult = m}
+        table.insert(segmentSpeeds, biggest + 1, {Inicio = mid, Fim = s.Fim, Mult = m})
+    end
+    rebuildSegList()
+end)
+
+-- Botão LIMPAR
+ResetSegBtn.MouseButton1Click:Connect(function()
+    segmentSpeeds = {}
+    rebuildSegList()
+end)
+
+-- Botão OK
+ApplySegBtn.MouseButton1Click:Connect(function()
+    if #segmentSpeeds == 0 then
+        SegInfoLabel.Text = "Nada pra aplicar"
+        return
+    end
+    StatusLabel.Text = string.format("Segmentos OK (%d)", #segmentSpeeds)
+    switchTab("record")
+end)
 
 -- ======================================================================== --
 -- TIMER
@@ -240,7 +626,38 @@ local function resetTimer()
 end
 
 -- ======================================================================== --
--- DRAG
+-- MULTIPLICADOR GLOBAL (mantido pra compatibilidade)
+-- ======================================================================== --
+local playbackSpeed = 1.0
+local SPEED_MIN, SPEED_MAX, SPEED_STEP = 0.5, 3.0, 0.1
+
+local function updateSpeedUI()
+    SpeedValue.Text = string.format("%.1fx", playbackSpeed)
+    if playbackSpeed <= 1.2 then
+        SpeedValue.TextColor3 = Color3.fromRGB(0, 255, 120)
+    elseif playbackSpeed <= 1.8 then
+        SpeedValue.TextColor3 = Color3.fromRGB(255, 200, 0)
+    else
+        SpeedValue.TextColor3 = Color3.fromRGB(255, 80, 80)
+    end
+end
+
+SpeedMinus.MouseButton1Click:Connect(function()
+    playbackSpeed = math.max(SPEED_MIN, playbackSpeed - SPEED_STEP)
+    playbackSpeed = math.floor(playbackSpeed * 10 + 0.5) / 10
+    updateSpeedUI()
+end)
+
+SpeedPlus.MouseButton1Click:Connect(function()
+    playbackSpeed = math.min(SPEED_MAX, playbackSpeed + SPEED_STEP)
+    playbackSpeed = math.floor(playbackSpeed * 10 + 0.5) / 10
+    updateSpeedUI()
+end)
+
+updateSpeedUI()
+
+-- ======================================================================== --
+-- DRAG (botão e menu)
 -- ======================================================================== --
 local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
 
@@ -298,13 +715,10 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- ======================================================================== --
--- ABRIR/FECHAR MENU
--- ======================================================================== --
 local function toggleMenu()
     MainFrame.Visible = not MainFrame.Visible
     if MainFrame.Visible then
-        MainFrame.Position = UDim2.new(0.5, -82, 0.5, -87)
+        MainFrame.Position = UDim2.new(0.5, -82, 0.5, -98)
         FloatStroke.Color = Color3.fromRGB(0, 220, 0)
     else
         FloatStroke.Color = Color3.fromRGB(0, 170, 0)
@@ -332,32 +746,43 @@ CloseBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ======================================================================== --
--- SISTEMA DE ABAS
+-- ABAS
 -- ======================================================================== --
 local function switchTab(tab)
+    -- Reset cores
+    TabRecord.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    TabRecord.TextColor3 = Color3.fromRGB(180, 180, 180)
+    TabData.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    TabData.TextColor3 = Color3.fromRGB(180, 180, 180)
+    TabConfig.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    TabConfig.TextColor3 = Color3.fromRGB(180, 180, 180)
+    RecordPage.Visible = false
+    DataPage.Visible = false
+    ConfigPage.Visible = false
+
     if tab == "record" then
         RecordPage.Visible = true
-        DataPage.Visible = false
         TabRecord.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         TabRecord.TextColor3 = Color3.fromRGB(255, 255, 255)
-        TabData.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        TabData.TextColor3 = Color3.fromRGB(180, 180, 180)
-    else
-        RecordPage.Visible = false
+    elseif tab == "data" then
         DataPage.Visible = true
         TabData.BackgroundColor3 = Color3.fromRGB(100, 60, 160)
         TabData.TextColor3 = Color3.fromRGB(255, 255, 255)
-        TabRecord.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-        TabRecord.TextColor3 = Color3.fromRGB(180, 180, 180)
         refreshDataList()
+    else
+        ConfigPage.Visible = true
+        TabConfig.BackgroundColor3 = Color3.fromRGB(0, 130, 200)
+        TabConfig.TextColor3 = Color3.fromRGB(255, 255, 255)
+        -- Atualiza duração de referência
+        if #recordedData > 0 then
+            timelineTotalDuration = recordedData[#recordedData].Time
+        end
+        rebuildSegList()
     end
 end
 
-TabRecord.MouseButton1Click:Connect(function() switchTab("record") end)
-TabData.MouseButton1Click:Connect(function() switchTab("data") end)
-
 -- ======================================================================== --
--- LÓGICA DE GRAVAÇÃO / REPRODUÇÃO
+-- LÓGICA
 -- ======================================================================== --
 local recordedData = {}
 local isRecording = false
@@ -368,7 +793,7 @@ local antigravidade = nil
 local originalCollides = {}
 local animationCache = {}
 local activeTracks = {}
-local preWalkTrack = nil
+local preWalkTracks = {}
 
 local function getOrLoadTrack(animator, animationId)
     if animationCache[animationId] and animationCache[animationId].Parent == animator then
@@ -384,35 +809,37 @@ local function getOrLoadTrack(animator, animationId)
     return nil
 end
 
-local function findWalkAnimation(data)
+local function getStartAnimations(data)
     data = data or recordedData
-    if #data == 0 then return nil end
-    for i = 1, math.min(20, #data) do
+    if #data == 0 then return {} end
+    local counts = {}
+    local sampleCount = math.min(30, #data)
+    for i = 1, sampleCount do
         local anims = data[i].Animations
         if anims then
             for _, a in ipairs(anims) do
-                if a.Priority == "Movement" and a.Speed and a.Speed > 0.1 then
-                    return a
-                end
+                if not counts[a.Id] then counts[a.Id] = {anim = a, count = 0} end
+                counts[a.Id].count = counts[a.Id].count + 1
             end
         end
     end
-    for i = 1, math.min(20, #data) do
-        local anims = data[i].Animations
-        if anims then
-            for _, a in ipairs(anims) do
-                if a.Priority == "Movement" then return a end
-            end
-        end
+    local result = {}
+    local threshold = math.max(2, sampleCount * 0.3)
+    for _, info in pairs(counts) do
+        if info.count >= threshold then table.insert(result, info.anim) end
     end
-    return nil
+    local prioOrder = {Action=4,Action2=4,Action3=4,Action4=4,Movement=3,Idle=2,Core=1}
+    table.sort(result, function(a, b)
+        return (prioOrder[a.Priority] or 0) > (prioOrder[b.Priority] or 0)
+    end)
+    return result
 end
 
-local function stopPreWalkAnimation()
-    if preWalkTrack then
-        pcall(function() preWalkTrack:Stop(0.1) end)
-        preWalkTrack = nil
+local function stopPreWalkAnimations()
+    for _, track in ipairs(preWalkTracks) do
+        pcall(function() track:Stop(0.1) end)
     end
+    preWalkTracks = {}
 end
 
 local function stopPlayback()
@@ -420,7 +847,7 @@ local function stopPlayback()
         playbackConnection:Disconnect()
         playbackConnection = nil
     end
-    stopPreWalkAnimation()
+    stopPreWalkAnimations()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChild("Humanoid")
     if antigravidade then antigravidade:Destroy() antigravidade = nil end
@@ -456,17 +883,51 @@ local function playRoute(data)
     local animator = hum:FindFirstChildOfClass("Animator")
     if not animator then animator = Instance.new("Animator", hum) end
 
-    local walkAnimData = findWalkAnimation(data)
-    if walkAnimData then
-        local track = getOrLoadTrack(animator, walkAnimData.Id)
+    local animateScript = char:FindFirstChild("Animate")
+    local animateWasDisabled = false
+    if animateScript and animateScript:IsA("BaseScript") then
+        animateScript.Disabled = true
+        animateWasDisabled = true
+    end
+
+    local detectedAnims = getStartAnimations(data)
+    preWalkTracks = {}
+    for _, animData in ipairs(detectedAnims) do
+        local track = getOrLoadTrack(animator, animData.Id)
         if track then
             pcall(function()
-                track.Priority = Enum.AnimationPriority.Movement
+                track.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
                 track.Looped = true
                 track:Play(0.1)
-                track:AdjustSpeed(walkAnimData.Speed or 1)
+                track:AdjustSpeed(animData.Speed or 1)
             end)
-            preWalkTrack = track
+            table.insert(preWalkTracks, track)
+        end
+    end
+
+    if #preWalkTracks == 0 then
+        for i = 1, math.min(20, #data) do
+            local anims = data[i].Animations
+            if anims then
+                local found = false
+                for _, a in ipairs(anims) do
+                    if a.Priority == "Movement" then
+                        local track = getOrLoadTrack(animator, a.Id)
+                        if track then
+                            pcall(function()
+                                track.Priority = Enum.AnimationPriority.Movement
+                                track.Looped = true
+                                track:Play(0.1)
+                                track:AdjustSpeed(a.Speed or 1)
+                            end)
+                            table.insert(preWalkTracks, track)
+                        end
+                        found = true
+                        break
+                    end
+                end
+                if found then break end
+            end
         end
     end
 
@@ -484,7 +945,10 @@ local function playRoute(data)
     while not reached and tick() < timeout do task.wait(0.1) end
     if conn then conn:Disconnect() end
 
-    stopPreWalkAnimation()
+    stopPreWalkAnimations()
+    if animateWasDisabled and animateScript then
+        pcall(function() animateScript.Disabled = false end)
+    end
 
     hum.AutoRotate = false
     antigravidade = Instance.new("BodyForce", hrp)
@@ -502,18 +966,38 @@ local function playRoute(data)
     local currentIndex = 1
     activeTracks = {}
 
-    StatusLabel.Text = "Reproduzindo..."
+    -- ===== NOVO: tempo acumulado adaptativo =====
+    local accumulatedRouteTime = 0
+    local lastRealTime = os.clock()
+    local useSegments = #segmentSpeeds > 0
+
+    StatusLabel.Text = useSegments and "Reproduzindo (segmentos)" or string.format("Reproduzindo %s", SpeedValue.Text)
     startTimer()
 
     playbackConnection = RunService.Heartbeat:Connect(function()
-        local elapsedTime = os.clock() - pstartTime
+        local now = os.clock()
+        local dt = now - lastRealTime
+        lastRealTime = now
+
+        -- Calcula velocidade no ponto atual
+        local speedHere
+        if useSegments then
+            speedHere = getSpeedAtTime(accumulatedRouteTime)
+        else
+            speedHere = playbackSpeed
+        end
+
+        -- Avança tempo virtual
+        accumulatedRouteTime = accumulatedRouteTime + dt * speedHere
+        local elapsedTime = accumulatedRouteTime
+
         while currentIndex < totalPoints and elapsedTime >= data[currentIndex + 1].Time do
             currentIndex = currentIndex + 1
         end
         if currentIndex >= totalPoints then
             stopPlayback()
             stopTimer()
-            StatusLabel.Text = string.format("OK! (%s)", formatTime(timerFrozen))
+            StatusLabel.Text = string.format("OK! em %.2fs", timerFrozen)
             return
         end
 
@@ -535,7 +1019,11 @@ local function playRoute(data)
             antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
         end
         if p1.Velocity then
-            hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
+            hrp.AssemblyLinearVelocity = Vector3.new(
+                p1.Velocity[1] * speedHere,
+                p1.Velocity[2] * speedHere,
+                p1.Velocity[3] * speedHere
+            )
         end
         if p0.State then
             pcall(function() hum:ChangeState(p0.State) end)
@@ -558,7 +1046,11 @@ local function playRoute(data)
                     end
                 end
                 local t = activeTracks[animData.Id]
-                if t then pcall(function() t:AdjustSpeed(animData.Speed) end) end
+                if t then
+                    pcall(function()
+                        t:AdjustSpeed((animData.Speed or 1) * speedHere)
+                    end)
+                end
             end
             for id, track in pairs(activeTracks) do
                 if not wanted[id] then
@@ -570,13 +1062,14 @@ local function playRoute(data)
     end)
 end
 
--- ===== BOTÃO GRAVAR =====
+-- ===== GRAVAR =====
 RecordBtn.MouseButton1Click:Connect(function()
     if playbackConnection then stopPlayback() end
     isRecording = not isRecording
 
     if isRecording then
         recordedData = {}
+        segmentSpeeds = {}  -- Limpa segmentos ao regravar
         startTime = os.clock()
         startTimer()
         RecordBtn.Text = "■ PARAR"
@@ -600,7 +1093,6 @@ RecordBtn.MouseButton1Click:Connect(function()
             local cf = hrp.CFrame
             local vel = hrp.AssemblyLinearVelocity
             local state = hum:GetState()
-
             local anims = {}
             local animator = hum:FindFirstChildOfClass("Animator")
             if animator then
@@ -615,7 +1107,6 @@ RecordBtn.MouseButton1Click:Connect(function()
                     end
                 end
             end
-
             table.insert(recordedData, {
                 Time = currentTime,
                 CF = {cf:GetComponents()},
@@ -633,10 +1124,13 @@ RecordBtn.MouseButton1Click:Connect(function()
         RecordBtn.Text = "● GRAVAR"
         RecordBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
         StatusLabel.Text = string.format("OK! %d pts", #recordedData)
+        -- Atualiza duração de referência
+        if #recordedData > 0 then
+            timelineTotalDuration = recordedData[#recordedData].Time
+        end
     end
 end)
 
--- ===== BOTÃO TESTAR =====
 TestBtn.MouseButton1Click:Connect(function()
     if isRecording then StatusLabel.Text = "Pare gravação!" return end
     if #recordedData == 0 then StatusLabel.Text = "Nada gravado!" return end
@@ -644,7 +1138,7 @@ TestBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ======================================================================== --
--- POPUP DE RENOMEAR
+-- POPUP RENOMEAR
 -- ======================================================================== --
 local RenamePopup = Instance.new("Frame", ScreenGui)
 RenamePopup.Size = UDim2.new(0, 180, 0, 78)
@@ -709,10 +1203,7 @@ RenameCancel.ZIndex = 11
 Instance.new("UICorner", RenameCancel).CornerRadius = UDim.new(0, 4)
 
 SaveRenameBtn.MouseButton1Click:Connect(function()
-    if #recordedData == 0 then
-        StatusLabel.Text = "Nada gravado!"
-        return
-    end
+    if #recordedData == 0 then StatusLabel.Text = "Nada gravado!" return end
     RenameBox.Text = "Rota_" .. os.date("%H%M%S")
     RenamePopup.Visible = true
     RenameBox:CaptureFocus()
@@ -731,20 +1222,19 @@ RenameOK.MouseButton1Click:Connect(function()
         name = baseName .. "_" .. counter
         counter = counter + 1
     end
-
     savedRoutes[name] = {
         Duracao = timerFrozen,
         Pontos = #recordedData,
-        Data = recordedData
+        Data = recordedData,
+        Segments = segmentSpeeds  -- salva os segmentos junto!
     }
-
     RenamePopup.Visible = false
     StatusLabel.Text = "Salvo: " .. name
     switchTab("data")
 end)
 
 -- ======================================================================== --
--- LISTA DE ROTAS SALVAS (aba DADOS)
+-- LISTA DE ROTAS
 -- ======================================================================== --
 local function makeRouteButton(parent, text, color, onClick)
     local b = Instance.new("TextButton", parent)
@@ -761,11 +1251,8 @@ end
 
 function refreshDataList()
     for _, child in ipairs(DataScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then
-            child:Destroy()
-        end
+        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
     end
-
     local names = {}
     for n in pairs(savedRoutes) do table.insert(names, n) end
     table.sort(names)
@@ -785,7 +1272,6 @@ function refreshDataList()
 
     for _, name in ipairs(names) do
         local entry = savedRoutes[name]
-
         local item = Instance.new("Frame", DataScroll)
         item.Size = UDim2.new(1, 0, 0, 32)
         item.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
@@ -793,7 +1279,7 @@ function refreshDataList()
         Instance.new("UICorner", item).CornerRadius = UDim.new(0, 4)
 
         local nameLbl = Instance.new("TextLabel", item)
-        nameLbl.Size = UDim2.new(1, -8, 0, 12)
+        nameLbl.Size = UDim2.new(1, -66, 0, 12)
         nameLbl.Position = UDim2.new(0, 4, 0, 2)
         nameLbl.BackgroundTransparency = 1
         nameLbl.Font = Enum.Font.GothamBold
@@ -804,30 +1290,36 @@ function refreshDataList()
         nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
         local infoLbl = Instance.new("TextLabel", item)
-        infoLbl.Size = UDim2.new(1, -8, 0, 10)
+        infoLbl.Size = UDim2.new(1, -66, 0, 10)
         infoLbl.Position = UDim2.new(0, 4, 0, 13)
         infoLbl.BackgroundTransparency = 1
         infoLbl.Font = Enum.Font.Code
-        infoLbl.Text = string.format("⏱ %.3fs • %d pts", entry.Duracao, entry.Pontos)
+        local segInfo = entry.Segments and #entry.Segments > 0 and " [S]" or ""
+        infoLbl.Text = string.format("⏱ %.3fs • %d pts%s", entry.Duracao, entry.Pontos, segInfo)
         infoLbl.TextColor3 = Color3.fromRGB(0, 200, 100)
         infoLbl.TextSize = 8
         infoLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-        -- ▶ Reproduzir
         local playBtn = makeRouteButton(item, "▶", Color3.fromRGB(40, 100, 180), function()
+            -- Aplica os segmentos salvos antes de reproduzir
+            if entry.Segments then
+                segmentSpeeds = {}
+                for _, s in ipairs(entry.Segments) do
+                    table.insert(segmentSpeeds, {Inicio = s.Inicio, Fim = s.Fim, Mult = s.Mult})
+                end
+            else
+                segmentSpeeds = {}
+            end
             playRoute(entry.Data)
         end)
         playBtn.Size = UDim2.new(0, 18, 0, 20)
         playBtn.Position = UDim2.new(1, -62, 0, 6)
 
-        -- 📋 Copiar
         local copyBtn = makeRouteButton(item, "📋", Color3.fromRGB(80, 80, 80), function()
             local result = string.format(
                 "-- ==================== ROTA: %s ====================\n" ..
-                "-- DURAÇÃO: %s\n" ..
-                "-- PONTOS: %d\n" ..
-                "-- ================================================\n" ..
-                "return {\n",
+                "-- DURAÇÃO: %s\n-- PONTOS: %d\n" ..
+                "-- ================================================\nreturn {\n",
                 name, formatTime(entry.Duracao), entry.Pontos
             )
             for _, node in ipairs(entry.Data) do
@@ -840,8 +1332,7 @@ function refreshDataList()
                     for _, a in ipairs(node.Animations) do
                         table.insert(parts, string.format(
                             "{Id = \"%s\", Speed = %.3f, Weight = %.3f, Priority = \"%s\"}",
-                            a.Id, a.Speed, a.Weight, a.Priority
-                        ))
+                            a.Id, a.Speed, a.Weight, a.Priority))
                     end
                     animStr = ", Animations = {" .. table.concat(parts, ", ") .. "}"
                 else
@@ -849,10 +1340,16 @@ function refreshDataList()
                 end
                 result = result .. string.format(
                     "    {Time = %.3f, CF = {%s}, Velocity = {%s}, State = Enum.HumanoidStateType.%s%s},\n",
-                    node.Time, cfStr, velStr, stateName, animStr
-                )
+                    node.Time, cfStr, velStr, stateName, animStr)
             end
             result = result .. "}"
+            -- Anexa segmentos como comentário
+            if entry.Segments and #entry.Segments > 0 then
+                result = result .. "\n-- SEGMENTOS DE VELOCIDADE:\n"
+                for _, s in ipairs(entry.Segments) do
+                    result = result .. string.format("-- %.2f → %.2f = %.1fx\n", s.Inicio, s.Fim, s.Mult)
+                end
+            end
             if setclipboard then
                 setclipboard(result)
                 StatusLabel.Text = "Copiado: " .. name
@@ -864,7 +1361,6 @@ function refreshDataList()
         copyBtn.Size = UDim2.new(0, 18, 0, 20)
         copyBtn.Position = UDim2.new(1, -42, 0, 6)
 
-        -- 🗑️ Deletar
         local delBtn = makeRouteButton(item, "🗑", Color3.fromRGB(170, 0, 0), function()
             savedRoutes[name] = nil
             StatusLabel.Text = "Deletado: " .. name
@@ -874,10 +1370,17 @@ function refreshDataList()
         delBtn.Position = UDim2.new(1, -22, 0, 6)
     end
 
-    -- Ajusta canvas size conforme o conteúdo
-    local total = #names * 35
-    DataScroll.CanvasSize = UDim2.new(0, 0, 0, total)
+    DataScroll.CanvasSize = UDim2.new(0, 0, 0, #names * 35)
 end
 
--- Auto-refresh ao abrir a aba dados também
--- (já é chamado em switchTab)
+TabRecord.MouseButton1Click:Connect(function() switchTab("record") end)
+TabData.MouseButton1Click:Connect(function() switchTab("data") end)
+TabConfig.MouseButton1Click:Connect(function() switchTab("config") end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    stopPlayback()
+    animationCache = {}
+end)
+
+-- Init
+rebuildSegList()
