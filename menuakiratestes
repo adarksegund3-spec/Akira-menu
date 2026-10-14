@@ -1,933 +1,1247 @@
--- ======================================================================== --
--- ⚡ angel • gravar rota
--- ======================================================================== --
+--[[
+  MAP SCANNER ULTIMATE v1.0  |  Roblox Luau / Delta Executor (Android)
+  Diagnóstico observacional do mapa carregado no cliente. NÃO altera nada no mapa.
+  Interface: apenas "Gerar diagnóstico" e "Copiar diagnóstico".
+]]
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local LocalPlayer = Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local CollectionService = game:GetService("CollectionService")
+local CoreGui = game:GetService("CoreGui")
+local Lighting = game:GetService("Lighting")
+local MarketplaceService = game:GetService("MarketplaceService")
+local Workspace = game:GetService("Workspace")
 
-local savedRoutes = {}
+local genv = (getgenv and getgenv()) or _G
 
-local C_TURQ       = Color3.fromRGB(0, 210, 210)
-local C_TURQ_BRIGHT= Color3.fromRGB(120, 245, 255)
-local C_TURQ_DARK  = Color3.fromRGB(0, 130, 140)
-local C_BG         = Color3.fromRGB(14, 22, 24)
-local C_BG_2       = Color3.fromRGB(22, 32, 35)
-local C_BG_3       = Color3.fromRGB(30, 44, 48)
-local C_TXT        = Color3.fromRGB(230, 245, 250)
-local C_TXT_DIM    = Color3.fromRGB(120, 150, 160)
+local CONFIG = {
+	MAX_INSTANCES = 80000,
+	MAX_REPORT_BYTES = 24000000,
+	CLIP_LIMIT = 400000,
+	FRAME_BUDGET = 0.012,
+	MAX_ASSETS = 5000,
+	MAX_INCOMPLETE = 1000,
+	FILE_NAME = "MapScanner_diagnostico.json",
+}
 
--- ======================================================================== --
--- GUI
--- ======================================================================== --
-local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-ScreenGui.Name = "AngelRecorder"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.IgnoreGuiInset = true
-
-local FloatButton = Instance.new("TextButton", ScreenGui)
-FloatButton.Size = UDim2.new(0, 46, 0, 46)
-FloatButton.Position = UDim2.new(0, 14, 0.5, -23)
-FloatButton.BackgroundColor3 = C_BG_2
-FloatButton.Text = "⚡"
-FloatButton.TextColor3 = C_TURQ_BRIGHT
-FloatButton.TextSize = 26
-FloatButton.Font = Enum.Font.GothamBold
-FloatButton.BorderSizePixel = 0
-FloatButton.Active = true
-FloatButton.AutoButtonColor = false
-Instance.new("UICorner", FloatButton).CornerRadius = UDim.new(1, 0)
-local FloatStroke = Instance.new("UIStroke", FloatButton)
-FloatStroke.Color = C_TURQ
-FloatStroke.Thickness = 2
-
-local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 158, 0, 196)
-MainFrame.Position = UDim2.new(0.5, -79, 0.5, -98)
-MainFrame.BackgroundColor3 = C_BG
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Visible = false
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
-local MainStroke = Instance.new("UIStroke", MainFrame)
-MainStroke.Color = C_TURQ
-MainStroke.Thickness = 1
-MainStroke.Transparency = 0.15
-
-local TitleBar = Instance.new("Frame", MainFrame)
-TitleBar.Size = UDim2.new(1, 0, 0, 22)
-TitleBar.BackgroundColor3 = C_BG_3
-TitleBar.BorderSizePixel = 0
-TitleBar.Active = true
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
-
-local Title = Instance.new("TextLabel", TitleBar)
-Title.Size = UDim2.new(1, -32, 1, 0)
-Title.Position = UDim2.new(0, 10, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.GothamBold
-Title.Text = "⚡ angel"
-Title.TextColor3 = C_TURQ_BRIGHT
-Title.TextSize = 12
-Title.TextXAlignment = Enum.TextXAlignment.Left
-
-local CloseBtn = Instance.new("TextButton", TitleBar)
-CloseBtn.Size = UDim2.new(0, 16, 0, 16)
-CloseBtn.Position = UDim2.new(1, -20, 0, 3)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 50)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 230, 230)
-CloseBtn.TextSize = 9
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.BorderSizePixel = 0
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
-
-local TabBar = Instance.new("Frame", MainFrame)
-TabBar.Size = UDim2.new(1, -14, 0, 16)
-TabBar.Position = UDim2.new(0, 7, 0, 26)
-TabBar.BackgroundColor3 = C_BG
-TabBar.BorderSizePixel = 0
-Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0, 4)
-
-local TabRota = Instance.new("TextButton", TabBar)
-TabRota.Size = UDim2.new(0.5, -1, 1, 0)
-TabRota.Position = UDim2.new(0, 1, 0, 0)
-TabRota.BackgroundColor3 = C_TURQ_DARK
-TabRota.Font = Enum.Font.GothamBold
-TabRota.Text = "gravar"
-TabRota.TextColor3 = C_TURQ_BRIGHT
-TabRota.TextSize = 9
-TabRota.BorderSizePixel = 0
-Instance.new("UICorner", TabRota).CornerRadius = UDim.new(0, 3)
-
-local TabDados = Instance.new("TextButton", TabBar)
-TabDados.Size = UDim2.new(0.5, -1, 1, 0)
-TabDados.Position = UDim2.new(0.5, 0, 0, 0)
-TabDados.BackgroundColor3 = C_BG_2
-TabDados.Font = Enum.Font.GothamBold
-TabDados.Text = "dados"
-TabDados.TextColor3 = C_TXT_DIM
-TabDados.TextSize = 9
-TabDados.BorderSizePixel = 0
-Instance.new("UICorner", TabDados).CornerRadius = UDim.new(0, 3)
-
--- Página ROTA
-local RotaPage = Instance.new("Frame", MainFrame)
-RotaPage.Size = UDim2.new(1, 0, 1, -48)
-RotaPage.Position = UDim2.new(0, 0, 0, 48)
-RotaPage.BackgroundTransparency = 1
-RotaPage.Visible = true
-
-local TimerFrame = Instance.new("Frame", RotaPage)
-TimerFrame.Size = UDim2.new(1, -14, 0, 32)
-TimerFrame.Position = UDim2.new(0, 7, 0, 0)
-TimerFrame.BackgroundColor3 = C_BG_2
-TimerFrame.BorderSizePixel = 0
-Instance.new("UICorner", TimerFrame).CornerRadius = UDim.new(0, 7)
-local TimerStroke = Instance.new("UIStroke", TimerFrame)
-TimerStroke.Color = C_TURQ_DARK
-TimerStroke.Thickness = 1
-
-local TimerLabel = Instance.new("TextLabel", TimerFrame)
-TimerLabel.Size = UDim2.new(1, 0, 1, 0)
-TimerLabel.BackgroundTransparency = 1
-TimerLabel.Font = Enum.Font.Code
-TimerLabel.Text = "00:00.000"
-TimerLabel.TextColor3 = C_TURQ_BRIGHT
-TimerLabel.TextSize = 16
-
-local StatusLabel = Instance.new("TextLabel", RotaPage)
-StatusLabel.Size = UDim2.new(1, -14, 0, 12)
-StatusLabel.Position = UDim2.new(0, 7, 0, 36)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.Text = "◦ parado"
-StatusLabel.TextColor3 = C_TXT_DIM
-StatusLabel.TextSize = 9
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local RecordBtn = Instance.new("TextButton", RotaPage)
-RecordBtn.Size = UDim2.new(1, -14, 0, 26)
-RecordBtn.Position = UDim2.new(0, 7, 0, 52)
-RecordBtn.BackgroundColor3 = C_TURQ_DARK
-RecordBtn.Font = Enum.Font.GothamBold
-RecordBtn.Text = "⚡ gravar"
-RecordBtn.TextColor3 = C_TURQ_BRIGHT
-RecordBtn.TextSize = 10
-RecordBtn.BorderSizePixel = 0
-Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 6)
-
-local TestBtn = Instance.new("TextButton", RotaPage)
-TestBtn.Size = UDim2.new(1, -14, 0, 26)
-TestBtn.Position = UDim2.new(0, 7, 0, 82)
-TestBtn.BackgroundColor3 = Color3.fromRGB(30, 60, 100)
-TestBtn.Font = Enum.Font.GothamBold
-TestBtn.Text = "▸ testar"
-TestBtn.TextColor3 = Color3.fromRGB(180, 220, 255)
-TestBtn.TextSize = 10
-TestBtn.BorderSizePixel = 0
-Instance.new("UICorner", TestBtn).CornerRadius = UDim.new(0, 6)
-
-local SaveRenameBtn = Instance.new("TextButton", RotaPage)
-SaveRenameBtn.Size = UDim2.new(1, -14, 0, 26)
-SaveRenameBtn.Position = UDim2.new(0, 7, 0, 112)
-SaveRenameBtn.BackgroundColor3 = Color3.fromRGB(70, 45, 110)
-SaveRenameBtn.Font = Enum.Font.GothamBold
-SaveRenameBtn.Text = "💾 guardar"
-SaveRenameBtn.TextColor3 = Color3.fromRGB(230, 210, 255)
-SaveRenameBtn.TextSize = 10
-SaveRenameBtn.BorderSizePixel = 0
-Instance.new("UICorner", SaveRenameBtn).CornerRadius = UDim.new(0, 6)
-
--- Página DADOS
-local DadosPage = Instance.new("Frame", MainFrame)
-DadosPage.Size = UDim2.new(1, 0, 1, -48)
-DadosPage.Position = UDim2.new(0, 0, 0, 48)
-DadosPage.BackgroundTransparency = 1
-DadosPage.Visible = false
-
-local DataScroll = Instance.new("ScrollingFrame", DadosPage)
-DataScroll.Size = UDim2.new(1, -14, 1, -10)
-DataScroll.Position = UDim2.new(0, 7, 0, 2)
-DataScroll.BackgroundTransparency = 1
-DataScroll.BorderSizePixel = 0
-DataScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-DataScroll.ScrollBarThickness = 5
-DataScroll.ScrollBarImageColor3 = C_TURQ
-DataScroll.ScrollingDirection = Enum.ScrollingDirection.Y
-DataScroll.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
-DataScroll.Active = true
-
-local DataLayout = Instance.new("UIListLayout", DataScroll)
-DataLayout.Padding = UDim.new(0, 4)
-DataLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-DataLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    DataScroll.CanvasSize = UDim2.new(0, 0, 0, DataLayout.AbsoluteContentSize.Y + 8)
-end)
-
--- ======================================================================== --
--- TIMER
--- ======================================================================== --
-local timerStartTime, timerFrozen, timerRunning, timerConnection = 0, 0, false, nil
-
-local function formatTime(t)
-    if t < 0 then t = 0 end
-    local mins = math.floor(t / 60)
-    local secs = t - mins * 60
-    return string.format("%02d:%06.3f", mins, secs)
+------------------------------------------------------------------
+-- Utilitários
+------------------------------------------------------------------
+local function r3(n)
+	if type(n) ~= "number" or n ~= n or n == math.huge or n == -math.huge then
+		return 0
+	end
+	return math.floor(n * 1000 + 0.5) / 1000
 end
 
-local function updateTimerDisplay()
-    local elapsed = timerRunning and (os.clock() - timerStartTime) or timerFrozen
-    TimerLabel.Text = formatTime(elapsed)
+local function vec(v)
+	return { r3(v.X), r3(v.Y), r3(v.Z) }
 end
 
-local function startTimer()
-    timerStartTime = os.clock()
-    timerRunning = true
-    timerFrozen = 0
-    if timerConnection then timerConnection:Disconnect() end
-    timerConnection = RunService.RenderStepped:Connect(updateTimerDisplay)
-    TimerStroke.Color = C_TURQ
-    TimerLabel.TextColor3 = C_TURQ_BRIGHT
+local function col(c)
+	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
 end
 
-local function stopTimer()
-    if timerRunning then timerFrozen = os.clock() - timerStartTime end
-    timerRunning = false
-    if timerConnection then timerConnection:Disconnect() timerConnection = nil end
-    updateTimerDisplay()
-    TimerStroke.Color = Color3.fromRGB(160, 120, 60)
-    TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 130)
+local function cfc(c)
+	local t = { c:GetComponents() }
+	for i = 1, #t do
+		t[i] = r3(t[i])
+	end
+	return t
 end
 
--- ======================================================================== --
--- DRAG
--- ======================================================================== --
+local function enumName(v)
+	return v.Name
+end
+
+local function idf(v)
+	return v
+end
+
+local function index(o, k)
+	return o[k]
+end
+
+local function ser(v)
+	local t = typeof(v)
+	if t == "number" then
+		return r3(v)
+	elseif t == "string" or t == "boolean" then
+		return v
+	elseif t == "Vector3" then
+		return vec(v)
+	elseif t == "Vector2" then
+		return { r3(v.X), r3(v.Y) }
+	elseif t == "Color3" then
+		return col(v)
+	elseif t == "CFrame" then
+		return cfc(v)
+	elseif t == "EnumItem" then
+		return v.Name
+	end
+	return tostring(v)
+end
+
+local function readSpec(inst, specs)
+	local out, miss = {}, {}
+	for _, p in ipairs(specs) do
+		local ok, v = pcall(index, inst, p[2])
+		if ok then
+			local ok2, cv = pcall(p[3], v)
+			if ok2 then
+				out[p[1]] = cv
+			else
+				miss[#miss + 1] = p[2]
+			end
+		else
+			miss[#miss + 1] = p[2]
+		end
+	end
+	return out, miss
+end
+
+------------------------------------------------------------------
+-- Especificação das propriedades lidas (apenas leitura)
+------------------------------------------------------------------
+local PROPS = {
+	{ "BasePart", {
+		{ "posicao", "Position", vec },
+		{ "tamanho", "Size", vec },
+		{ "orientacao", "Orientation", vec },
+		{ "cframe", "CFrame", cfc },
+		{ "cor_rgb", "Color", col },
+		{ "material", "Material", enumName },
+		{ "transparencia", "Transparency", r3 },
+		{ "reflectance", "Reflectance", r3 },
+		{ "anchored", "Anchored", idf },
+		{ "can_collide", "CanCollide", idf },
+		{ "can_touch", "CanTouch", idf },
+		{ "can_query", "CanQuery", idf },
+		{ "grupo_colisao", "CollisionGroup", idf },
+	} },
+	{ "Part", { { "forma", "Shape", enumName } } },
+	{ "MeshPart", {
+		{ "mesh_id", "MeshId", idf, "mesh" },
+		{ "textura_id", "TextureID", idf, "textura" },
+		{ "mesh_tamanho_original", "MeshSize", vec },
+	} },
+	{ "FileMesh", {
+		{ "mesh_id", "MeshId", idf, "mesh" },
+		{ "textura_id", "TextureId", idf, "textura" },
+		{ "escala", "Scale", vec },
+		{ "deslocamento", "Offset", vec },
+	} },
+	{ "SpecialMesh", { { "tipo_mesh", "MeshType", enumName } } },
+	{ "Decal", {
+		{ "textura_id", "Texture", idf, "decal/textura" },
+		{ "face", "Face", enumName },
+		{ "transparencia", "Transparency", r3 },
+		{ "cor_rgb", "Color3", col },
+	} },
+	{ "Texture", {
+		{ "studs_por_tile_u", "StudsPerTileU", r3 },
+		{ "studs_por_tile_v", "StudsPerTileV", r3 },
+	} },
+	{ "SurfaceAppearance", {
+		{ "color_map", "ColorMap", idf, "surface_color" },
+		{ "normal_map", "NormalMap", idf, "surface_normal" },
+		{ "metalness_map", "MetalnessMap", idf, "surface_metal" },
+		{ "roughness_map", "RoughnessMap", idf, "surface_rough" },
+	} },
+	{ "Sky", {
+		{ "ceu_tras", "SkyboxBk", idf, "skybox" },
+		{ "ceu_baixo", "SkyboxDn", idf, "skybox" },
+		{ "ceu_frente", "SkyboxFt", idf, "skybox" },
+		{ "ceu_esquerda", "SkyboxLf", idf, "skybox" },
+		{ "ceu_direita", "SkyboxRt", idf, "skybox" },
+		{ "ceu_cima", "SkyboxUp", idf, "skybox" },
+	} },
+	{ "Atmosphere", {
+		{ "densidade", "Density", r3 },
+		{ "deslocamento", "Offset", r3 },
+		{ "cor_rgb", "Color", col },
+		{ "decay_rgb", "Decay", col },
+		{ "glare", "Glare", r3 },
+		{ "haze", "Haze", r3 },
+	} },
+	{ "Clouds", {
+		{ "cobertura", "Cover", r3 },
+		{ "densidade", "Density", r3 },
+		{ "cor_rgb", "Color", col },
+	} },
+	{ "Light", {
+		{ "brilho", "Brightness", r3 },
+		{ "alcance", "Range", r3 },
+		{ "cor_rgb", "Color", col },
+		{ "ativo", "Enabled", idf },
+		{ "sombras", "Shadows", idf },
+	} },
+	{ "SpotLight", { { "angulo", "Angle", r3 }, { "face", "Face", enumName } } },
+	{ "SurfaceLight", { { "angulo", "Angle", r3 }, { "face", "Face", enumName } } },
+	{ "ParticleEmitter", {
+		{ "ativo", "Enabled", idf },
+		{ "taxa", "Rate", r3 },
+		{ "textura_id", "Texture", idf, "particula" },
+	} },
+	{ "Fire", { { "ativo", "Enabled", idf } } },
+	{ "Smoke", { { "ativo", "Enabled", idf } } },
+	{ "Sparkles", { { "ativo", "Enabled", idf } } },
+	{ "Beam", { { "ativo", "Enabled", idf }, { "textura_id", "Texture", idf, "beam" } } },
+	{ "Trail", { { "ativo", "Enabled", idf }, { "textura_id", "Texture", idf, "trail" } } },
+	{ "PostEffect", { { "ativo", "Enabled", idf } } },
+	{ "ProximityPrompt", {
+		{ "texto_acao", "ActionText", idf },
+		{ "texto_objeto", "ObjectText", idf },
+		{ "tempo_segurar", "HoldDuration", r3 },
+		{ "distancia_max", "MaxActivationDistance", r3 },
+		{ "ativo", "Enabled", idf },
+		{ "exige_linha_visao", "RequiresLineOfSight", idf },
+	} },
+	{ "ClickDetector", { { "distancia_max", "MaxActivationDistance", r3 } } },
+	{ "Seat", { { "desabilitado", "Disabled", idf } } },
+	{ "VehicleSeat", { { "desabilitado", "Disabled", idf } } },
+	{ "SpawnLocation", { { "ativo", "Enabled", idf }, { "neutro", "Neutral", idf } } },
+	{ "HingeConstraint", {
+		{ "atuador", "ActuatorType", enumName },
+		{ "limites_ativos", "LimitsEnabled", idf },
+		{ "limite_inferior", "LowerAngle", r3 },
+		{ "limite_superior", "UpperAngle", r3 },
+	} },
+	{ "PrismaticConstraint", {
+		{ "atuador", "ActuatorType", enumName },
+		{ "limites_ativos", "LimitsEnabled", idf },
+		{ "limite_inferior", "LowerLimit", r3 },
+		{ "limite_superior", "UpperLimit", r3 },
+	} },
+	{ "Attachment", { { "posicao", "WorldPosition", vec } } },
+}
+
+local INTERACT = {
+	ProximityPrompt = true, ClickDetector = true, TouchInterest = true, DragDetector = true,
+}
+local MECH = {
+	HingeConstraint = true, PrismaticConstraint = true, CylindricalConstraint = true,
+	AlignPosition = true, AlignOrientation = true, LinearVelocity = true, AngularVelocity = true,
+	BodyPosition = true, BodyVelocity = true, BodyGyro = true,
+}
+local EVENTS = {
+	RemoteEvent = true, RemoteFunction = true, BindableEvent = true, BindableFunction = true,
+}
+
+local KW = {
+	{ "portas_portoes_mecanismos", { "door", "porta", "portao", "portão", "gate", "garage", "garagem", "elevator", "elevador", "lift", "barrier", "barreira", "cancela", "drawbridge", "hatch", "alcapao", "alçapão" } },
+	{ "objetos_interativos", { "button", "botao", "botão", "switch", "interruptor", "lever", "alavanca", "panel", "painel", "terminal", "keypad", "vending" } },
+	{ "terreno_ambiente", { "terrain", "terreno", "water", "agua", "água", "tree", "arvore", "árvore", "bush", "arbusto", "grass", "grama", "rock", "pedra", "flower", "flor", "plant", "planta", "mountain", "montanha", "hill", "colina", "river", "rio", "lake", "lago", "sand", "areia" } },
+	{ "salas_divisoes", { "room", "sala", "corridor", "corredor", "hall", "bedroom", "quarto", "bathroom", "banheiro", "kitchen", "cozinha", "partition", "divisoria", "divisória", "passage", "passagem", "lobby", "office", "escritorio", "escritório" } },
+	{ "estruturas_edificios", { "wall", "parede", "muro", "floor", "piso", "chao", "chão", "roof", "telhado", "teto", "ceiling", "building", "predio", "prédio", "house", "casa", "stair", "escada", "pillar", "coluna", "fence", "cerca", "bridge", "ponte", "window", "janela", "foundation", "tower", "torre" } },
+	{ "moveis_decorativos", { "table", "mesa", "chair", "cadeira", "desk", "escrivaninha", "counter", "balcao", "balcão", "sofa", "sofá", "bed", "cama", "shelf", "prateleira", "locker", "armario", "armário", "chest", "bau", "baú", "lamp", "luminaria", "luminária", "car", "carro", "vehicle", "veiculo", "veículo", "truck", "caminhao", "caminhão", "sign", "placa", "pole", "poste", "decor", "decoracao", "decoração", "furniture", "movel", "móvel", "vase", "vaso", "rug", "tapete", "bench", "banco" } },
+}
+
+local STATE_ATTR = {
+	open = true, opened = true, aberto = true, aberta = true, state = true, estado = true,
+	locked = true, trancado = true, closed = true, fechado = true, active = true, ativo = true,
+}
+
+local function tokens(name)
+	local set = {}
+	local ok = pcall(function()
+		local s = name:gsub("(%l)(%u)", "%1 %2"):lower()
+		for tok in s:gmatch("[^%s%p%d]+") do
+			set[tok] = true
+			local sg = tok:gsub("s$", "")
+			set[sg] = true
+		end
+	end)
+	if not ok then
+		return {}
+	end
+	return set
+end
+
+------------------------------------------------------------------
+-- Interface
+------------------------------------------------------------------
+local GUI_NAME = "MapScannerUltimateGui"
+
+local function guiParents()
+	local list = {}
+	local ok, h = pcall(function()
+		if gethui then
+			return gethui()
+		end
+	end)
+	if ok and h then
+		list[#list + 1] = h
+	end
+	list[#list + 1] = CoreGui
+	local lp = Players.LocalPlayer
+	if lp then
+		local pg = lp:FindFirstChildOfClass("PlayerGui")
+		if pg then
+			list[#list + 1] = pg
+		end
+	end
+	return list
+end
+
+-- Evita janelas duplicadas
+if genv.MapScannerUltimate and genv.MapScannerUltimate.Destroy then
+	pcall(genv.MapScannerUltimate.Destroy)
+end
+for _, par in ipairs(guiParents()) do
+	pcall(function()
+		for _, c in ipairs(par:GetChildren()) do
+			if c.Name == GUI_NAME then
+				c:Destroy()
+			end
+		end
+	end)
+end
+
+local ACCENT = Color3.fromRGB(41, 121, 255)
+local BG = Color3.fromRGB(14, 18, 28)
+local BG2 = Color3.fromRGB(24, 30, 46)
+
+local function mk(class, props, parent)
+	local o = Instance.new(class)
+	for k, v in pairs(props) do
+		o[k] = v
+	end
+	o.Parent = parent
+	return o
+end
+
+local gui = mk("ScreenGui", {
+	Name = GUI_NAME,
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 999999,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, nil)
+
+local frame = mk("Frame", {
+	Name = "Janela",
+	Size = UDim2.fromOffset(240, 156),
+	Position = UDim2.new(0.5, -120, 0.5, -78),
+	BackgroundColor3 = BG,
+	BorderSizePixel = 0,
+	Active = true,
+}, gui)
+mk("UICorner", { CornerRadius = UDim.new(0, 10) }, frame)
+mk("UIStroke", { Color = ACCENT, Thickness = 1.5, Transparency = 0.25 }, frame)
+
+local header = mk("TextLabel", {
+	Name = "Cabecalho",
+	Size = UDim2.new(1, 0, 0, 30),
+	BackgroundColor3 = BG2,
+	BorderSizePixel = 0,
+	Text = "MAP SCANNER ULTIMATE",
+	TextColor3 = Color3.fromRGB(235, 242, 255),
+	Font = Enum.Font.GothamBold,
+	TextSize = 13,
+	Active = true,
+}, frame)
+mk("UICorner", { CornerRadius = UDim.new(0, 10) }, header)
+mk("Frame", {
+	Size = UDim2.new(1, 0, 0, 2),
+	Position = UDim2.new(0, 0, 1, -2),
+	BackgroundColor3 = ACCENT,
+	BorderSizePixel = 0,
+}, header)
+
+local btnGen = mk("TextButton", {
+	Name = "Gerar",
+	Size = UDim2.new(1, -24, 0, 34),
+	Position = UDim2.new(0, 12, 0, 40),
+	BackgroundColor3 = ACCENT,
+	BorderSizePixel = 0,
+	Text = "Gerar diagnóstico",
+	TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamBold,
+	TextSize = 14,
+	AutoButtonColor = true,
+}, frame)
+mk("UICorner", { CornerRadius = UDim.new(0, 8) }, btnGen)
+
+local btnCopy = mk("TextButton", {
+	Name = "Copiar",
+	Size = UDim2.new(1, -24, 0, 34),
+	Position = UDim2.new(0, 12, 0, 80),
+	BackgroundColor3 = BG2,
+	BorderSizePixel = 0,
+	Text = "Copiar diagnóstico",
+	TextColor3 = Color3.fromRGB(235, 242, 255),
+	Font = Enum.Font.GothamBold,
+	TextSize = 14,
+	AutoButtonColor = true,
+}, frame)
+mk("UICorner", { CornerRadius = UDim.new(0, 8) }, btnCopy)
+mk("UIStroke", { Color = ACCENT, Thickness = 1, Transparency = 0.2 }, btnCopy)
+
+local statusLabel = mk("TextLabel", {
+	Name = "Status",
+	Size = UDim2.new(1, -24, 0, 34),
+	Position = UDim2.new(0, 12, 0, 118),
+	BackgroundTransparency = 1,
+	Text = "Pronto.",
+	TextColor3 = Color3.fromRGB(150, 175, 220),
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+}, frame)
+
+local function setStatus(t)
+	if statusLabel and statusLabel.Parent then
+		statusLabel.Text = t
+	end
+end
+
+-- Arraste pelo cabeçalho (toque e mouse)
 local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
-
-FloatButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or
-       input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = FloatButton.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
-    end
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = frame.Position
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+header.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+local dragConn = UIS.InputChanged:Connect(function(input)
+	if dragging and input == dragInput and dragStart and startPos then
+		local d = input.Position - dragStart
+		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	end
 end)
 
-FloatButton.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or
-       input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input == dragInput then
-        local delta = input.Position - dragStart
-        FloatButton.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-local menuDragging, menuDragStart, menuStartPos = false, nil, nil
-
-TitleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or
-       input.UserInputType == Enum.UserInputType.Touch then
-        menuDragging = true
-        menuDragStart = input.Position
-        menuStartPos = MainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then menuDragging = false end
-        end)
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if menuDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or
-       input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - menuDragStart
-        MainFrame.Position = UDim2.new(
-            menuStartPos.X.Scale, menuStartPos.X.Offset + delta.X,
-            menuStartPos.Y.Scale, menuStartPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-local function toggleMenu()
-    MainFrame.Visible = not MainFrame.Visible
-    if MainFrame.Visible then
-        MainFrame.Position = UDim2.new(0.5, -79, 0.5, -98)
-    end
+do
+	local placed = false
+	for _, par in ipairs(guiParents()) do
+		local ok = pcall(function()
+			gui.Parent = par
+		end)
+		if ok and gui.Parent then
+			placed = true
+			break
+		end
+	end
+	if not placed then
+		return
+	end
 end
 
-local clickStartTime, clickStartPos = 0, nil
+gui.Destroying:Connect(function()
+	dragConn:Disconnect()
+end)
+genv.MapScannerUltimate = {
+	Destroy = function()
+		pcall(function()
+			gui:Destroy()
+		end)
+	end,
+}
 
-FloatButton.MouseButton1Down:Connect(function()
-    clickStartTime = tick()
-    clickStartPos = UserInputService:GetMouseLocation()
+------------------------------------------------------------------
+-- Varredura
+------------------------------------------------------------------
+local report = nil
+local scanning = false
+local copyIdx = 1
+
+local function runScan()
+	local errCount, removed, skippedCount, totalSeen, failSer = 0, 0, 0, 0, 0
+	local truncatedInst, truncatedBytes = false, false
+	local list, idOf, skip = {}, {}, {}
+	local roots = { Workspace, Lighting }
+	local byClass, byCat, missingByProp = {}, {}, {}
+	local incompletos = {}
+	local incompletosTotal = 0
+	local assets, assetOrder = {}, {}
+	local partCount = {}
+	local pivots = {}
+	local objLines = {}
+	local bytes = 0
+	local registered = 0
+
+	local function yieldLoop(n, label, fn)
+		local last = os.clock()
+		for i = 1, n do
+			local ok = pcall(fn, i)
+			if not ok then
+				errCount = errCount + 1
+			end
+			if os.clock() - last > CONFIG.FRAME_BUDGET then
+				setStatus(string.format("%s %d/%d (%d%%)", label, i, n, math.floor(i / n * 100)))
+				task.wait()
+				last = os.clock()
+				if not gui.Parent then
+					error("janela fechada")
+				end
+			end
+		end
+	end
+
+	local function addSkip(root)
+		skip[root] = true
+		local ok, d = pcall(root.GetDescendants, root)
+		if ok then
+			for i = 1, #d do
+				skip[d[i]] = true
+			end
+		end
+	end
+
+	setStatus("Listando instâncias...")
+	task.wait()
+
+	local cam = Workspace.CurrentCamera
+	if cam then
+		addSkip(cam)
+	end
+	for _, pl in ipairs(Players:GetPlayers()) do
+		if pl.Character then
+			addSkip(pl.Character)
+		end
+	end
+
+	for _, root in ipairs(roots) do
+		local ok, desc = pcall(root.GetDescendants, root)
+		if ok then
+			for i = 1, #desc do
+				local inst = desc[i]
+				totalSeen = totalSeen + 1
+				if skip[inst] then
+					skippedCount = skippedCount + 1
+				elseif #list >= CONFIG.MAX_INSTANCES then
+					truncatedInst = true
+				elseif not idOf[inst] then
+					list[#list + 1] = inst
+					idOf[inst] = #list
+				end
+			end
+		else
+			errCount = errCount + 1
+		end
+	end
+
+	-- Pré-passo: quantidade de peças por contêiner
+	yieldLoop(#list, "Contando peças", function(i)
+		local inst = list[i]
+		if inst:IsA("BasePart") and not inst:IsA("Terrain") then
+			local p = inst.Parent
+			while p and p ~= Workspace and p ~= Lighting and p ~= game do
+				partCount[p] = (partCount[p] or 0) + 1
+				p = p.Parent
+			end
+		end
+	end)
+
+	local function addAsset(kind, val, path)
+		if type(val) ~= "string" or val == "" then
+			return false
+		end
+		local a = assets[val]
+		if not a then
+			if #assetOrder >= CONFIG.MAX_ASSETS then
+				return true
+			end
+			a = { tipo = kind, id = val, usos = 0, exemplos = {} }
+			assets[val] = a
+			assetOrder[#assetOrder + 1] = a
+		end
+		a.usos = a.usos + 1
+		if #a.exemplos < 3 then
+			a.exemplos[#a.exemplos + 1] = path
+		end
+		return true
+	end
+
+	local function getPivot(m)
+		local c = pivots[m]
+		if c == nil then
+			local ok, cf = pcall(m.GetPivot, m)
+			c = ok and cf or false
+			pivots[m] = c
+		end
+		return c
+	end
+
+	local function classify(inst, rec, hasInteractChild, hasMechChild, stateAttr)
+		local out = {}
+		local present = {}
+		local function add(c, conf, why)
+			if not present[c] then
+				present[c] = true
+				out[#out + 1] = { categoria = c, confianca = conf, motivo = why }
+			end
+		end
+		local cn = inst.ClassName
+		if inst:IsA("Terrain") or inst:IsA("Sky") or inst:IsA("Atmosphere") or inst:IsA("Clouds") then
+			add("terreno_ambiente", "confirmada", "classe " .. cn)
+		end
+		if inst:IsA("Light") or inst:IsA("ParticleEmitter") or inst:IsA("Fire") or inst:IsA("Smoke")
+			or inst:IsA("Sparkles") or inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("PostEffect") then
+			add("iluminacao_efeitos", "confirmada", "classe " .. cn)
+		end
+		if MECH[cn] then
+			add("portas_portoes_mecanismos", "confirmada", "constraint/atuador físico (" .. cn .. ")")
+		end
+		if hasMechChild then
+			add("portas_portoes_mecanismos", "confirmada", "possui constraint/atuador físico como filho")
+		end
+		if INTERACT[cn] or EVENTS[cn] or inst:IsA("Seat") or inst:IsA("VehicleSeat") then
+			add("objetos_interativos", "confirmada", "classe " .. cn)
+		end
+		if hasInteractChild then
+			add("objetos_interativos", "confirmada", "possui ProximityPrompt/ClickDetector/TouchInterest como filho")
+		end
+		if stateAttr then
+			add("objetos_interativos", "provavel", "atributo com nome de estado (" .. stateAttr .. ")")
+		end
+		local set = tokens(inst.Name)
+		for _, grp in ipairs(KW) do
+			for _, kw in ipairs(grp[2]) do
+				if set[kw] then
+					add(grp[1], "provavel", "nome contém '" .. kw .. "'")
+					break
+				end
+			end
+		end
+		if #out == 0 then
+			if inst:IsA("BasePart") then
+				add("desconhecidos", "nenhuma", "peça sem indício de função")
+			elseif inst:IsA("Model") or inst:IsA("Folder") then
+				add("desconhecidos", "nenhuma", "contêiner sem classificação")
+			else
+				add("desconhecidos", "nenhuma", "classe " .. cn .. " sem classificação")
+			end
+		end
+		return out
+	end
+
+	local function describe(inst, id)
+		local cn = inst.ClassName
+		local rec = {
+			id = id,
+			parent_id = idOf[inst.Parent] or 0,
+			nome = inst.Name,
+			classe = cn,
+			caminho = inst:GetFullName(),
+		}
+		local miss = {}
+		local isTerrain = inst:IsA("Terrain")
+
+		local nearest, outer
+		local p = inst.Parent
+		while p and p ~= Workspace and p ~= Lighting and p ~= game do
+			if p:IsA("Model") then
+				nearest = nearest or p
+				outer = p
+			end
+			p = p.Parent
+		end
+		if nearest then
+			rec.modelo_pai = nearest:GetFullName()
+		end
+		if outer and outer ~= nearest then
+			rec.estrutura_principal = outer:GetFullName()
+		end
+
+		local assetRefs = {}
+		for _, g in ipairs(PROPS) do
+			if inst:IsA(g[1]) and not (g[1] == "BasePart" and isTerrain) then
+				local out, m = readSpec(inst, g[2])
+				for k, v in pairs(out) do
+					rec[k] = v
+				end
+				for _, mm in ipairs(m) do
+					miss[#miss + 1] = mm
+					local key = cn .. "." .. mm
+					missingByProp[key] = (missingByProp[key] or 0) + 1
+				end
+				for _, sp in ipairs(g[2]) do
+					if sp[4] and out[sp[1]] then
+						if addAsset(sp[4], out[sp[1]], rec.caminho) then
+							assetRefs[#assetRefs + 1] = { tipo = sp[4], id = out[sp[1]] }
+						end
+					end
+				end
+			end
+		end
+
+		-- Posição mundial usada para posições relativas
+		local wpos
+		if inst:IsA("BasePart") and not isTerrain then
+			local ok, v = pcall(index, inst, "Position")
+			if ok then
+				wpos = v
+			end
+		elseif inst:IsA("Attachment") then
+			local ok, v = pcall(index, inst, "WorldPosition")
+			if ok then
+				wpos = v
+			end
+		end
+
+		if inst:IsA("Model") then
+			local ok, cf, sz = pcall(function()
+				return inst:GetBoundingBox()
+			end)
+			if ok and cf and sz then
+				rec.posicao = vec(cf.Position)
+				rec.tamanho = vec(sz)
+				local rx, ry, rz = cf:ToOrientation()
+				rec.orientacao = { r3(math.deg(rx)), r3(math.deg(ry)), r3(math.deg(rz)) }
+				wpos = cf.Position
+			else
+				miss[#miss + 1] = "BoundingBox"
+			end
+			local pv = getPivot(inst)
+			if pv then
+				rec.pivo_posicao = vec(pv.Position)
+			end
+			local okp, pp = pcall(index, inst, "PrimaryPart")
+			if okp and pp then
+				rec.peca_primaria = pp.Name
+			end
+		end
+
+		if inst:IsA("ValueBase") then
+			local ok, v = pcall(index, inst, "Value")
+			if ok then
+				rec.valor = ser(v)
+			else
+				miss[#miss + 1] = "Value"
+			end
+		end
+
+		if wpos then
+			if nearest then
+				local pv = getPivot(nearest)
+				if pv then
+					rec.relativo_modelo = vec(pv:PointToObjectSpace(wpos))
+				end
+			end
+			if outer and outer ~= nearest then
+				local pv = getPivot(outer)
+				if pv then
+					rec.relativo_estrutura = vec(pv:PointToObjectSpace(wpos))
+				end
+			end
+		end
+
+		local hasInteractChild, hasMechChild = false, false
+		if inst:IsA("BasePart") or inst:IsA("Model") or inst:IsA("Folder") then
+			local ok, ch = pcall(inst.GetChildren, inst)
+			if ok then
+				local fi, sc = {}, {}
+				for _, c in ipairs(ch) do
+					local ccn = c.ClassName
+					if INTERACT[ccn] then
+						hasInteractChild = true
+						if #fi < 12 then
+							fi[#fi + 1] = ccn .. ":" .. c.Name
+						end
+					elseif MECH[ccn] then
+						hasMechChild = true
+						if #fi < 12 then
+							fi[#fi + 1] = ccn .. ":" .. c.Name
+						end
+					elseif c:IsA("LuaSourceContainer") then
+						if #sc < 8 then
+							sc[#sc + 1] = ccn .. ":" .. c.Name
+						end
+					end
+				end
+				if #fi > 0 then
+					rec.filhos_interativos = fi
+				end
+				if #sc > 0 then
+					rec.scripts_filhos = sc
+				end
+				if not inst:IsA("BasePart") then
+					rec.filhos_diretos = #ch
+				end
+			end
+			if inst:IsA("Model") or inst:IsA("Folder") then
+				rec.pecas_contidas = partCount[inst] or 0
+			end
+		end
+
+		local stateAttr
+		local okA, at = pcall(inst.GetAttributes, inst)
+		if okA and at and next(at) ~= nil then
+			local keys = {}
+			for k in pairs(at) do
+				keys[#keys + 1] = k
+			end
+			table.sort(keys)
+			local arr = {}
+			for _, k in ipairs(keys) do
+				arr[#arr + 1] = { nome = k, valor = ser(at[k]) }
+				if not stateAttr and STATE_ATTR[string.lower(k)] then
+					stateAttr = k
+				end
+			end
+			rec.atributos = arr
+		elseif not okA then
+			miss[#miss + 1] = "Attributes"
+		end
+
+		local okT, tags = pcall(CollectionService.GetTags, CollectionService, inst)
+		if okT and tags and #tags > 0 then
+			table.sort(tags)
+			rec.tags = tags
+		end
+
+		if #assetRefs > 0 then
+			rec.recursos_visuais = assetRefs
+		end
+
+		local cls = classify(inst, rec, hasInteractChild, hasMechChild, stateAttr)
+		rec.categoria = cls[1].categoria
+		rec.confianca = cls[1].confianca
+		rec.motivo_classificacao = cls[1].motivo
+		if #cls > 1 then
+			local extra = {}
+			for i = 2, #cls do
+				extra[#extra + 1] = cls[i]
+			end
+			rec.classificacoes_adicionais = extra
+		end
+
+		if isTerrain then
+			rec.observacao = "Ver bloco 'terreno' do relatório."
+		end
+
+		if #miss > 0 then
+			rec.propriedades_indisponiveis = miss
+			incompletosTotal = incompletosTotal + 1
+			if #incompletos < CONFIG.MAX_INCOMPLETE then
+				incompletos[#incompletos + 1] = { id = id, caminho = rec.caminho, faltando = miss }
+			end
+		end
+
+		return rec
+	end
+
+	-- Varredura principal
+	yieldLoop(#list, "Varrendo", function(i)
+		local inst = list[i]
+		if inst.Parent == nil then
+			removed = removed + 1
+			return
+		end
+		if bytes > CONFIG.MAX_REPORT_BYTES then
+			truncatedBytes = true
+			return
+		end
+		local ok, rec = pcall(describe, inst, i)
+		if not ok or type(rec) ~= "table" then
+			failSer = failSer + 1
+			rec = { id = i, nome = "?", classe = inst.ClassName, erro = "falha ao descrever o objeto" }
+		end
+		local okE, enc = pcall(HttpService.JSONEncode, HttpService, rec)
+		if not okE then
+			failSer = failSer + 1
+			rec = { id = i, classe = inst.ClassName, erro = "falha ao serializar (nome/valor inválido)" }
+			okE, enc = pcall(HttpService.JSONEncode, HttpService, rec)
+			if not okE then
+				return
+			end
+		end
+		objLines[#objLines + 1] = enc
+		bytes = bytes + #enc + 2
+		registered = registered + 1
+		byClass[rec.classe] = (byClass[rec.classe] or 0) + 1
+		local c = rec.categoria or "desconhecidos"
+		byCat[c] = (byCat[c] or 0) + 1
+	end)
+
+	-- Terreno (amostragem por raycast)
+	setStatus("Amostrando terreno...")
+	task.wait()
+	local terrainInfo = { encontrado = false }
+	local sampleLines = {}
+	do
+		local terrain = Workspace:FindFirstChildOfClass("Terrain")
+		if terrain then
+			terrainInfo.encontrado = true
+			local tp, tmiss = readSpec(terrain, {
+				{ "cor_agua_rgb", "WaterColor", col },
+				{ "transparencia_agua", "WaterTransparency", r3 },
+				{ "reflectancia_agua", "WaterReflectance", r3 },
+				{ "onda_tamanho", "WaterWaveSize", r3 },
+				{ "onda_velocidade", "WaterWaveSpeed", r3 },
+				{ "decoracao_ativa", "Decoration", idf },
+			})
+			terrainInfo.propriedades = tp
+			if #tmiss > 0 then
+				terrainInfo.propriedades_indisponiveis = tmiss
+			end
+
+			local lo = Vector3.new(-1024, -512, -1024)
+			local hi = Vector3.new(1024, 1024, 1024)
+			local okE, e = pcall(index, terrain, "MaxExtents")
+			if okE and e then
+				local okC = pcall(function()
+					lo = Vector3.new(e.Min.X * 4, e.Min.Y * 4, e.Min.Z * 4)
+					hi = Vector3.new(e.Max.X * 4, e.Max.Y * 4, e.Max.Z * 4)
+					terrainInfo.extensao_declarada_studs = { vec(lo), vec(hi) }
+				end)
+				if not okC then
+					lo = Vector3.new(-1024, -512, -1024)
+					hi = Vector3.new(1024, 1024, 1024)
+				end
+			end
+			lo = Vector3.new(math.max(lo.X, -2048), math.max(lo.Y, -1024), math.max(lo.Z, -2048))
+			hi = Vector3.new(math.min(hi.X, 2048), math.min(hi.Y, 2048), math.min(hi.Z, 2048))
+			local span = math.max(hi.X - lo.X, hi.Z - lo.Z, 16)
+			local step = math.max(16, math.ceil(span / 64 / 16) * 16)
+
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Include
+			params.FilterDescendantsInstances = { terrain }
+			params.IgnoreWater = false
+
+			local mats, matList, matCount = {}, {}, {}
+			local hits, waterHits, total = 0, 0, 0
+			local yMin, yMax = math.huge, -math.huge
+			local cur = {}
+			local last = os.clock()
+			local height = hi.Y - lo.Y + 8
+			local x = lo.X
+			while x <= hi.X do
+				local z = lo.Z
+				while z <= hi.Z do
+					total = total + 1
+					local ok, res = pcall(function()
+						return Workspace:Raycast(Vector3.new(x, hi.Y + 4, z), Vector3.new(0, -height, 0), params)
+					end)
+					if ok and res then
+						hits = hits + 1
+						local mn = res.Material.Name
+						if not mats[mn] then
+							matList[#matList + 1] = mn
+							mats[mn] = #matList
+							matCount[mn] = 0
+						end
+						matCount[mn] = matCount[mn] + 1
+						if res.Material == Enum.Material.Water then
+							waterHits = waterHits + 1
+						end
+						local y = res.Position.Y
+						yMin = math.min(yMin, y)
+						yMax = math.max(yMax, y)
+						cur[#cur + 1] = string.format("[%d,%d,%.1f,%d]", x, z, y, mats[mn])
+						if #cur >= 100 then
+							sampleLines[#sampleLines + 1] = table.concat(cur, ",")
+							cur = {}
+						end
+					end
+					if os.clock() - last > CONFIG.FRAME_BUDGET then
+						setStatus(string.format("Amostrando terreno %d amostras...", total))
+						task.wait()
+						last = os.clock()
+					end
+					z = z + step
+				end
+				x = x + step
+			end
+			if #cur > 0 then
+				sampleLines[#sampleLines + 1] = table.concat(cur, ",")
+			end
+
+			local matOut = {}
+			for _, mn in ipairs(matList) do
+				local entry = { indice = mats[mn], material = mn, amostras = matCount[mn] }
+				local okc, c = pcall(function()
+					return terrain:GetMaterialColor(Enum.Material[mn])
+				end)
+				if okc and c then
+					entry.cor_rgb = col(c)
+				end
+				matOut[#matOut + 1] = entry
+			end
+			terrainInfo.metodo = "ESTIMATIVA: raycast vertical em grade (somente superfície visível). Não é leitura de voxels."
+			terrainInfo.formato_amostras = "[x, z, y, indice_material]"
+			terrainInfo.limites_amostrados = { vec(lo), vec(hi) }
+			terrainInfo.passo_studs = step
+			terrainInfo.amostras_totais = total
+			terrainInfo.amostras_com_terreno = hits
+			terrainInfo.amostras_agua = waterHits
+			terrainInfo.altura_min = hits > 0 and r3(yMin) or nil
+			terrainInfo.altura_max = hits > 0 and r3(yMax) or nil
+			terrainInfo.materiais = matOut
+			if hits == 0 then
+				terrainInfo.aviso = "Nenhum terreno detectado nas amostras (pode não existir ou não estar carregado)."
+			else
+				terrainInfo.aviso = "Cavernas, camadas inferiores e feições menores que o passo não foram capturadas; o terreno NÃO foi reconstruído integralmente."
+			end
+		end
+	end
+
+	-- Ambiente
+	local ambiente = { place_id = game.PlaceId, game_id = game.GameId }
+	pcall(function()
+		local info = MarketplaceService:GetProductInfo(game.PlaceId)
+		if info and info.Name then
+			ambiente.nome_do_lugar = info.Name
+		end
+	end)
+	local lp, lmiss = readSpec(Lighting, {
+		{ "clock_time", "ClockTime", r3 },
+		{ "brilho", "Brightness", r3 },
+		{ "ambient_rgb", "Ambient", col },
+		{ "outdoor_ambient_rgb", "OutdoorAmbient", col },
+		{ "fog_cor_rgb", "FogColor", col },
+		{ "fog_inicio", "FogStart", r3 },
+		{ "fog_fim", "FogEnd", r3 },
+		{ "sombras_globais", "GlobalShadows", idf },
+		{ "tecnologia", "Technology", enumName },
+	})
+	ambiente.iluminacao = lp
+	if #lmiss > 0 then
+		ambiente.iluminacao_indisponivel = lmiss
+	end
+	local wp, wmiss = readSpec(Workspace, {
+		{ "gravidade", "Gravity", r3 },
+		{ "streaming_ativo", "StreamingEnabled", idf },
+		{ "altura_destruicao_pecas", "FallenPartsDestroyHeight", r3 },
+	})
+	ambiente.workspace = wp
+	if #wmiss > 0 then
+		ambiente.workspace_indisponivel = wmiss
+	end
+
+	local streaming = wp.streaming_ativo == true
+
+	-- Resumo
+	local parcial = truncatedInst or truncatedBytes or errCount > 0 or failSer > 0
+	local cats = {
+		"terreno_ambiente", "estruturas_edificios", "salas_divisoes", "moveis_decorativos",
+		"portas_portoes_mecanismos", "objetos_interativos", "iluminacao_efeitos", "desconhecidos",
+	}
+	local catOut = {}
+	for _, c in ipairs(cats) do
+		catOut[c] = byCat[c] or 0
+	end
+	local resumo = {
+		total_instancias_encontradas = totalSeen,
+		total_instancias_examinadas = #list,
+		total_objetos_registrados = registered,
+		ignoradas_personagens_e_camera = skippedCount,
+		removidas_durante_varredura = removed,
+		falhas_individuais = errCount,
+		falhas_de_serializacao = failSer,
+		coleta_parcial = parcial,
+		contagem_por_classe = byClass,
+		contagem_por_categoria = catOut,
+		recursos_visuais_unicos = #assetOrder,
+		objetos_com_propriedades_incompletas = incompletosTotal,
+	}
+
+	local limitacoes = {
+		"Somente dados replicados ao cliente: ServerStorage, ServerScriptService e objetos não replicados não são acessíveis.",
+		"Classificação 'confirmada' vem de classe/constraint/componente; 'provavel' vem apenas do nome ou de atributos e não é garantia.",
+		"Scripts: apenas a existência (nome/classe) é registrada, nunca o código. Nenhum evento remoto foi chamado.",
+		"Personagens de jogadores e a câmera foram ignorados.",
+		"Union/MeshPart: tamanho é a caixa delimitadora, não a geometria real. Models: caixa delimitadora calculada por GetBoundingBox.",
+		"Terreno: apenas amostragem por raycast da superfície; não é reconstrução integral.",
+		"Salas e construções não são reconhecidas semanticamente; a categoria é uma sugestão para organizar a reconstrução.",
+	}
+	if streaming then
+		limitacoes[#limitacoes + 1] = "StreamingEnabled está ativo: partes distantes do mapa podem não estar carregadas no cliente e ficaram fora do relatório."
+	end
+	if truncatedInst then
+		limitacoes[#limitacoes + 1] = "COLETA PARCIAL: limite de " .. CONFIG.MAX_INSTANCES .. " instâncias atingido."
+	end
+	if truncatedBytes then
+		limitacoes[#limitacoes + 1] = "COLETA PARCIAL: limite de tamanho do relatório atingido."
+	end
+	if removed > 0 then
+		limitacoes[#limitacoes + 1] = removed .. " objeto(s) foram removidos do mapa durante a varredura."
+	end
+
+	local naoAnalisados = {
+		"Serviços fora de Workspace e Lighting (ReplicatedStorage, StarterGui etc.) não foram varridos.",
+	}
+	if streaming then
+		naoAnalisados[#naoAnalisados + 1] = "Áreas não transmitidas pelo streaming."
+	end
+	if truncatedInst then
+		naoAnalisados[#naoAnalisados + 1] = "Instâncias além do limite de " .. CONFIG.MAX_INSTANCES .. "."
+	end
+	if truncatedBytes then
+		naoAnalisados[#naoAnalisados + 1] = "Objetos finais da lista (limite de tamanho do relatório)."
+	end
+	if skippedCount > 0 then
+		naoAnalisados[#naoAnalisados + 1] = skippedCount .. " instâncias de personagens/câmera ignoradas."
+	end
+
+	local dt = "indisponível"
+	pcall(function()
+		dt = DateTime.now():ToIsoDate()
+	end)
+
+	-- Montagem do JSON (linhas)
+	local lines = { "{" }
+	local function field(key, val)
+		local ok, e = pcall(HttpService.JSONEncode, HttpService, val)
+		if not ok then
+			e = "null"
+		end
+		lines[#lines + 1] = '"' .. key .. '":' .. e .. ","
+	end
+	field("nome_diagnostico", "MAP SCANNER ULTIMATE v1.0")
+	field("data_hora_utc", dt)
+	field("ambiente", ambiente)
+	field("resumo", resumo)
+	field("limitacoes", limitacoes)
+	field("possiveis_objetos_nao_analisados", naoAnalisados)
+	field("propriedades_indisponiveis_por_classe", missingByProp)
+	field("terreno", terrainInfo)
+	lines[#lines + 1] = '"terreno_amostras":['
+	for i, s in ipairs(sampleLines) do
+		lines[#lines + 1] = s .. (i < #sampleLines and "," or "")
+	end
+	lines[#lines + 1] = "],"
+	field("recursos_visuais", assetOrder)
+	field("objetos_com_propriedades_incompletas", incompletos)
+	lines[#lines + 1] = '"objetos":['
+	for i, s in ipairs(objLines) do
+		lines[#lines + 1] = s .. (i < #objLines and "," or "")
+	end
+	lines[#lines + 1] = "]"
+	lines[#lines + 1] = "}"
+
+	-- Partes para cópia
+	local parts, cur, curSize = {}, {}, 0
+	for _, ln in ipairs(lines) do
+		if curSize + #ln + 1 > CONFIG.CLIP_LIMIT and #cur > 0 then
+			parts[#parts + 1] = table.concat(cur, "\n")
+			cur, curSize = {}, 0
+		end
+		cur[#cur + 1] = ln
+		curSize = curSize + #ln + 1
+	end
+	if #cur > 0 then
+		parts[#parts + 1] = table.concat(cur, "\n")
+	end
+
+	local total = 0
+	for _, p in ipairs(parts) do
+		total = total + #p
+	end
+
+	-- Validação do JSON e arquivo de apoio
+	local validado = "não validado (relatório grande)"
+	local salvo = false
+	if total < 6000000 then
+		local full = table.concat(parts, "\n")
+		local okV = pcall(HttpService.JSONDecode, HttpService, full)
+		validado = okV and "JSON válido" or "JSON COM ERRO de validação"
+		if writefile then
+			salvo = pcall(writefile, CONFIG.FILE_NAME, full)
+		end
+	elseif writefile then
+		salvo = pcall(writefile, CONFIG.FILE_NAME, table.concat(parts, "\n"))
+	end
+
+	return {
+		parts = parts,
+		total = total,
+		registered = registered,
+		parcial = parcial,
+		validado = validado,
+		salvo = salvo,
+	}
+end
+
+local function doCopy(text)
+	local fn = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+	if not fn then
+		return false, "indisponível"
+	end
+	local ok = pcall(fn, text)
+	return ok, ok and "ok" or "erro"
+end
+
+btnGen.Activated:Connect(function()
+	if scanning then
+		return
+	end
+	scanning = true
+	btnGen.Text = "Varrendo..."
+	local ok, res = pcall(runScan)
+	scanning = false
+	btnGen.Text = "Gerar diagnóstico"
+	if ok and res then
+		report = res
+		copyIdx = 1
+		local msg = string.format("Concluído: %d objetos. %s.", res.registered, res.validado)
+		if res.parcial then
+			msg = msg .. " ATENÇÃO: coleta parcial."
+		end
+		if #res.parts > 1 then
+			msg = msg .. string.format(" Cópia em %d partes.", #res.parts)
+		end
+		if res.salvo then
+			msg = msg .. " Salvo em " .. CONFIG.FILE_NAME .. "."
+		end
+		setStatus(msg)
+	else
+		setStatus("Falha na varredura. Tente gerar novamente.")
+	end
 end)
 
-FloatButton.MouseButton1Up:Connect(function()
-    local elapsed = tick() - clickStartTime
-    local currentPos = UserInputService:GetMouseLocation()
-    if elapsed < 0.25 and clickStartPos and (currentPos - clickStartPos).Magnitude < 5 then
-        toggleMenu()
-    end
-end)
-
-CloseBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-end)
-
--- ======================================================================== --
--- ABAS
--- ======================================================================== --
-local function switchTab(tab)
-    if tab == "rota" then
-        RotaPage.Visible = true
-        DadosPage.Visible = false
-        TabRota.BackgroundColor3 = C_TURQ_DARK
-        TabRota.TextColor3 = C_TURQ_BRIGHT
-        TabDados.BackgroundColor3 = C_BG_2
-        TabDados.TextColor3 = C_TXT_DIM
-    else
-        RotaPage.Visible = false
-        DadosPage.Visible = true
-        TabDados.BackgroundColor3 = C_TURQ_DARK
-        TabDados.TextColor3 = C_TURQ_BRIGHT
-        TabRota.BackgroundColor3 = C_BG_2
-        TabRota.TextColor3 = C_TXT_DIM
-        refreshDataList()
-    end
-end
-
-TabRota.MouseButton1Click:Connect(function() switchTab("rota") end)
-TabDados.MouseButton1Click:Connect(function() switchTab("dados") end)
-
--- ======================================================================== --
--- LÓGICA
--- ======================================================================== --
-local recordedData = {}
-local isRecording = false
-local recordingConnection = nil
-local playbackConnection = nil
-local startTime = 0
-local antigravidade = nil
-local originalCollides = {}
-local animationCache = {}
-local activeTracks = {}
-local preWalkTracks = {}
-
-local DEFAULT_WALKSPEED = 16
-local savedWalkSpeed = nil
-
-local function getOrLoadTrack(animator, animationId)
-    if animationCache[animationId] and animationCache[animationId].Parent == animator then
-        return animationCache[animationId]
-    end
-    local anim = Instance.new("Animation")
-    anim.AnimationId = animationId
-    local ok, track = pcall(function() return animator:LoadAnimation(anim) end)
-    if ok and track then
-        animationCache[animationId] = track
-        return track
-    end
-    return nil
-end
-
-local function getStartAnimations(data)
-    data = data or recordedData
-    if #data == 0 then return {} end
-    local counts = {}
-    local sampleCount = math.min(30, #data)
-    for i = 1, sampleCount do
-        local anims = data[i].Animations
-        if anims then
-            for _, a in ipairs(anims) do
-                if not counts[a.Id] then counts[a.Id] = {anim = a, count = 0} end
-                counts[a.Id].count = counts[a.Id].count + 1
-            end
-        end
-    end
-    local result = {}
-    local threshold = math.max(2, sampleCount * 0.3)
-    for _, info in pairs(counts) do
-        if info.count >= threshold then table.insert(result, info.anim) end
-    end
-    local prioOrder = {Action=4,Action2=4,Action3=4,Action4=4,Movement=3,Idle=2,Core=1}
-    table.sort(result, function(a, b)
-        return (prioOrder[a.Priority] or 0) > (prioOrder[b.Priority] or 0)
-    end)
-    return result
-end
-
-local function stopPreWalkAnimations()
-    for _, track in ipairs(preWalkTracks) do
-        pcall(function() track:Stop(0.1) end)
-    end
-    preWalkTracks = {}
-end
-
-local function restoreWalkSpeed()
-    if savedWalkSpeed then
-        local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChild("Humanoid")
-        if hum then hum.WalkSpeed = savedWalkSpeed end
-        savedWalkSpeed = nil
-    end
-end
-
-local function stopPlayback()
-    if playbackConnection then
-        playbackConnection:Disconnect()
-        playbackConnection = nil
-    end
-    stopPreWalkAnimations()
-    restoreWalkSpeed()
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if antigravidade then antigravidade:Destroy() antigravidade = nil end
-    if hum then hum.AutoRotate = true end
-    for _, track in pairs(activeTracks) do
-        pcall(function() track:Stop(0.1) end)
-    end
-    activeTracks = {}
-    for parte, status in pairs(originalCollides) do
-        if parte and parte.Parent then parte.CanCollide = status end
-    end
-    table.clear(originalCollides)
-end
-
-local function playRoute(data)
-    if #data == 0 then StatusLabel.Text = "◦ nada gravado" return end
-    if playbackConnection then
-        stopPlayback()
-        stopTimer()
-        StatusLabel.Text = "◦ cancelado"
-        return
-    end
-
-    StatusLabel.Text = "◦ indo pro início..."
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChild("Humanoid")
-    if not hrp or not hum then return end
-
-    savedWalkSpeed = hum.WalkSpeed
-
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if not animator then animator = Instance.new("Animator", hum) end
-
-    local animateScript = char:FindFirstChild("Animate")
-    local animateWasDisabled = false
-    if animateScript and animateScript:IsA("BaseScript") then
-        animateScript.Disabled = true
-        animateWasDisabled = true
-    end
-
-    local detectedAnims = getStartAnimations(data)
-    preWalkTracks = {}
-    for _, animData in ipairs(detectedAnims) do
-        local track = getOrLoadTrack(animator, animData.Id)
-        if track then
-            pcall(function()
-                track.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
-                track.Looped = true
-                track:Play(0.1)
-                track:AdjustSpeed(animData.Speed or 1)
-            end)
-            table.insert(preWalkTracks, track)
-        end
-    end
-
-    if #preWalkTracks == 0 then
-        for i = 1, math.min(20, #data) do
-            local anims = data[i].Animations
-            if anims then
-                local found = false
-                for _, a in ipairs(anims) do
-                    if a.Priority == "Movement" then
-                        local track = getOrLoadTrack(animator, a.Id)
-                        if track then
-                            pcall(function()
-                                track.Priority = Enum.AnimationPriority.Movement
-                                track.Looped = true
-                                track:Play(0.1)
-                                track:AdjustSpeed(a.Speed or 1)
-                            end)
-                            table.insert(preWalkTracks, track)
-                        end
-                        found = true
-                        break
-                    end
-                end
-                if found then break end
-            end
-        end
-    end
-
-    hum.WalkSpeed = DEFAULT_WALKSPEED
-
-    local startCF = CFrame.new(unpack(data[1].CF))
-    hum:MoveTo(startCF.Position)
-
-    local reached = false
-    local conn
-    conn = hum.MoveToFinished:Connect(function()
-        reached = true
-        if conn then conn:Disconnect() end
-    end)
-    local timeout = tick() + 5
-    while not reached and tick() < timeout do task.wait(0.1) end
-    if conn then conn:Disconnect() end
-
-    stopPreWalkAnimations()
-    restoreWalkSpeed()
-
-    if animateWasDisabled and animateScript then
-        pcall(function() animateScript.Disabled = false end)
-    end
-
-    hum.AutoRotate = false
-    antigravidade = Instance.new("BodyForce", hrp)
-    antigravidade.Force = Vector3.new(0, 0, 0)
-
-    for _, parte in ipairs(char:GetChildren()) do
-        if parte:IsA("BasePart") then
-            originalCollides[parte] = parte.CanCollide
-            parte.CanCollide = false
-        end
-    end
-
-    local pstartTime = os.clock()
-    local totalPoints = #data
-    local currentIndex = 1
-    activeTracks = {}
-
-    StatusLabel.Text = "◦ reproduzindo..."
-    startTimer()
-
-    playbackConnection = RunService.Heartbeat:Connect(function()
-        local elapsedTime = os.clock() - pstartTime
-        while currentIndex < totalPoints and elapsedTime >= data[currentIndex + 1].Time do
-            currentIndex = currentIndex + 1
-        end
-        if currentIndex >= totalPoints then
-            stopPlayback()
-            stopTimer()
-            StatusLabel.Text = string.format("◦ ok em %.2fs", timerFrozen)
-            return
-        end
-
-        local p0 = data[currentIndex]
-        local p1 = data[currentIndex + 1]
-        local alpha = (p1.Time - p0.Time > 0) and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
-
-        local cf0 = CFrame.new(unpack(p0.CF))
-        local cf1 = CFrame.new(unpack(p1.CF))
-        hrp.CFrame = cf0:Lerp(cf1, alpha)
-
-        local totalMass = 0
-        for _, parte in ipairs(char:GetChildren()) do
-            if parte:IsA("BasePart") then
-                totalMass = totalMass + parte:GetMass()
-            end
-        end
-        if antigravidade and antigravidade.Parent then
-            antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
-        end
-        if p1.Velocity then
-            hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
-        end
-        if p0.State then
-            pcall(function() hum:ChangeState(p0.State) end)
-        end
-
-        if p1.Animations then
-            local wanted = {}
-            for _, animData in ipairs(p1.Animations) do
-                wanted[animData.Id] = animData
-                local track = activeTracks[animData.Id]
-                if not track then
-                    track = getOrLoadTrack(animator, animData.Id)
-                    if track then
-                        pcall(function()
-                            track.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
-                            track.Looped = true
-                            track:Play(0.05)
-                        end)
-                        activeTracks[animData.Id] = track
-                    end
-                end
-                local t = activeTracks[animData.Id]
-                if t then pcall(function() t:AdjustSpeed(animData.Speed) end) end
-            end
-            for id, track in pairs(activeTracks) do
-                if not wanted[id] then
-                    pcall(function() track:Stop(0.1) end)
-                    activeTracks[id] = nil
-                end
-            end
-        end
-    end)
-end
-
-RecordBtn.MouseButton1Click:Connect(function()
-    if playbackConnection then stopPlayback() end
-    isRecording = not isRecording
-
-    if isRecording then
-        recordedData = {}
-        startTime = os.clock()
-        startTimer()
-        RecordBtn.Text = "⏹ parar"
-        RecordBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 55)
-        RecordBtn.TextColor3 = Color3.fromRGB(255, 210, 220)
-        StatusLabel.Text = "◦ gravando..."
-
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        if not hrp or not hum then
-            isRecording = false
-            stopTimer()
-            RecordBtn.Text = "⚡ gravar"
-            RecordBtn.BackgroundColor3 = C_TURQ_DARK
-            RecordBtn.TextColor3 = C_TURQ_BRIGHT
-            StatusLabel.Text = "◦ sem personagem"
-            return
-        end
-
-        recordingConnection = RunService.Heartbeat:Connect(function()
-            local currentTime = os.clock() - startTime
-            local cf = hrp.CFrame
-            local vel = hrp.AssemblyLinearVelocity
-            local state = hum:GetState()
-            local anims = {}
-            local animator = hum:FindFirstChildOfClass("Animator")
-            if animator then
-                for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
-                    if track.Animation and track.WeightCurrent > 0.01 then
-                        table.insert(anims, {
-                            Id = track.Animation.AnimationId,
-                            Speed = track.Speed,
-                            Weight = track.WeightCurrent,
-                            Priority = track.Priority.Name
-                        })
-                    end
-                end
-            end
-            table.insert(recordedData, {
-                Time = currentTime,
-                CF = {cf:GetComponents()},
-                Velocity = {vel.X, vel.Y, vel.Z},
-                State = state,
-                Animations = anims
-            })
-        end)
-    else
-        if recordingConnection then
-            recordingConnection:Disconnect()
-            recordingConnection = nil
-        end
-        stopTimer()
-        RecordBtn.Text = "⚡ gravar"
-        RecordBtn.BackgroundColor3 = C_TURQ_DARK
-        RecordBtn.TextColor3 = C_TURQ_BRIGHT
-        StatusLabel.Text = string.format("◦ %.2fs • %d pts", timerFrozen, #recordedData)
-    end
-end)
-
-TestBtn.MouseButton1Click:Connect(function()
-    if isRecording then StatusLabel.Text = "◦ pare a gravação" return end
-    if #recordedData == 0 then StatusLabel.Text = "◦ nada gravado" return end
-    playRoute(recordedData)
-end)
-
--- ======================================================================== --
--- POPUP RENOMEAR
--- ======================================================================== --
-local RenamePopup = Instance.new("Frame", ScreenGui)
-RenamePopup.Size = UDim2.new(0, 164, 0, 72)
-RenamePopup.Position = UDim2.new(0.5, -82, 0.5, -36)
-RenamePopup.BackgroundColor3 = C_BG
-RenamePopup.BorderSizePixel = 0
-RenamePopup.Visible = false
-RenamePopup.ZIndex = 10
-Instance.new("UICorner", RenamePopup).CornerRadius = UDim.new(0, 9)
-local RenameStroke = Instance.new("UIStroke", RenamePopup)
-RenameStroke.Color = Color3.fromRGB(150, 100, 220)
-RenameStroke.Thickness = 1.2
-
-local RenameTitle = Instance.new("TextLabel", RenamePopup)
-RenameTitle.Size = UDim2.new(1, -14, 0, 16)
-RenameTitle.Position = UDim2.new(0, 7, 0, 5)
-RenameTitle.BackgroundTransparency = 1
-RenameTitle.Font = Enum.Font.GothamBold
-RenameTitle.Text = "💾 nome da rota"
-RenameTitle.TextColor3 = Color3.fromRGB(220, 200, 255)
-RenameTitle.TextSize = 10
-RenameTitle.TextXAlignment = Enum.TextXAlignment.Left
-RenameTitle.ZIndex = 11
-
-local RenameBox = Instance.new("TextBox", RenamePopup)
-RenameBox.Size = UDim2.new(1, -14, 0, 22)
-RenameBox.Position = UDim2.new(0, 7, 0, 22)
-RenameBox.BackgroundColor3 = C_BG_2
-RenameBox.BorderSizePixel = 0
-RenameBox.Font = Enum.Font.Gotham
-RenameBox.Text = ""
-RenameBox.PlaceholderText = "rota_1"
-RenameBox.PlaceholderColor3 = Color3.fromRGB(90, 120, 130)
-RenameBox.TextColor3 = C_TXT
-RenameBox.TextSize = 10
-RenameBox.ClearTextOnFocus = false
-RenameBox.ZIndex = 11
-Instance.new("UICorner", RenameBox).CornerRadius = UDim.new(0, 5)
-
-local RenameOK = Instance.new("TextButton", RenamePopup)
-RenameOK.Size = UDim2.new(0.5, -10, 0, 20)
-RenameOK.Position = UDim2.new(0, 7, 0, 48)
-RenameOK.BackgroundColor3 = Color3.fromRGB(70, 45, 110)
-RenameOK.Font = Enum.Font.GothamBold
-RenameOK.Text = "guardar"
-RenameOK.TextColor3 = Color3.fromRGB(230, 210, 255)
-RenameOK.TextSize = 9
-RenameOK.BorderSizePixel = 0
-RenameOK.ZIndex = 11
-Instance.new("UICorner", RenameOK).CornerRadius = UDim.new(0, 5)
-
-local RenameCancel = Instance.new("TextButton", RenamePopup)
-RenameCancel.Size = UDim2.new(0.5, -10, 0, 20)
-RenameCancel.Position = UDim2.new(0.5, 3, 0, 48)
-RenameCancel.BackgroundColor3 = C_BG_3
-RenameCancel.Font = Enum.Font.GothamBold
-RenameCancel.Text = "cancelar"
-RenameCancel.TextColor3 = C_TXT_DIM
-RenameCancel.TextSize = 9
-RenameCancel.BorderSizePixel = 0
-RenameCancel.ZIndex = 11
-Instance.new("UICorner", RenameCancel).CornerRadius = UDim.new(0, 5)
-
-SaveRenameBtn.MouseButton1Click:Connect(function()
-    if #recordedData == 0 then StatusLabel.Text = "◦ nada gravado" return end
-    RenameBox.Text = "rota_" .. os.date("%H%M%S")
-    RenamePopup.Visible = true
-    RenameBox:CaptureFocus()
-end)
-
-RenameCancel.MouseButton1Click:Connect(function()
-    RenamePopup.Visible = false
-end)
-
-RenameOK.MouseButton1Click:Connect(function()
-    local name = RenameBox.Text
-    if name == "" then name = "rota_" .. os.date("%H%M%S") end
-    local baseName = name
-    local counter = 2
-    while savedRoutes[name] do
-        name = baseName .. "_" .. counter
-        counter = counter + 1
-    end
-    savedRoutes[name] = {
-        Duracao = timerFrozen,
-        Pontos = #recordedData,
-        Data = recordedData
-    }
-    RenamePopup.Visible = false
-    StatusLabel.Text = "◦ guardado: " .. name
-    switchTab("dados")
-end)
-
--- ======================================================================== --
--- LISTA DE ROTAS
--- ======================================================================== --
-local function makeTextBtn(parent, text, bg, fg, onClick)
-    local b = Instance.new("TextButton", parent)
-    b.BackgroundColor3 = bg
-    b.Font = Enum.Font.GothamBold
-    b.Text = text
-    b.TextColor3 = fg
-    b.TextSize = 8
-    b.BorderSizePixel = 0
-    b.AutoButtonColor = true
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
-    b.MouseButton1Click:Connect(onClick)
-    return b
-end
-
-function refreshDataList()
-    for _, child in ipairs(DataScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
-    end
-    local names = {}
-    for n in pairs(savedRoutes) do table.insert(names, n) end
-    table.sort(names)
-
-    if #names == 0 then
-        local empty = Instance.new("TextLabel", DataScroll)
-        empty.Size = UDim2.new(1, 0, 0, 60)
-        empty.BackgroundTransparency = 1
-        empty.Font = Enum.Font.Gotham
-        empty.Text = "◦ sem rotas guardadas\n\ngrave uma rota e toque\nem 💾 guardar"
-        empty.TextColor3 = C_TXT_DIM
-        empty.TextSize = 9
-        empty.TextWrapped = true
-        DataScroll.CanvasSize = UDim2.new(0, 0, 0, 60)
-        return
-    end
-
-    for i, name in ipairs(names) do
-        local entry = savedRoutes[name]
-
-        -- Item mais alto pra caber nome + info + 3 botões
-        local item = Instance.new("Frame", DataScroll)
-        item.Size = UDim2.new(1, 0, 0, 52)
-        item.BackgroundColor3 = C_BG_2
-        item.BorderSizePixel = 0
-        item.LayoutOrder = i
-        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
-        local s = Instance.new("UIStroke", item)
-        s.Color = C_BG_3
-        s.Thickness = 1
-
-        -- Nome (largura total)
-        local nameLbl = Instance.new("TextLabel", item)
-        nameLbl.Size = UDim2.new(1, -12, 0, 13)
-        nameLbl.Position = UDim2.new(0, 6, 0, 4)
-        nameLbl.BackgroundTransparency = 1
-        nameLbl.Font = Enum.Font.GothamBold
-        nameLbl.Text = name
-        nameLbl.TextColor3 = C_TXT
-        nameLbl.TextSize = 9
-        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-
-        -- Info
-        local infoLbl = Instance.new("TextLabel", item)
-        infoLbl.Size = UDim2.new(1, -12, 0, 10)
-        infoLbl.Position = UDim2.new(0, 6, 0, 17)
-        infoLbl.BackgroundTransparency = 1
-        infoLbl.Font = Enum.Font.Code
-        infoLbl.Text = string.format("%.2fs  ·  %d pts", entry.Duracao, entry.Pontos)
-        infoLbl.TextColor3 = C_TURQ
-        infoLbl.TextSize = 8
-        infoLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-        -- ===== 3 BOTÕES DE TEXTO =====
-        local btnY = 30
-        local btnH = 18
-        local pad = 4
-        local available = 144 - pad * 2  -- 144 = largura interna
-        local btnW = (available - pad * 2) / 3
-
-        -- Testar
-        local testBtn = makeTextBtn(item, "testar",
-            Color3.fromRGB(30, 80, 130), Color3.fromRGB(200, 230, 255),
-            function() playRoute(entry.Data) end)
-        testBtn.Size = UDim2.new(0, btnW, 0, btnH)
-        testBtn.Position = UDim2.new(0, pad, 0, btnY)
-
-        -- Copiar
-        local copyBtn = makeTextBtn(item, "copiar",
-            C_BG_3, C_TXT,
-            function()
-                local result = string.format("-- ⚡ angel • %s (%.3fs)\nreturn {\n", name, entry.Duracao)
-                for _, node in ipairs(entry.Data) do
-                    local cfStr = table.concat(node.CF, ", ")
-                    local velStr = table.concat(node.Velocity, ", ")
-                    local stateName = typeof(node.State) == "EnumItem" and node.State.Name or "Running"
-                    local animStr = ""
-                    if node.Animations and #node.Animations > 0 then
-                        local parts = {}
-                        for _, a in ipairs(node.Animations) do
-                            table.insert(parts, string.format(
-                                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\"}",
-                                a.Id, a.Speed, a.Weight, a.Priority))
-                        end
-                        animStr = ",Animations={" .. table.concat(parts, ",") .. "}"
-                    else
-                        animStr = ",Animations={}"
-                    end
-                    result = result .. string.format(
-                        "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s%s},\n",
-                        node.Time, cfStr, velStr, stateName, animStr)
-                end
-                result = result .. "}"
-                if setclipboard then
-                    setclipboard(result)
-                    StatusLabel.Text = "◦ copiado"
-                else
-                    print(result)
-                end
-            end)
-        copyBtn.Size = UDim2.new(0, btnW, 0, btnH)
-        copyBtn.Position = UDim2.new(0, pad + btnW + pad, 0, btnY)
-
-        -- Apagar
-        local delBtn = makeTextBtn(item, "apagar",
-            Color3.fromRGB(120, 35, 45), Color3.fromRGB(255, 200, 210),
-            function()
-                savedRoutes[name] = nil
-                StatusLabel.Text = "◦ apagado: " .. name
-                refreshDataList()
-            end)
-        delBtn.Size = UDim2.new(0, btnW, 0, btnH)
-        delBtn.Position = UDim2.new(0, pad + (btnW + pad) * 2, 0, btnY)
-    end
-end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    stopPlayback()
-    animationCache = {}
+btnCopy.Activated:Connect(function()
+	if scanning then
+		setStatus("Aguarde o fim da varredura.")
+		return
+	end
+	if not report then
+		setStatus("Gere o diagnóstico primeiro.")
+		return
+	end
+	local n = #report.parts
+	if n == 1 then
+		local ok, why = doCopy(report.parts[1])
+		if ok then
+			setStatus("Diagnóstico copiado (" .. report.total .. " caracteres).")
+		elseif why == "indisponível" then
+			setStatus("Cópia indisponível neste executor." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or " Nada foi copiado."))
+		else
+			setStatus("A cópia falhou. Nada foi copiado." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or ""))
+		end
+		return
+	end
+	-- Relatório grande: cópia em partes (nada é descartado)
+	local ok, why = doCopy(report.parts[copyIdx])
+	if ok then
+		local msg = string.format("Parte %d/%d copiada.", copyIdx, n)
+		if copyIdx < n then
+			copyIdx = copyIdx + 1
+			msg = msg .. " Cole em um local e toque de novo para a próxima."
+		else
+			copyIdx = 1
+			msg = msg .. " Todas as partes foram copiadas."
+		end
+		setStatus(msg)
+	elseif why == "indisponível" then
+		setStatus("Cópia indisponível neste executor." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or " Nada foi copiado."))
+	else
+		setStatus("A cópia da parte " .. copyIdx .. " falhou. Nada foi copiado.")
+	end
 end)
