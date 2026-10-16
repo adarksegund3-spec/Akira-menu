@@ -1,1247 +1,1301 @@
---[[
-  MAP SCANNER ULTIMATE v1.0  |  Roblox Luau / Delta Executor (Android)
-  Diagnóstico observacional do mapa carregado no cliente. NÃO altera nada no mapa.
-  Interface: apenas "Gerar diagnóstico" e "Copiar diagnóstico".
-]]
+--[[ PRIME HUB — v8.0.0 (UI Pro)
+     Criador: angel
+     Comunidade: https://discord.gg/9jaEtmEJ7 ]]
 
-local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
-local CollectionService = game:GetService("CollectionService")
-local CoreGui = game:GetService("CoreGui")
-local Lighting = game:GetService("Lighting")
-local MarketplaceService = game:GetService("MarketplaceService")
-local Workspace = game:GetService("Workspace")
+local TweenService=game:GetService("TweenService")
+local UserInputService=game:GetService("UserInputService")
+local Players=game:GetService("Players")
+local RunService=game:GetService("RunService")
+local HttpService=game:GetService("HttpService")
+local StarterGui=game:GetService("StarterGui")
+local LocalPlayer=Players.LocalPlayer
 
-local genv = (getgenv and getgenv()) or _G
+local CREATOR="angel"
+local DISCORD="https://discord.gg/9jaEtmEJ7"
+local VERSION="v8.0.0"
 
-local CONFIG = {
-	MAX_INSTANCES = 80000,
-	MAX_REPORT_BYTES = 24000000,
-	CLIP_LIMIT = 400000,
-	FRAME_BUDGET = 0.012,
-	MAX_ASSETS = 5000,
-	MAX_INCOMPLETE = 1000,
-	FILE_NAME = "MapScanner_diagnostico.json",
+local GB=Enum.Font.GothamBold
+local GBK=Enum.Font.GothamBlack
+local GR=Enum.Font.Gotham
+local LEFT=Enum.TextXAlignment.Left
+
+local T={
+    bg=Color3.fromRGB(13,10,22),panel=Color3.fromRGB(19,15,32),card=Color3.fromRGB(27,22,45),
+    hover=Color3.fromRGB(38,31,63),active=Color3.fromRGB(48,36,84),input=Color3.fromRGB(23,18,38),
+    border=Color3.fromRGB(50,41,84),off=Color3.fromRGB(58,52,80),
+    purple=Color3.fromRGB(150,100,245),purpleSoft=Color3.fromRGB(88,60,160),
+    red=Color3.fromRGB(220,70,95),redSoft=Color3.fromRGB(60,24,38),
+    green=Color3.fromRGB(50,185,125),yellow=Color3.fromRGB(230,160,30),cyan=Color3.fromRGB(50,160,215),
+    text=Color3.fromRGB(244,242,252),textDim=Color3.fromRGB(176,162,206),textMuted=Color3.fromRGB(122,108,156),
 }
 
-------------------------------------------------------------------
--- Utilitários
-------------------------------------------------------------------
-local function r3(n)
-	if type(n) ~= "number" or n ~= n or n == math.huge or n == -math.huge then
-		return 0
-	end
-	return math.floor(n * 1000 + 0.5) / 1000
+-- ============================================
+-- HELPERS DE UI
+-- ============================================
+local function new(class,props,parent)
+    local o=Instance.new(class)
+    for k,v in pairs(props) do o[k]=v end
+    if parent then o.Parent=parent end
+    return o
+end
+local function corner(o,r) return new("UICorner",{CornerRadius=UDim.new(0,r or 8)},o) end
+local function stroke(o,c,th,tr)
+    return new("UIStroke",{Color=c,Thickness=th or 1,Transparency=tr or 0,ApplyStrokeMode=Enum.ApplyStrokeMode.Border},o)
+end
+local function label(parent,props)
+    props.BackgroundTransparency=1
+    props.Font=props.Font or GR
+    props.TextColor3=props.TextColor3 or T.text
+    props.TextSize=props.TextSize or 12
+    return new("TextLabel",props,parent)
 end
 
-local function vec(v)
-	return { r3(v.X), r3(v.Y), r3(v.Z) }
+local function getParent()
+    if type(gethui)=="function" then local ok,h=pcall(gethui); if ok and h then return h end end
+    local ok,cg=pcall(function() return game:GetService("CoreGui") end); if ok and cg then return cg end
+    return LocalPlayer:WaitForChild("PlayerGui")
 end
-
-local function col(c)
-	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
-end
-
-local function cfc(c)
-	local t = { c:GetComponents() }
-	for i = 1, #t do
-		t[i] = r3(t[i])
-	end
-	return t
-end
-
-local function enumName(v)
-	return v.Name
-end
-
-local function idf(v)
-	return v
-end
-
-local function index(o, k)
-	return o[k]
-end
-
-local function ser(v)
-	local t = typeof(v)
-	if t == "number" then
-		return r3(v)
-	elseif t == "string" or t == "boolean" then
-		return v
-	elseif t == "Vector3" then
-		return vec(v)
-	elseif t == "Vector2" then
-		return { r3(v.X), r3(v.Y) }
-	elseif t == "Color3" then
-		return col(v)
-	elseif t == "CFrame" then
-		return cfc(v)
-	elseif t == "EnumItem" then
-		return v.Name
-	end
-	return tostring(v)
-end
-
-local function readSpec(inst, specs)
-	local out, miss = {}, {}
-	for _, p in ipairs(specs) do
-		local ok, v = pcall(index, inst, p[2])
-		if ok then
-			local ok2, cv = pcall(p[3], v)
-			if ok2 then
-				out[p[1]] = cv
-			else
-				miss[#miss + 1] = p[2]
-			end
-		else
-			miss[#miss + 1] = p[2]
-		end
-	end
-	return out, miss
-end
-
-------------------------------------------------------------------
--- Especificação das propriedades lidas (apenas leitura)
-------------------------------------------------------------------
-local PROPS = {
-	{ "BasePart", {
-		{ "posicao", "Position", vec },
-		{ "tamanho", "Size", vec },
-		{ "orientacao", "Orientation", vec },
-		{ "cframe", "CFrame", cfc },
-		{ "cor_rgb", "Color", col },
-		{ "material", "Material", enumName },
-		{ "transparencia", "Transparency", r3 },
-		{ "reflectance", "Reflectance", r3 },
-		{ "anchored", "Anchored", idf },
-		{ "can_collide", "CanCollide", idf },
-		{ "can_touch", "CanTouch", idf },
-		{ "can_query", "CanQuery", idf },
-		{ "grupo_colisao", "CollisionGroup", idf },
-	} },
-	{ "Part", { { "forma", "Shape", enumName } } },
-	{ "MeshPart", {
-		{ "mesh_id", "MeshId", idf, "mesh" },
-		{ "textura_id", "TextureID", idf, "textura" },
-		{ "mesh_tamanho_original", "MeshSize", vec },
-	} },
-	{ "FileMesh", {
-		{ "mesh_id", "MeshId", idf, "mesh" },
-		{ "textura_id", "TextureId", idf, "textura" },
-		{ "escala", "Scale", vec },
-		{ "deslocamento", "Offset", vec },
-	} },
-	{ "SpecialMesh", { { "tipo_mesh", "MeshType", enumName } } },
-	{ "Decal", {
-		{ "textura_id", "Texture", idf, "decal/textura" },
-		{ "face", "Face", enumName },
-		{ "transparencia", "Transparency", r3 },
-		{ "cor_rgb", "Color3", col },
-	} },
-	{ "Texture", {
-		{ "studs_por_tile_u", "StudsPerTileU", r3 },
-		{ "studs_por_tile_v", "StudsPerTileV", r3 },
-	} },
-	{ "SurfaceAppearance", {
-		{ "color_map", "ColorMap", idf, "surface_color" },
-		{ "normal_map", "NormalMap", idf, "surface_normal" },
-		{ "metalness_map", "MetalnessMap", idf, "surface_metal" },
-		{ "roughness_map", "RoughnessMap", idf, "surface_rough" },
-	} },
-	{ "Sky", {
-		{ "ceu_tras", "SkyboxBk", idf, "skybox" },
-		{ "ceu_baixo", "SkyboxDn", idf, "skybox" },
-		{ "ceu_frente", "SkyboxFt", idf, "skybox" },
-		{ "ceu_esquerda", "SkyboxLf", idf, "skybox" },
-		{ "ceu_direita", "SkyboxRt", idf, "skybox" },
-		{ "ceu_cima", "SkyboxUp", idf, "skybox" },
-	} },
-	{ "Atmosphere", {
-		{ "densidade", "Density", r3 },
-		{ "deslocamento", "Offset", r3 },
-		{ "cor_rgb", "Color", col },
-		{ "decay_rgb", "Decay", col },
-		{ "glare", "Glare", r3 },
-		{ "haze", "Haze", r3 },
-	} },
-	{ "Clouds", {
-		{ "cobertura", "Cover", r3 },
-		{ "densidade", "Density", r3 },
-		{ "cor_rgb", "Color", col },
-	} },
-	{ "Light", {
-		{ "brilho", "Brightness", r3 },
-		{ "alcance", "Range", r3 },
-		{ "cor_rgb", "Color", col },
-		{ "ativo", "Enabled", idf },
-		{ "sombras", "Shadows", idf },
-	} },
-	{ "SpotLight", { { "angulo", "Angle", r3 }, { "face", "Face", enumName } } },
-	{ "SurfaceLight", { { "angulo", "Angle", r3 }, { "face", "Face", enumName } } },
-	{ "ParticleEmitter", {
-		{ "ativo", "Enabled", idf },
-		{ "taxa", "Rate", r3 },
-		{ "textura_id", "Texture", idf, "particula" },
-	} },
-	{ "Fire", { { "ativo", "Enabled", idf } } },
-	{ "Smoke", { { "ativo", "Enabled", idf } } },
-	{ "Sparkles", { { "ativo", "Enabled", idf } } },
-	{ "Beam", { { "ativo", "Enabled", idf }, { "textura_id", "Texture", idf, "beam" } } },
-	{ "Trail", { { "ativo", "Enabled", idf }, { "textura_id", "Texture", idf, "trail" } } },
-	{ "PostEffect", { { "ativo", "Enabled", idf } } },
-	{ "ProximityPrompt", {
-		{ "texto_acao", "ActionText", idf },
-		{ "texto_objeto", "ObjectText", idf },
-		{ "tempo_segurar", "HoldDuration", r3 },
-		{ "distancia_max", "MaxActivationDistance", r3 },
-		{ "ativo", "Enabled", idf },
-		{ "exige_linha_visao", "RequiresLineOfSight", idf },
-	} },
-	{ "ClickDetector", { { "distancia_max", "MaxActivationDistance", r3 } } },
-	{ "Seat", { { "desabilitado", "Disabled", idf } } },
-	{ "VehicleSeat", { { "desabilitado", "Disabled", idf } } },
-	{ "SpawnLocation", { { "ativo", "Enabled", idf }, { "neutro", "Neutral", idf } } },
-	{ "HingeConstraint", {
-		{ "atuador", "ActuatorType", enumName },
-		{ "limites_ativos", "LimitsEnabled", idf },
-		{ "limite_inferior", "LowerAngle", r3 },
-		{ "limite_superior", "UpperAngle", r3 },
-	} },
-	{ "PrismaticConstraint", {
-		{ "atuador", "ActuatorType", enumName },
-		{ "limites_ativos", "LimitsEnabled", idf },
-		{ "limite_inferior", "LowerLimit", r3 },
-		{ "limite_superior", "UpperLimit", r3 },
-	} },
-	{ "Attachment", { { "posicao", "WorldPosition", vec } } },
-}
-
-local INTERACT = {
-	ProximityPrompt = true, ClickDetector = true, TouchInterest = true, DragDetector = true,
-}
-local MECH = {
-	HingeConstraint = true, PrismaticConstraint = true, CylindricalConstraint = true,
-	AlignPosition = true, AlignOrientation = true, LinearVelocity = true, AngularVelocity = true,
-	BodyPosition = true, BodyVelocity = true, BodyGyro = true,
-}
-local EVENTS = {
-	RemoteEvent = true, RemoteFunction = true, BindableEvent = true, BindableFunction = true,
-}
-
-local KW = {
-	{ "portas_portoes_mecanismos", { "door", "porta", "portao", "portão", "gate", "garage", "garagem", "elevator", "elevador", "lift", "barrier", "barreira", "cancela", "drawbridge", "hatch", "alcapao", "alçapão" } },
-	{ "objetos_interativos", { "button", "botao", "botão", "switch", "interruptor", "lever", "alavanca", "panel", "painel", "terminal", "keypad", "vending" } },
-	{ "terreno_ambiente", { "terrain", "terreno", "water", "agua", "água", "tree", "arvore", "árvore", "bush", "arbusto", "grass", "grama", "rock", "pedra", "flower", "flor", "plant", "planta", "mountain", "montanha", "hill", "colina", "river", "rio", "lake", "lago", "sand", "areia" } },
-	{ "salas_divisoes", { "room", "sala", "corridor", "corredor", "hall", "bedroom", "quarto", "bathroom", "banheiro", "kitchen", "cozinha", "partition", "divisoria", "divisória", "passage", "passagem", "lobby", "office", "escritorio", "escritório" } },
-	{ "estruturas_edificios", { "wall", "parede", "muro", "floor", "piso", "chao", "chão", "roof", "telhado", "teto", "ceiling", "building", "predio", "prédio", "house", "casa", "stair", "escada", "pillar", "coluna", "fence", "cerca", "bridge", "ponte", "window", "janela", "foundation", "tower", "torre" } },
-	{ "moveis_decorativos", { "table", "mesa", "chair", "cadeira", "desk", "escrivaninha", "counter", "balcao", "balcão", "sofa", "sofá", "bed", "cama", "shelf", "prateleira", "locker", "armario", "armário", "chest", "bau", "baú", "lamp", "luminaria", "luminária", "car", "carro", "vehicle", "veiculo", "veículo", "truck", "caminhao", "caminhão", "sign", "placa", "pole", "poste", "decor", "decoracao", "decoração", "furniture", "movel", "móvel", "vase", "vaso", "rug", "tapete", "bench", "banco" } },
-}
-
-local STATE_ATTR = {
-	open = true, opened = true, aberto = true, aberta = true, state = true, estado = true,
-	locked = true, trancado = true, closed = true, fechado = true, active = true, ativo = true,
-}
-
-local function tokens(name)
-	local set = {}
-	local ok = pcall(function()
-		local s = name:gsub("(%l)(%u)", "%1 %2"):lower()
-		for tok in s:gmatch("[^%s%p%d]+") do
-			set[tok] = true
-			local sg = tok:gsub("s$", "")
-			set[sg] = true
-		end
-	end)
-	if not ok then
-		return {}
-	end
-	return set
-end
-
-------------------------------------------------------------------
--- Interface
-------------------------------------------------------------------
-local GUI_NAME = "MapScannerUltimateGui"
-
-local function guiParents()
-	local list = {}
-	local ok, h = pcall(function()
-		if gethui then
-			return gethui()
-		end
-	end)
-	if ok and h then
-		list[#list + 1] = h
-	end
-	list[#list + 1] = CoreGui
-	local lp = Players.LocalPlayer
-	if lp then
-		local pg = lp:FindFirstChildOfClass("PlayerGui")
-		if pg then
-			list[#list + 1] = pg
-		end
-	end
-	return list
-end
-
--- Evita janelas duplicadas
-if genv.MapScannerUltimate and genv.MapScannerUltimate.Destroy then
-	pcall(genv.MapScannerUltimate.Destroy)
-end
-for _, par in ipairs(guiParents()) do
-	pcall(function()
-		for _, c in ipairs(par:GetChildren()) do
-			if c.Name == GUI_NAME then
-				c:Destroy()
-			end
-		end
-	end)
-end
-
-local ACCENT = Color3.fromRGB(41, 121, 255)
-local BG = Color3.fromRGB(14, 18, 28)
-local BG2 = Color3.fromRGB(24, 30, 46)
-
-local function mk(class, props, parent)
-	local o = Instance.new(class)
-	for k, v in pairs(props) do
-		o[k] = v
-	end
-	o.Parent = parent
-	return o
-end
-
-local gui = mk("ScreenGui", {
-	Name = GUI_NAME,
-	ResetOnSpawn = false,
-	IgnoreGuiInset = true,
-	DisplayOrder = 999999,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-}, nil)
-
-local frame = mk("Frame", {
-	Name = "Janela",
-	Size = UDim2.fromOffset(240, 156),
-	Position = UDim2.new(0.5, -120, 0.5, -78),
-	BackgroundColor3 = BG,
-	BorderSizePixel = 0,
-	Active = true,
-}, gui)
-mk("UICorner", { CornerRadius = UDim.new(0, 10) }, frame)
-mk("UIStroke", { Color = ACCENT, Thickness = 1.5, Transparency = 0.25 }, frame)
-
-local header = mk("TextLabel", {
-	Name = "Cabecalho",
-	Size = UDim2.new(1, 0, 0, 30),
-	BackgroundColor3 = BG2,
-	BorderSizePixel = 0,
-	Text = "MAP SCANNER ULTIMATE",
-	TextColor3 = Color3.fromRGB(235, 242, 255),
-	Font = Enum.Font.GothamBold,
-	TextSize = 13,
-	Active = true,
-}, frame)
-mk("UICorner", { CornerRadius = UDim.new(0, 10) }, header)
-mk("Frame", {
-	Size = UDim2.new(1, 0, 0, 2),
-	Position = UDim2.new(0, 0, 1, -2),
-	BackgroundColor3 = ACCENT,
-	BorderSizePixel = 0,
-}, header)
-
-local btnGen = mk("TextButton", {
-	Name = "Gerar",
-	Size = UDim2.new(1, -24, 0, 34),
-	Position = UDim2.new(0, 12, 0, 40),
-	BackgroundColor3 = ACCENT,
-	BorderSizePixel = 0,
-	Text = "Gerar diagnóstico",
-	TextColor3 = Color3.new(1, 1, 1),
-	Font = Enum.Font.GothamBold,
-	TextSize = 14,
-	AutoButtonColor = true,
-}, frame)
-mk("UICorner", { CornerRadius = UDim.new(0, 8) }, btnGen)
-
-local btnCopy = mk("TextButton", {
-	Name = "Copiar",
-	Size = UDim2.new(1, -24, 0, 34),
-	Position = UDim2.new(0, 12, 0, 80),
-	BackgroundColor3 = BG2,
-	BorderSizePixel = 0,
-	Text = "Copiar diagnóstico",
-	TextColor3 = Color3.fromRGB(235, 242, 255),
-	Font = Enum.Font.GothamBold,
-	TextSize = 14,
-	AutoButtonColor = true,
-}, frame)
-mk("UICorner", { CornerRadius = UDim.new(0, 8) }, btnCopy)
-mk("UIStroke", { Color = ACCENT, Thickness = 1, Transparency = 0.2 }, btnCopy)
-
-local statusLabel = mk("TextLabel", {
-	Name = "Status",
-	Size = UDim2.new(1, -24, 0, 34),
-	Position = UDim2.new(0, 12, 0, 118),
-	BackgroundTransparency = 1,
-	Text = "Pronto.",
-	TextColor3 = Color3.fromRGB(150, 175, 220),
-	Font = Enum.Font.Gotham,
-	TextSize = 11,
-	TextWrapped = true,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
-}, frame)
-
-local function setStatus(t)
-	if statusLabel and statusLabel.Parent then
-		statusLabel.Text = t
-	end
-end
-
--- Arraste pelo cabeçalho (toque e mouse)
-local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
-header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = frame.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
-header.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-		dragInput = input
-	end
-end)
-local dragConn = UIS.InputChanged:Connect(function(input)
-	if dragging and input == dragInput and dragStart and startPos then
-		local d = input.Position - dragStart
-		frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-	end
+local UI_PARENT=getParent()
+pcall(function()
+    for _,n in ipairs({"PrimeHubIntro","PrimeHubUI","PrimeHubTimer"}) do
+        local o=UI_PARENT:FindFirstChild(n); if o then o:Destroy() end
+    end
 end)
 
-do
-	local placed = false
-	for _, par in ipairs(guiParents()) do
-		local ok = pcall(function()
-			gui.Parent = par
-		end)
-		if ok and gui.Parent then
-			placed = true
-			break
-		end
-	end
-	if not placed then
-		return
-	end
+local function notify(m)
+    pcall(function() StarterGui:SetCore("SendNotification",{Title="PRIME HUB",Text=m,Duration=2}) end)
 end
 
-gui.Destroying:Connect(function()
-	dragConn:Disconnect()
-end)
-genv.MapScannerUltimate = {
-	Destroy = function()
-		pcall(function()
-			gui:Destroy()
-		end)
-	end,
-}
-
-------------------------------------------------------------------
--- Varredura
-------------------------------------------------------------------
-local report = nil
-local scanning = false
-local copyIdx = 1
-
-local function runScan()
-	local errCount, removed, skippedCount, totalSeen, failSer = 0, 0, 0, 0, 0
-	local truncatedInst, truncatedBytes = false, false
-	local list, idOf, skip = {}, {}, {}
-	local roots = { Workspace, Lighting }
-	local byClass, byCat, missingByProp = {}, {}, {}
-	local incompletos = {}
-	local incompletosTotal = 0
-	local assets, assetOrder = {}, {}
-	local partCount = {}
-	local pivots = {}
-	local objLines = {}
-	local bytes = 0
-	local registered = 0
-
-	local function yieldLoop(n, label, fn)
-		local last = os.clock()
-		for i = 1, n do
-			local ok = pcall(fn, i)
-			if not ok then
-				errCount = errCount + 1
-			end
-			if os.clock() - last > CONFIG.FRAME_BUDGET then
-				setStatus(string.format("%s %d/%d (%d%%)", label, i, n, math.floor(i / n * 100)))
-				task.wait()
-				last = os.clock()
-				if not gui.Parent then
-					error("janela fechada")
-				end
-			end
-		end
-	end
-
-	local function addSkip(root)
-		skip[root] = true
-		local ok, d = pcall(root.GetDescendants, root)
-		if ok then
-			for i = 1, #d do
-				skip[d[i]] = true
-			end
-		end
-	end
-
-	setStatus("Listando instâncias...")
-	task.wait()
-
-	local cam = Workspace.CurrentCamera
-	if cam then
-		addSkip(cam)
-	end
-	for _, pl in ipairs(Players:GetPlayers()) do
-		if pl.Character then
-			addSkip(pl.Character)
-		end
-	end
-
-	for _, root in ipairs(roots) do
-		local ok, desc = pcall(root.GetDescendants, root)
-		if ok then
-			for i = 1, #desc do
-				local inst = desc[i]
-				totalSeen = totalSeen + 1
-				if skip[inst] then
-					skippedCount = skippedCount + 1
-				elseif #list >= CONFIG.MAX_INSTANCES then
-					truncatedInst = true
-				elseif not idOf[inst] then
-					list[#list + 1] = inst
-					idOf[inst] = #list
-				end
-			end
-		else
-			errCount = errCount + 1
-		end
-	end
-
-	-- Pré-passo: quantidade de peças por contêiner
-	yieldLoop(#list, "Contando peças", function(i)
-		local inst = list[i]
-		if inst:IsA("BasePart") and not inst:IsA("Terrain") then
-			local p = inst.Parent
-			while p and p ~= Workspace and p ~= Lighting and p ~= game do
-				partCount[p] = (partCount[p] or 0) + 1
-				p = p.Parent
-			end
-		end
-	end)
-
-	local function addAsset(kind, val, path)
-		if type(val) ~= "string" or val == "" then
-			return false
-		end
-		local a = assets[val]
-		if not a then
-			if #assetOrder >= CONFIG.MAX_ASSETS then
-				return true
-			end
-			a = { tipo = kind, id = val, usos = 0, exemplos = {} }
-			assets[val] = a
-			assetOrder[#assetOrder + 1] = a
-		end
-		a.usos = a.usos + 1
-		if #a.exemplos < 3 then
-			a.exemplos[#a.exemplos + 1] = path
-		end
-		return true
-	end
-
-	local function getPivot(m)
-		local c = pivots[m]
-		if c == nil then
-			local ok, cf = pcall(m.GetPivot, m)
-			c = ok and cf or false
-			pivots[m] = c
-		end
-		return c
-	end
-
-	local function classify(inst, rec, hasInteractChild, hasMechChild, stateAttr)
-		local out = {}
-		local present = {}
-		local function add(c, conf, why)
-			if not present[c] then
-				present[c] = true
-				out[#out + 1] = { categoria = c, confianca = conf, motivo = why }
-			end
-		end
-		local cn = inst.ClassName
-		if inst:IsA("Terrain") or inst:IsA("Sky") or inst:IsA("Atmosphere") or inst:IsA("Clouds") then
-			add("terreno_ambiente", "confirmada", "classe " .. cn)
-		end
-		if inst:IsA("Light") or inst:IsA("ParticleEmitter") or inst:IsA("Fire") or inst:IsA("Smoke")
-			or inst:IsA("Sparkles") or inst:IsA("Beam") or inst:IsA("Trail") or inst:IsA("PostEffect") then
-			add("iluminacao_efeitos", "confirmada", "classe " .. cn)
-		end
-		if MECH[cn] then
-			add("portas_portoes_mecanismos", "confirmada", "constraint/atuador físico (" .. cn .. ")")
-		end
-		if hasMechChild then
-			add("portas_portoes_mecanismos", "confirmada", "possui constraint/atuador físico como filho")
-		end
-		if INTERACT[cn] or EVENTS[cn] or inst:IsA("Seat") or inst:IsA("VehicleSeat") then
-			add("objetos_interativos", "confirmada", "classe " .. cn)
-		end
-		if hasInteractChild then
-			add("objetos_interativos", "confirmada", "possui ProximityPrompt/ClickDetector/TouchInterest como filho")
-		end
-		if stateAttr then
-			add("objetos_interativos", "provavel", "atributo com nome de estado (" .. stateAttr .. ")")
-		end
-		local set = tokens(inst.Name)
-		for _, grp in ipairs(KW) do
-			for _, kw in ipairs(grp[2]) do
-				if set[kw] then
-					add(grp[1], "provavel", "nome contém '" .. kw .. "'")
-					break
-				end
-			end
-		end
-		if #out == 0 then
-			if inst:IsA("BasePart") then
-				add("desconhecidos", "nenhuma", "peça sem indício de função")
-			elseif inst:IsA("Model") or inst:IsA("Folder") then
-				add("desconhecidos", "nenhuma", "contêiner sem classificação")
-			else
-				add("desconhecidos", "nenhuma", "classe " .. cn .. " sem classificação")
-			end
-		end
-		return out
-	end
-
-	local function describe(inst, id)
-		local cn = inst.ClassName
-		local rec = {
-			id = id,
-			parent_id = idOf[inst.Parent] or 0,
-			nome = inst.Name,
-			classe = cn,
-			caminho = inst:GetFullName(),
-		}
-		local miss = {}
-		local isTerrain = inst:IsA("Terrain")
-
-		local nearest, outer
-		local p = inst.Parent
-		while p and p ~= Workspace and p ~= Lighting and p ~= game do
-			if p:IsA("Model") then
-				nearest = nearest or p
-				outer = p
-			end
-			p = p.Parent
-		end
-		if nearest then
-			rec.modelo_pai = nearest:GetFullName()
-		end
-		if outer and outer ~= nearest then
-			rec.estrutura_principal = outer:GetFullName()
-		end
-
-		local assetRefs = {}
-		for _, g in ipairs(PROPS) do
-			if inst:IsA(g[1]) and not (g[1] == "BasePart" and isTerrain) then
-				local out, m = readSpec(inst, g[2])
-				for k, v in pairs(out) do
-					rec[k] = v
-				end
-				for _, mm in ipairs(m) do
-					miss[#miss + 1] = mm
-					local key = cn .. "." .. mm
-					missingByProp[key] = (missingByProp[key] or 0) + 1
-				end
-				for _, sp in ipairs(g[2]) do
-					if sp[4] and out[sp[1]] then
-						if addAsset(sp[4], out[sp[1]], rec.caminho) then
-							assetRefs[#assetRefs + 1] = { tipo = sp[4], id = out[sp[1]] }
-						end
-					end
-				end
-			end
-		end
-
-		-- Posição mundial usada para posições relativas
-		local wpos
-		if inst:IsA("BasePart") and not isTerrain then
-			local ok, v = pcall(index, inst, "Position")
-			if ok then
-				wpos = v
-			end
-		elseif inst:IsA("Attachment") then
-			local ok, v = pcall(index, inst, "WorldPosition")
-			if ok then
-				wpos = v
-			end
-		end
-
-		if inst:IsA("Model") then
-			local ok, cf, sz = pcall(function()
-				return inst:GetBoundingBox()
-			end)
-			if ok and cf and sz then
-				rec.posicao = vec(cf.Position)
-				rec.tamanho = vec(sz)
-				local rx, ry, rz = cf:ToOrientation()
-				rec.orientacao = { r3(math.deg(rx)), r3(math.deg(ry)), r3(math.deg(rz)) }
-				wpos = cf.Position
-			else
-				miss[#miss + 1] = "BoundingBox"
-			end
-			local pv = getPivot(inst)
-			if pv then
-				rec.pivo_posicao = vec(pv.Position)
-			end
-			local okp, pp = pcall(index, inst, "PrimaryPart")
-			if okp and pp then
-				rec.peca_primaria = pp.Name
-			end
-		end
-
-		if inst:IsA("ValueBase") then
-			local ok, v = pcall(index, inst, "Value")
-			if ok then
-				rec.valor = ser(v)
-			else
-				miss[#miss + 1] = "Value"
-			end
-		end
-
-		if wpos then
-			if nearest then
-				local pv = getPivot(nearest)
-				if pv then
-					rec.relativo_modelo = vec(pv:PointToObjectSpace(wpos))
-				end
-			end
-			if outer and outer ~= nearest then
-				local pv = getPivot(outer)
-				if pv then
-					rec.relativo_estrutura = vec(pv:PointToObjectSpace(wpos))
-				end
-			end
-		end
-
-		local hasInteractChild, hasMechChild = false, false
-		if inst:IsA("BasePart") or inst:IsA("Model") or inst:IsA("Folder") then
-			local ok, ch = pcall(inst.GetChildren, inst)
-			if ok then
-				local fi, sc = {}, {}
-				for _, c in ipairs(ch) do
-					local ccn = c.ClassName
-					if INTERACT[ccn] then
-						hasInteractChild = true
-						if #fi < 12 then
-							fi[#fi + 1] = ccn .. ":" .. c.Name
-						end
-					elseif MECH[ccn] then
-						hasMechChild = true
-						if #fi < 12 then
-							fi[#fi + 1] = ccn .. ":" .. c.Name
-						end
-					elseif c:IsA("LuaSourceContainer") then
-						if #sc < 8 then
-							sc[#sc + 1] = ccn .. ":" .. c.Name
-						end
-					end
-				end
-				if #fi > 0 then
-					rec.filhos_interativos = fi
-				end
-				if #sc > 0 then
-					rec.scripts_filhos = sc
-				end
-				if not inst:IsA("BasePart") then
-					rec.filhos_diretos = #ch
-				end
-			end
-			if inst:IsA("Model") or inst:IsA("Folder") then
-				rec.pecas_contidas = partCount[inst] or 0
-			end
-		end
-
-		local stateAttr
-		local okA, at = pcall(inst.GetAttributes, inst)
-		if okA and at and next(at) ~= nil then
-			local keys = {}
-			for k in pairs(at) do
-				keys[#keys + 1] = k
-			end
-			table.sort(keys)
-			local arr = {}
-			for _, k in ipairs(keys) do
-				arr[#arr + 1] = { nome = k, valor = ser(at[k]) }
-				if not stateAttr and STATE_ATTR[string.lower(k)] then
-					stateAttr = k
-				end
-			end
-			rec.atributos = arr
-		elseif not okA then
-			miss[#miss + 1] = "Attributes"
-		end
-
-		local okT, tags = pcall(CollectionService.GetTags, CollectionService, inst)
-		if okT and tags and #tags > 0 then
-			table.sort(tags)
-			rec.tags = tags
-		end
-
-		if #assetRefs > 0 then
-			rec.recursos_visuais = assetRefs
-		end
-
-		local cls = classify(inst, rec, hasInteractChild, hasMechChild, stateAttr)
-		rec.categoria = cls[1].categoria
-		rec.confianca = cls[1].confianca
-		rec.motivo_classificacao = cls[1].motivo
-		if #cls > 1 then
-			local extra = {}
-			for i = 2, #cls do
-				extra[#extra + 1] = cls[i]
-			end
-			rec.classificacoes_adicionais = extra
-		end
-
-		if isTerrain then
-			rec.observacao = "Ver bloco 'terreno' do relatório."
-		end
-
-		if #miss > 0 then
-			rec.propriedades_indisponiveis = miss
-			incompletosTotal = incompletosTotal + 1
-			if #incompletos < CONFIG.MAX_INCOMPLETE then
-				incompletos[#incompletos + 1] = { id = id, caminho = rec.caminho, faltando = miss }
-			end
-		end
-
-		return rec
-	end
-
-	-- Varredura principal
-	yieldLoop(#list, "Varrendo", function(i)
-		local inst = list[i]
-		if inst.Parent == nil then
-			removed = removed + 1
-			return
-		end
-		if bytes > CONFIG.MAX_REPORT_BYTES then
-			truncatedBytes = true
-			return
-		end
-		local ok, rec = pcall(describe, inst, i)
-		if not ok or type(rec) ~= "table" then
-			failSer = failSer + 1
-			rec = { id = i, nome = "?", classe = inst.ClassName, erro = "falha ao descrever o objeto" }
-		end
-		local okE, enc = pcall(HttpService.JSONEncode, HttpService, rec)
-		if not okE then
-			failSer = failSer + 1
-			rec = { id = i, classe = inst.ClassName, erro = "falha ao serializar (nome/valor inválido)" }
-			okE, enc = pcall(HttpService.JSONEncode, HttpService, rec)
-			if not okE then
-				return
-			end
-		end
-		objLines[#objLines + 1] = enc
-		bytes = bytes + #enc + 2
-		registered = registered + 1
-		byClass[rec.classe] = (byClass[rec.classe] or 0) + 1
-		local c = rec.categoria or "desconhecidos"
-		byCat[c] = (byCat[c] or 0) + 1
-	end)
-
-	-- Terreno (amostragem por raycast)
-	setStatus("Amostrando terreno...")
-	task.wait()
-	local terrainInfo = { encontrado = false }
-	local sampleLines = {}
-	do
-		local terrain = Workspace:FindFirstChildOfClass("Terrain")
-		if terrain then
-			terrainInfo.encontrado = true
-			local tp, tmiss = readSpec(terrain, {
-				{ "cor_agua_rgb", "WaterColor", col },
-				{ "transparencia_agua", "WaterTransparency", r3 },
-				{ "reflectancia_agua", "WaterReflectance", r3 },
-				{ "onda_tamanho", "WaterWaveSize", r3 },
-				{ "onda_velocidade", "WaterWaveSpeed", r3 },
-				{ "decoracao_ativa", "Decoration", idf },
-			})
-			terrainInfo.propriedades = tp
-			if #tmiss > 0 then
-				terrainInfo.propriedades_indisponiveis = tmiss
-			end
-
-			local lo = Vector3.new(-1024, -512, -1024)
-			local hi = Vector3.new(1024, 1024, 1024)
-			local okE, e = pcall(index, terrain, "MaxExtents")
-			if okE and e then
-				local okC = pcall(function()
-					lo = Vector3.new(e.Min.X * 4, e.Min.Y * 4, e.Min.Z * 4)
-					hi = Vector3.new(e.Max.X * 4, e.Max.Y * 4, e.Max.Z * 4)
-					terrainInfo.extensao_declarada_studs = { vec(lo), vec(hi) }
-				end)
-				if not okC then
-					lo = Vector3.new(-1024, -512, -1024)
-					hi = Vector3.new(1024, 1024, 1024)
-				end
-			end
-			lo = Vector3.new(math.max(lo.X, -2048), math.max(lo.Y, -1024), math.max(lo.Z, -2048))
-			hi = Vector3.new(math.min(hi.X, 2048), math.min(hi.Y, 2048), math.min(hi.Z, 2048))
-			local span = math.max(hi.X - lo.X, hi.Z - lo.Z, 16)
-			local step = math.max(16, math.ceil(span / 64 / 16) * 16)
-
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Include
-			params.FilterDescendantsInstances = { terrain }
-			params.IgnoreWater = false
-
-			local mats, matList, matCount = {}, {}, {}
-			local hits, waterHits, total = 0, 0, 0
-			local yMin, yMax = math.huge, -math.huge
-			local cur = {}
-			local last = os.clock()
-			local height = hi.Y - lo.Y + 8
-			local x = lo.X
-			while x <= hi.X do
-				local z = lo.Z
-				while z <= hi.Z do
-					total = total + 1
-					local ok, res = pcall(function()
-						return Workspace:Raycast(Vector3.new(x, hi.Y + 4, z), Vector3.new(0, -height, 0), params)
-					end)
-					if ok and res then
-						hits = hits + 1
-						local mn = res.Material.Name
-						if not mats[mn] then
-							matList[#matList + 1] = mn
-							mats[mn] = #matList
-							matCount[mn] = 0
-						end
-						matCount[mn] = matCount[mn] + 1
-						if res.Material == Enum.Material.Water then
-							waterHits = waterHits + 1
-						end
-						local y = res.Position.Y
-						yMin = math.min(yMin, y)
-						yMax = math.max(yMax, y)
-						cur[#cur + 1] = string.format("[%d,%d,%.1f,%d]", x, z, y, mats[mn])
-						if #cur >= 100 then
-							sampleLines[#sampleLines + 1] = table.concat(cur, ",")
-							cur = {}
-						end
-					end
-					if os.clock() - last > CONFIG.FRAME_BUDGET then
-						setStatus(string.format("Amostrando terreno %d amostras...", total))
-						task.wait()
-						last = os.clock()
-					end
-					z = z + step
-				end
-				x = x + step
-			end
-			if #cur > 0 then
-				sampleLines[#sampleLines + 1] = table.concat(cur, ",")
-			end
-
-			local matOut = {}
-			for _, mn in ipairs(matList) do
-				local entry = { indice = mats[mn], material = mn, amostras = matCount[mn] }
-				local okc, c = pcall(function()
-					return terrain:GetMaterialColor(Enum.Material[mn])
-				end)
-				if okc and c then
-					entry.cor_rgb = col(c)
-				end
-				matOut[#matOut + 1] = entry
-			end
-			terrainInfo.metodo = "ESTIMATIVA: raycast vertical em grade (somente superfície visível). Não é leitura de voxels."
-			terrainInfo.formato_amostras = "[x, z, y, indice_material]"
-			terrainInfo.limites_amostrados = { vec(lo), vec(hi) }
-			terrainInfo.passo_studs = step
-			terrainInfo.amostras_totais = total
-			terrainInfo.amostras_com_terreno = hits
-			terrainInfo.amostras_agua = waterHits
-			terrainInfo.altura_min = hits > 0 and r3(yMin) or nil
-			terrainInfo.altura_max = hits > 0 and r3(yMax) or nil
-			terrainInfo.materiais = matOut
-			if hits == 0 then
-				terrainInfo.aviso = "Nenhum terreno detectado nas amostras (pode não existir ou não estar carregado)."
-			else
-				terrainInfo.aviso = "Cavernas, camadas inferiores e feições menores que o passo não foram capturadas; o terreno NÃO foi reconstruído integralmente."
-			end
-		end
-	end
-
-	-- Ambiente
-	local ambiente = { place_id = game.PlaceId, game_id = game.GameId }
-	pcall(function()
-		local info = MarketplaceService:GetProductInfo(game.PlaceId)
-		if info and info.Name then
-			ambiente.nome_do_lugar = info.Name
-		end
-	end)
-	local lp, lmiss = readSpec(Lighting, {
-		{ "clock_time", "ClockTime", r3 },
-		{ "brilho", "Brightness", r3 },
-		{ "ambient_rgb", "Ambient", col },
-		{ "outdoor_ambient_rgb", "OutdoorAmbient", col },
-		{ "fog_cor_rgb", "FogColor", col },
-		{ "fog_inicio", "FogStart", r3 },
-		{ "fog_fim", "FogEnd", r3 },
-		{ "sombras_globais", "GlobalShadows", idf },
-		{ "tecnologia", "Technology", enumName },
-	})
-	ambiente.iluminacao = lp
-	if #lmiss > 0 then
-		ambiente.iluminacao_indisponivel = lmiss
-	end
-	local wp, wmiss = readSpec(Workspace, {
-		{ "gravidade", "Gravity", r3 },
-		{ "streaming_ativo", "StreamingEnabled", idf },
-		{ "altura_destruicao_pecas", "FallenPartsDestroyHeight", r3 },
-	})
-	ambiente.workspace = wp
-	if #wmiss > 0 then
-		ambiente.workspace_indisponivel = wmiss
-	end
-
-	local streaming = wp.streaming_ativo == true
-
-	-- Resumo
-	local parcial = truncatedInst or truncatedBytes or errCount > 0 or failSer > 0
-	local cats = {
-		"terreno_ambiente", "estruturas_edificios", "salas_divisoes", "moveis_decorativos",
-		"portas_portoes_mecanismos", "objetos_interativos", "iluminacao_efeitos", "desconhecidos",
-	}
-	local catOut = {}
-	for _, c in ipairs(cats) do
-		catOut[c] = byCat[c] or 0
-	end
-	local resumo = {
-		total_instancias_encontradas = totalSeen,
-		total_instancias_examinadas = #list,
-		total_objetos_registrados = registered,
-		ignoradas_personagens_e_camera = skippedCount,
-		removidas_durante_varredura = removed,
-		falhas_individuais = errCount,
-		falhas_de_serializacao = failSer,
-		coleta_parcial = parcial,
-		contagem_por_classe = byClass,
-		contagem_por_categoria = catOut,
-		recursos_visuais_unicos = #assetOrder,
-		objetos_com_propriedades_incompletas = incompletosTotal,
-	}
-
-	local limitacoes = {
-		"Somente dados replicados ao cliente: ServerStorage, ServerScriptService e objetos não replicados não são acessíveis.",
-		"Classificação 'confirmada' vem de classe/constraint/componente; 'provavel' vem apenas do nome ou de atributos e não é garantia.",
-		"Scripts: apenas a existência (nome/classe) é registrada, nunca o código. Nenhum evento remoto foi chamado.",
-		"Personagens de jogadores e a câmera foram ignorados.",
-		"Union/MeshPart: tamanho é a caixa delimitadora, não a geometria real. Models: caixa delimitadora calculada por GetBoundingBox.",
-		"Terreno: apenas amostragem por raycast da superfície; não é reconstrução integral.",
-		"Salas e construções não são reconhecidas semanticamente; a categoria é uma sugestão para organizar a reconstrução.",
-	}
-	if streaming then
-		limitacoes[#limitacoes + 1] = "StreamingEnabled está ativo: partes distantes do mapa podem não estar carregadas no cliente e ficaram fora do relatório."
-	end
-	if truncatedInst then
-		limitacoes[#limitacoes + 1] = "COLETA PARCIAL: limite de " .. CONFIG.MAX_INSTANCES .. " instâncias atingido."
-	end
-	if truncatedBytes then
-		limitacoes[#limitacoes + 1] = "COLETA PARCIAL: limite de tamanho do relatório atingido."
-	end
-	if removed > 0 then
-		limitacoes[#limitacoes + 1] = removed .. " objeto(s) foram removidos do mapa durante a varredura."
-	end
-
-	local naoAnalisados = {
-		"Serviços fora de Workspace e Lighting (ReplicatedStorage, StarterGui etc.) não foram varridos.",
-	}
-	if streaming then
-		naoAnalisados[#naoAnalisados + 1] = "Áreas não transmitidas pelo streaming."
-	end
-	if truncatedInst then
-		naoAnalisados[#naoAnalisados + 1] = "Instâncias além do limite de " .. CONFIG.MAX_INSTANCES .. "."
-	end
-	if truncatedBytes then
-		naoAnalisados[#naoAnalisados + 1] = "Objetos finais da lista (limite de tamanho do relatório)."
-	end
-	if skippedCount > 0 then
-		naoAnalisados[#naoAnalisados + 1] = skippedCount .. " instâncias de personagens/câmera ignoradas."
-	end
-
-	local dt = "indisponível"
-	pcall(function()
-		dt = DateTime.now():ToIsoDate()
-	end)
-
-	-- Montagem do JSON (linhas)
-	local lines = { "{" }
-	local function field(key, val)
-		local ok, e = pcall(HttpService.JSONEncode, HttpService, val)
-		if not ok then
-			e = "null"
-		end
-		lines[#lines + 1] = '"' .. key .. '":' .. e .. ","
-	end
-	field("nome_diagnostico", "MAP SCANNER ULTIMATE v1.0")
-	field("data_hora_utc", dt)
-	field("ambiente", ambiente)
-	field("resumo", resumo)
-	field("limitacoes", limitacoes)
-	field("possiveis_objetos_nao_analisados", naoAnalisados)
-	field("propriedades_indisponiveis_por_classe", missingByProp)
-	field("terreno", terrainInfo)
-	lines[#lines + 1] = '"terreno_amostras":['
-	for i, s in ipairs(sampleLines) do
-		lines[#lines + 1] = s .. (i < #sampleLines and "," or "")
-	end
-	lines[#lines + 1] = "],"
-	field("recursos_visuais", assetOrder)
-	field("objetos_com_propriedades_incompletas", incompletos)
-	lines[#lines + 1] = '"objetos":['
-	for i, s in ipairs(objLines) do
-		lines[#lines + 1] = s .. (i < #objLines and "," or "")
-	end
-	lines[#lines + 1] = "]"
-	lines[#lines + 1] = "}"
-
-	-- Partes para cópia
-	local parts, cur, curSize = {}, {}, 0
-	for _, ln in ipairs(lines) do
-		if curSize + #ln + 1 > CONFIG.CLIP_LIMIT and #cur > 0 then
-			parts[#parts + 1] = table.concat(cur, "\n")
-			cur, curSize = {}, 0
-		end
-		cur[#cur + 1] = ln
-		curSize = curSize + #ln + 1
-	end
-	if #cur > 0 then
-		parts[#parts + 1] = table.concat(cur, "\n")
-	end
-
-	local total = 0
-	for _, p in ipairs(parts) do
-		total = total + #p
-	end
-
-	-- Validação do JSON e arquivo de apoio
-	local validado = "não validado (relatório grande)"
-	local salvo = false
-	if total < 6000000 then
-		local full = table.concat(parts, "\n")
-		local okV = pcall(HttpService.JSONDecode, HttpService, full)
-		validado = okV and "JSON válido" or "JSON COM ERRO de validação"
-		if writefile then
-			salvo = pcall(writefile, CONFIG.FILE_NAME, full)
-		end
-	elseif writefile then
-		salvo = pcall(writefile, CONFIG.FILE_NAME, table.concat(parts, "\n"))
-	end
-
-	return {
-		parts = parts,
-		total = total,
-		registered = registered,
-		parcial = parcial,
-		validado = validado,
-		salvo = salvo,
-	}
+-- ============================================
+-- INTRO
+-- ============================================
+local function rodarIntro()
+    local gui=new("ScreenGui",{Name="PrimeHubIntro",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=9999},UI_PARENT)
+    local fundo=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(8,6,16),BorderSizePixel=0},gui)
+    local grp=new("CanvasGroup",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,GroupTransparency=1},fundo)
+    local box=new("Frame",{Size=UDim2.new(0,440,0,210),AnchorPoint=Vector2.new(.5,.5),Position=UDim2.new(.5,0,.5,0),BackgroundTransparency=1},grp)
+    label(box,{Size=UDim2.new(1,0,0,56),Text="PRIME HUB",Font=GBK,TextSize=46,TextColor3=T.purple})
+    label(box,{Position=UDim2.new(0,0,0,58),Size=UDim2.new(1,0,0,22),Text="Criador: "..CREATOR,Font=GB,TextSize=15})
+    local barBg=new("Frame",{Size=UDim2.new(.8,0,0,6),Position=UDim2.new(.1,0,0,108),BackgroundColor3=T.border,BorderSizePixel=0},box); corner(barBg,3)
+    local barFill=new("Frame",{Size=UDim2.new(0,0,1,0),BackgroundColor3=T.purple,BorderSizePixel=0},barBg); corner(barFill,3)
+    local pct=label(box,{Position=UDim2.new(0,0,0,122),Size=UDim2.new(1,0,0,18),Text="0%",TextColor3=T.textDim})
+    label(box,{Position=UDim2.new(0,0,0,164),Size=UDim2.new(1,0,0,34),Text="Comunidade: "..DISCORD,TextColor3=T.textDim,TextWrapped=true})
+    TweenService:Create(grp,TweenInfo.new(.5),{GroupTransparency=0}):Play()
+    task.wait(.5)
+    local ini=tick(); local prog=0
+    while prog<100 do
+        prog=math.min(100,(tick()-ini)/3*100)
+        barFill.Size=UDim2.new(prog/100,0,1,0)
+        pct.Text=math.floor(prog).."%"
+        task.wait(.02)
+    end
+    pct.Text="100% • Pronto!"; task.wait(.4)
+    TweenService:Create(grp,TweenInfo.new(.4),{GroupTransparency=1}):Play()
+    TweenService:Create(fundo,TweenInfo.new(.5),{BackgroundTransparency=1}):Play()
+    task.wait(.6); gui:Destroy()
 end
 
-local function doCopy(text)
-	local fn = setclipboard or toclipboard or (Clipboard and Clipboard.set)
-	if not fn then
-		return false, "indisponível"
-	end
-	local ok = pcall(fn, text)
-	return ok, ok and "ok" or "erro"
-end
+task.spawn(function()
+    rodarIntro()
 
-btnGen.Activated:Connect(function()
-	if scanning then
-		return
-	end
-	scanning = true
-	btnGen.Text = "Varrendo..."
-	local ok, res = pcall(runScan)
-	scanning = false
-	btnGen.Text = "Gerar diagnóstico"
-	if ok and res then
-		report = res
-		copyIdx = 1
-		local msg = string.format("Concluído: %d objetos. %s.", res.registered, res.validado)
-		if res.parcial then
-			msg = msg .. " ATENÇÃO: coleta parcial."
-		end
-		if #res.parts > 1 then
-			msg = msg .. string.format(" Cópia em %d partes.", #res.parts)
-		end
-		if res.salvo then
-			msg = msg .. " Salvo em " .. CONFIG.FILE_NAME .. "."
-		end
-		setStatus(msg)
-	else
-		setStatus("Falha na varredura. Tente gerar novamente.")
-	end
-end)
+    local RECORD_HZ=60; local RECORD_INTERVAL=1/RECORD_HZ; local RECORD_MIN_DIST=0.08
+    local MAX_FRAMES=2400; local SAVE_FOLDER="PrimeHub_Saves"
+    local A_IDLE="rbxassetid://180435571"; local A_WALK="rbxassetid://134324036420171"
+    local A_JUMP="rbxassetid://125750702"; local A_FALL="rbxassetid://180436148"
+    local WIN_W=0.80; local WIN_H=0.78
+    local FOTO_ID="rbxassetid://113321776584277"
+    local openModal,refreshLib,switchTab,timerGui,timerRota,timerTempo
+    local stLabel,stDot,recBtn
+    local hitboxes={}
+    local parkourAuxAtivo=false
+    local hitboxData=nil
 
-btnCopy.Activated:Connect(function()
-	if scanning then
-		setStatus("Aguarde o fim da varredura.")
-		return
-	end
-	if not report then
-		setStatus("Gere o diagnóstico primeiro.")
-		return
-	end
-	local n = #report.parts
-	if n == 1 then
-		local ok, why = doCopy(report.parts[1])
-		if ok then
-			setStatus("Diagnóstico copiado (" .. report.total .. " caracteres).")
-		elseif why == "indisponível" then
-			setStatus("Cópia indisponível neste executor." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or " Nada foi copiado."))
-		else
-			setStatus("A cópia falhou. Nada foi copiado." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or ""))
-		end
-		return
-	end
-	-- Relatório grande: cópia em partes (nada é descartado)
-	local ok, why = doCopy(report.parts[copyIdx])
-	if ok then
-		local msg = string.format("Parte %d/%d copiada.", copyIdx, n)
-		if copyIdx < n then
-			copyIdx = copyIdx + 1
-			msg = msg .. " Cole em um local e toque de novo para a próxima."
-		else
-			copyIdx = 1
-			msg = msg .. " Todas as partes foram copiadas."
-		end
-		setStatus(msg)
-	elseif why == "indisponível" then
-		setStatus("Cópia indisponível neste executor." .. (report.salvo and (" Use o arquivo " .. CONFIG.FILE_NAME .. ".") or " Nada foi copiado."))
-	else
-		setStatus("A cópia da parte " .. copyIdx .. " falhou. Nada foi copiado.")
-	end
+    local function setStatus(t,c)
+        if stLabel then stLabel.Text=t end
+        if stDot then stDot.BackgroundColor3=c or T.green end
+    end
+
+    -- ============================================
+    -- ARQUIVOS / REDE
+    -- ============================================
+    local function ensureFolder() if type(isfolder)~="function" or type(makefolder)~="function" then return end; pcall(function() if not isfolder(SAVE_FOLDER) then makefolder(SAVE_FOLDER) end end) end
+    local hasFS=(type(writefile)=="function") and (type(readfile)=="function")
+    local function sanitize(n) local s=n:gsub("[^%w_%- ]",""):gsub("%s+","_"); return s~="" and s or "traj" end
+    local function saveToDisk(n,d) if not hasFS then return false end; ensureFolder(); return pcall(function() writefile(SAVE_FOLDER.."/"..sanitize(n)..".json",HttpService:JSONEncode(d)) end) end
+    local function deleteFromDisk(n)
+        if not hasFS then return false end
+        local path=SAVE_FOLDER.."/"..sanitize(n)..".json"
+        local deletado=false
+        if type(delfile)=="function" then local ok=pcall(delfile,path); if ok then deletado=true end end
+        if type(deletefile)=="function" then local ok=pcall(deletefile,path); if ok then deletado=true end end
+        if type(isfile)=="function" then local ok,existe=pcall(isfile,path); if ok and not existe then deletado=true end end
+        if type(writefile)=="function" then
+            local ok,existe=true,false
+            if type(isfile)=="function" then ok,existe=pcall(isfile,path) end
+            if ok and existe then pcall(writefile,path,"{\"deleted\":true,\"frames\":[]}") end
+        end
+        return deletado
+    end
+    local function httpGetSeguro(url)
+        local ms={
+            function() return game:HttpGet(url,true) end,
+            function() return game:HttpGetAsync(url) end,
+            function() if syn and syn.request then return syn.request({Url=url,Method="GET"}).Body end end,
+            function() if http and http.request then return http.request({Url=url,Method="GET"}).Body end end,
+            function() if request then return request({Url=url,Method="GET"}).Body end end,
+            function() if http_request then return http_request({Url=url,Method="GET"}).Body end end,
+        }
+        for _,m in ipairs(ms) do local ok,r=pcall(m); if ok and r and type(r)=="string" and #r>10 then return r end end
+        return nil
+    end
+    local function baixarPrimeiro(urls)
+        for _,u in ipairs(urls) do
+            local ok,res=pcall(httpGetSeguro,u)
+            if ok and res and #res>10 and not res:find("Not Found",1,true) and not res:find("<!DOCTYPE",1,true) then return res,u end
+        end
+        return nil
+    end
+    local function prepararFrames(frames)
+        local n=#frames
+        local cfs=table.create(n); local times=table.create(n)
+        for i=1,n do
+            local f=frames[i]
+            if f.p then cfs[i]=CFrame.new(f.p[1],f.p[2],f.p[3])
+            elseif f.cf then cfs[i]=f.cf end
+            times[i]=f.t or ((i-1)/RECORD_HZ)
+        end
+        frames.cfsCache=cfs; frames.timesCache=times; return frames
+    end
+    local function parseRotas(d,prefixo)
+        local out={}
+        local dc=d:gsub("\r\n","\n"):gsub("\r","\n")
+        if not dc:find("\n") then dc=dc:gsub("("..prefixo..")","\n%1") end
+        for l in dc:gmatch("[^\n]+") do
+            local n,s=l:match("^([^|]+)|(.+)$")
+            if n and s then
+                local f={}
+                for cc in s:gmatch("[^;]+") do
+                    local x,y,z,t=cc:match("([^,]+),([^,]+),([^,]+),([^,]+)")
+                    if x then
+                        local nx,ny,nz=tonumber(x),tonumber(y),tonumber(z)
+                        if nx and ny and nz then f[#f+1]={p={nx,ny,nz},t=tonumber(t) or 0} end
+                    end
+                end
+                if #f>=2 then out[#out+1]={nome=n,frames=prepararFrames(f)} end
+            end
+        end
+        return out
+    end
+
+    local function carregarHitboxData()
+        if hitboxData and #hitboxData>0 then return hitboxData end
+        hitboxData={}
+        local d=httpGetSeguro("https://pastebin.com/raw/Ld2V1LSL")
+        if not d then notify("⚠️ Falha ao baixar hitboxes"); return hitboxData end
+        local bloco=d:match("local%s+hitboxData%s*=%s*(%b{})")
+        if not bloco then bloco=d:match("hitboxData%s*=%s*(%b{})") end
+        if not bloco then notify("⚠️ Tabela não encontrada"); return hitboxData end
+        local f=loadstring("return "..bloco)
+        if not f then notify("⚠️ Erro ao ler tabela"); return hitboxData end
+        local ok,data=pcall(f)
+        if ok and type(data)=="table" then
+            hitboxData=data
+        else
+            for posX,posY,posZ,sizeX,sizeY,sizeZ in bloco:gmatch(
+                "Vector3%.new%(([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)%),%s*size%s*=%s*Vector3%.new%(([%-%d%.]+),([%-%d%.]+),([%-%d%.]+)%)"
+            ) do
+                table.insert(hitboxData,{
+                    pos=Vector3.new(tonumber(posX),tonumber(posY),tonumber(posZ)),
+                    size=Vector3.new(tonumber(sizeX),tonumber(sizeY),tonumber(sizeZ))
+                })
+            end
+        end
+        return hitboxData
+    end
+
+    local TORRES_GLOBAIS={}
+    local function carregarTorresGlobais()
+        local d=baixarPrimeiro({"https://pastebin.com/raw/mgp13UBd"})
+        if not d then notify("⚠️ Torres offline"); return false end
+        TORRES_GLOBAIS=parseRotas(d,"TORRE_")
+        return #TORRES_GLOBAIS>0
+    end
+    task.spawn(carregarTorresGlobais)
+
+    local CIVIS_GLOBAIS={}
+    local function carregarCivisGlobais()
+        local d=baixarPrimeiro({"https://pastebin.com/raw/JfCMbKnY"})
+        if not d then return false end
+        CIVIS_GLOBAIS=parseRotas(d,"CIVIL_")
+        return #CIVIS_GLOBAIS>0
+    end
+    task.spawn(carregarCivisGlobais)
+
+    local PARKOURS={}
+    local parkourCarregando=false
+    local PARKOUR_URLS={
+        "https://gist.githubusercontent.com/primehub784/95916dbc6109d8a6fa33f39ab6acb326/raw",
+        "https://pastebin.com/raw/G1VRfCf0",
+        "https://pastebin.com/raw.php?i=G1VRfCf0",
+        "https://r.jina.ai/https://pastebin.com/raw/G1VRfCf0",
+    }
+    local function baixarParkours()
+        for _,url in ipairs(PARKOUR_URLS) do
+            local d=baixarPrimeiro({url})
+            if d and #d>50 then
+                local lista=parseRotas(d,"PARKOUR_")
+                if #lista>0 then PARKOURS=lista; return true end
+            end
+        end
+        return false
+    end
+    task.spawn(function() task.wait(1); baixarParkours() end)
+
+    local PARKOURS_FIXOS={}
+    local URLS_SEM_BURLA={"https://pastebin.com/raw/F8FXR4aa","https://pastebin.com/raw.php?i=F8FXR4aa","https://r.jina.ai/https://pastebin.com/raw/F8FXR4aa","https://pastebin.com/raw/c0LT5XbS"}
+    local function carregarParkoursFixos()
+        local d=baixarPrimeiro(URLS_SEM_BURLA)
+        if not d then return false end
+        PARKOURS_FIXOS={}
+        for _,pk in ipairs(parseRotas(d,"PARKOUR_")) do
+            if not pk.nome:upper():find("PARKOUR_4_SEM_BURLA",1,true) then table.insert(PARKOURS_FIXOS,pk) end
+        end
+        return #PARKOURS_FIXOS>0
+    end
+    task.spawn(carregarParkoursFixos)
+
+    -- ============================================
+    -- DADOS: COLAS / CORRETOR
+    -- ============================================
+    local COLAS={
+        {nome="TAF (CIGS)",cor=Color3.fromRGB(240,180,40),itens={"TAF: Teste de Aptidão Física: CIGS","Comandante: Sagas","Subcomandante: Deselegant","Lema: Treinar para resistir & Combater para vencer.","Pronomes: Saudações, senhor Guerreiro de Selva."}},
+        {nome="CIE",cor=Color3.fromRGB(70,130,200),itens={"CIE: Agente.","Criador: vicofjgfhf","Sub criador: RIP_dabfj8w","Comandante: eriqurrr.","Subcomandante: RodrigoPao8","Saudações: Saudações, senhores Agentes.","Lema CIE: Inteligência para Vitória & Saber para Prever."}},
+        {nome="Polícia",cor=Color3.fromRGB(70,200,130),itens={"Subcomandante: Matheuslindo587.","Lema: Orientar o Responsável, Corrigir o Irresponsável, Prender o Incorrigível.","Saudações: Saudações, senhores Policiais."}},
+        {nome="BFE (Fantasma)",cor=Color3.fromRGB(200,60,60),itens={"BFE: Fantasma.","Criador: NATANHMELLO4.","Criado: 1983.","Comandante: RenanFoxiy.","Subcomandante: TILAPIA_PROFISSIONAL.","Lema: Qualquer missão, em qualquer lugar, a qualquer hora, de qualquer maneira."}},
+        {nome="BAC",cor=Color3.fromRGB(200,100,40),itens={"BAC: Batalhão de Ações de Comandos","Dono: MateusHgz","Comandante: SasukePro202.","Subcomandante: DanielSxS2.","Lema: O máximo de confusão, morte e destruição na retaguarda do inimigo."}},
+        {nome="CYBER",cor=Color3.fromRGB(150,100,220),itens={"CYBER: Comando de Defesa Cibernética.","Comandante: highanddry98","Lema: Segurança no ciberespaço, soberania para a Nação."}},
+    }
+
+    local CORR={["oi"]="olá",["ola"]="olá",["opa"]="olá",["eae"]="e aí",["eai"]="e aí",["eaí"]="e aí",["salve"]="saudações",["fala"]="falou",["tchau"]="até logo",["xau"]="até logo",["flw"]="falou",["vlw"]="valeu",["bjs"]="beijos",["bj"]="beijo",["abs"]="abraços",["abç"]="abraços",["bomdia"]="bom dia",["boatarde"]="boa tarde",["boanoite"]="boa noite",["vc"]="você",["vcs"]="vocês",["q"]="que",["qq"]="que",["qnd"]="quando",["qdo"]="quando",["pq"]="porque",["tb"]="também",["tbm"]="também",["tmb"]="também",["cmg"]="comigo",["ctg"]="contigo",["mds"]="meu Deus",["nn"]="não",["nao"]="não",["ta"]="está",["tah"]="está",["to"]="estou",["tô"]="estou",["eh"]="é",["hj"]="hoje",["amanha"]="amanhã",["oq"]="o que",["pfv"]="por favor",["blz"]="beleza",["obg"]="obrigado",["td"]="tudo",["ngm"]="ninguém",["algm"]="alguém",["kd"]="cadê",["cade"]="cadê",["ql"]="qual",["qm"]="quem",["qnt"]="quanto",["min"]="mim",["vamo"]="vamos",["tamo"]="estamos",["tava"]="estava",["qro"]="quero",["sla"]="sei lá",["poso"]="posso",["podee"]="pode",["voce"]="você",["sao"]="são",["estao"]="estão",["tambem"]="também",["porem"]="porém",["ate"]="até",["area"]="área",["tres"]="três",["atras"]="atrás",["ai"]="aí",["la"]="lá",["pais"]="país",["so"]="só",["ja"]="já",["familia"]="família",["policia"]="polícia",["missao"]="missão",["missoes"]="missões",["operacao"]="operação",["instrucao"]="instrução",["salario"]="salário",["codigo"]="código",["numero"]="número",["proximo"]="próximo",["possivel"]="possível",["responsavel"]="responsável",["agente"]="a gente",["derrepente"]="de repente",["concerteza"]="com certeza",["apartir"]="a partir",["atravez"]="através",["pobrema"]="problema",["menas"]="menos",["seje"]="seja",["maiz"]="mais",["denovo"]="de novo",["emcima"]="em cima",["top"]="ótimo",["massa"]="legal",["irado"]="legal",["show"]="ótimo",["sussa"]="tranquilo",["tlgd"]="tá ligado",["tmj"]="tamo junto",["vdd"]="verdade",["sdds"]="saudades",["dnv"]="de novo",["cigs"]="CIGS",["cie"]="CIE",["bope"]="BOPE",["bfe"]="BFE",["bac"]="BAC",["bip"]="BIP",["bpe"]="BPE",["taf"]="TAF",["cyber"]="CYBER"}
+    local PT={"[","]","{","}","<",">","http","www","rbxassetid","https://","pastebin"}
+    local CORR_KEYS={}
+    do for k in pairs(CORR) do CORR_KEYS[#CORR_KEYS+1]=k end; table.sort(CORR_KEYS,function(a,b) return #a>#b end) end
+    local function tp(t) for i=1,#PT do if t:find(PT[i],1,true) then return true end end; return false end
+    local function cp(t)
+        for i=1,#CORR_KEYS do
+            local e=CORR_KEYS[i]; local c=CORR[e]
+            t=t:gsub("%f[%w]"..e.."%f[%W]",function(m)
+                if m==m:upper() and #m>1 then return c:upper() end
+                if m:sub(1,1)==m:sub(1,1):upper() then return c:sub(1,1):upper()..c:sub(2) end
+                return c
+            end)
+        end
+        return t
+    end
+    local function cg(t)
+        if tp(t) then return t end
+        for _,c in ipairs({"mas","porém","contudo","entretanto","todavia"}) do t=t:gsub("([^%s,;:%.%!%?])(%s+)("..c.."%f[%W])","%1, %3") end
+        for _,c in ipairs({"ou seja","isto é","por exemplo","além disso","portanto","por isso","assim","logo"}) do t=t:gsub("([^%s,;:%.%!%?])(%s+)("..c..")","%1, %3") end
+        for _,c in ipairs({"porque","pois","já que","visto que"}) do t=t:gsub("([^%s,;:%.%!%?])(%s+)("..c.."%f[%W])","%1, %3") end
+        t=t:gsub("%s+([,%.%!%?;:])","%1"); t=t:gsub("([,%.%!%?;:])([^%s%p%d])","%1 %2"); t=t:gsub("([%.%!%?]%s+)(%l)",function(p,l) return p..l:upper() end)
+        t=t:gsub("^(%l)",function(l) return l:upper() end); t=t:gsub(",%s*,+",","):gsub(",,",","); t=t:gsub(",%s*([%.%!%?])","%1")
+        t=t:gsub("%.%.+","."):gsub("%!%!+","!"):gsub("%?%?+","?"); t=t:gsub("%s+"," "); t=t:gsub("^%s+",""):gsub("%s+$","")
+        if not t:match("[%.%!%?]$") then t=t.."." end
+        return t
+    end
+    local function corrigir(t) if not t or t=="" then return "" end; local x=t:gsub("%s+"," "):gsub("^%s+",""):gsub("%s+$",""); x=cp(x); x=cg(x); return x end
+
+    -- ============================================
+    -- ESTADO / GRAVAÇÃO / REPRODUÇÃO
+    -- ============================================
+    local S={recording=false,playing=false,frames=table.create(MAX_FRAMES),playConn=nil,recordConn=nil,hrp=nil,humanoid=nil,char=nil,animTracks=nil,animCurrent=nil,lastAnimSpeed=0,lastPlayCF=nil,smoothLook=nil,saves={},activeTab="",showingLine=false,lineColor=T.purple,currentCfs=nil}
+
+    local function refreshChar()
+        local c=LocalPlayer.Character; if not c then return false end
+        local h=c:FindFirstChild("HumanoidRootPart"); if not h then return false end
+        S.char=c; S.hrp=h; S.humanoid=c:FindFirstChildOfClass("Humanoid"); return true
+    end
+
+    local currentLineRef=nil
+    local MAX_LINE_PARTS=55
+    local function clearLine()
+        if currentLineRef and currentLineRef.Parent then currentLineRef:Destroy() end
+        currentLineRef=nil
+    end
+    local function drawLine(cfs,corC)
+        clearLine()
+        if not cfs or #cfs<2 then return end
+        local cor=corC or S.lineColor or T.purple
+        local step=math.max(16, math.ceil(#cfs/MAX_LINE_PARTS))
+        local pts=table.create(MAX_LINE_PARTS+2)
+        local n=0
+        for i=1,#cfs,step do n=n+1; pts[n]=cfs[i].Position end
+        if pts[n]~=cfs[#cfs].Position then n=n+1; pts[n]=cfs[#cfs].Position end
+        if n<2 then return end
+        local folder=Instance.new("Folder"); folder.Name="PrimeHubLine"; folder.Parent=workspace
+        local count=0
+        for i=1,n-1 do
+            local a=pts[i]; local b=pts[i+1]
+            local dx=b.X-a.X; local dy=b.Y-a.Y; local dz=b.Z-a.Z
+            local d=math.sqrt(dx*dx+dy*dy+dz*dz)
+            if d>0.5 then
+                local s=Instance.new("Part")
+                s.Anchored=true; s.CanCollide=false; s.CanQuery=false; s.CanTouch=false; s.CastShadow=false
+                s.Material=Enum.Material.Neon; s.Color=cor
+                s.Size=Vector3.new(0.15,0.15,d)
+                s.CFrame=CFrame.lookAt(Vector3.new((a.X+b.X)*0.5,(a.Y+b.Y)*0.5,(a.Z+b.Z)*0.5),b)
+                s.Parent=folder
+                count=count+1
+                if count%40==0 then task.wait() end
+            end
+        end
+        currentLineRef=folder
+    end
+
+    local function createTrail()
+        if not refreshChar() then return end
+        local o=S.hrp:FindFirstChild("PrimeHubTrail"); if o then o:Destroy() end
+        local a0=Instance.new("Attachment",S.hrp); a0.Position=Vector3.new(0,0.5,0)
+        local a1=Instance.new("Attachment",S.hrp); a1.Position=Vector3.new(0,-0.5,0)
+        local t=Instance.new("Trail"); t.Name="PrimeHubTrail"; t.Attachment0=a0; t.Attachment1=a1; t.Lifetime=2; t.FaceCamera=true
+        t.Color=ColorSequence.new(T.purple); t.Parent=S.hrp
+    end
+    local function destroyTrail()
+        if S.hrp then
+            local t=S.hrp:FindFirstChild("PrimeHubTrail")
+            if t then t.Enabled=false; task.delay(3,function() if t and t.Parent then t:Destroy() end end) end
+        end
+    end
+    local function getAnim()
+        if not S.humanoid and S.char then S.humanoid=S.char:FindFirstChildOfClass("Humanoid") end
+        if not S.humanoid then return nil end
+        local a=S.humanoid:FindFirstChildOfClass("Animator"); if not a then a=Instance.new("Animator",S.humanoid) end; return a
+    end
+    local function prepAnims()
+        if not refreshChar() then return false end
+        if not S.humanoid then S.humanoid=S.char:FindFirstChildOfClass("Humanoid") end
+        local an=getAnim(); if not an then return false end
+        if S.animTracks then for _,t in pairs(S.animTracks) do pcall(function() t:Stop(0) end) end end
+        S.animTracks={}
+        local function load(id)
+            if not id then return nil end
+            local a=Instance.new("Animation"); a.AnimationId=id
+            local ok,tr=pcall(function() return an:LoadAnimation(a) end)
+            if ok and tr then tr.Priority=Enum.AnimationPriority.Movement; tr.Looped=true; return tr end
+            return nil
+        end
+        S.animTracks.idle=load(A_IDLE); S.animTracks.walk=load(A_WALK); S.animTracks.jump=load(A_JUMP); S.animTracks.fall=load(A_FALL)
+        S.animCurrent=nil; return true
+    end
+    local function switchAnim(n)
+        if not S.animTracks or S.animCurrent==n then return end
+        if S.animCurrent and S.animTracks[S.animCurrent] then pcall(function() S.animTracks[S.animCurrent]:Stop(0.15) end) end
+        local t=S.animTracks[n]
+        if t then pcall(function() t:Play(0.15,1,1) end); S.animCurrent=n end
+    end
+    local function updateAnim(sp)
+        if not S.animTracks then return end
+        local hum=S.humanoid
+        if hum and hum.FloorMaterial==Enum.Material.Air then
+            if hum:GetState()==Enum.HumanoidStateType.Freefall then switchAnim(sp>5 and "fall" or "jump") end
+            return
+        end
+        if sp<0.5 then switchAnim("idle") return end
+        switchAnim("walk")
+    end
+    local function stopAnims()
+        if S.animTracks then for _,t in pairs(S.animTracks) do pcall(function() t:Stop(0.15) end) end end
+        S.animTracks=nil; S.animCurrent=nil
+    end
+    local function stopPlayback(s)
+        S.playing=false
+        if S.playConn then S.playConn:Disconnect() S.playConn=nil end
+        if S.onStopRestore then pcall(S.onStopRestore); S.onStopRestore=nil end
+        stopAnims()
+        if timerGui then timerGui.Enabled=false end
+        setStatus("Pronto",T.green)
+        if not s then notify("Reprodução interrompida") end
+    end
+
+    local function playFrames(frames,name,draw)
+        if not frames or #frames<2 then notify("Trajetória inválida") return end
+        if not refreshChar() then notify("Personagem não encontrado") return end
+        if S.playing then stopPlayback(true) end
+        if S.recording then S.recording=false; if S.recordConn then S.recordConn:Disconnect() S.recordConn=nil end end
+        local cfs=frames.cfsCache
+        local times=frames.timesCache
+        if not cfs or not times then
+            cfs={}; times={}
+            for i,f in ipairs(frames) do
+                local cf=f.cf or (f.p and CFrame.new(f.p[1],f.p[2],f.p[3]))
+                if cf then cfs[#cfs+1]=cf; times[#times+1]=f.t or ((i-1)/RECORD_HZ) end
+            end
+        end
+        if #cfs<2 then notify("Trajetória inválida") return end
+        if #cfs>600 then
+            local sk=math.ceil(#cfs/400)
+            local nC,nT={},{}
+            for i=1,#cfs,sk do table.insert(nC,cfs[i]); table.insert(nT,times[i]) end
+            if nC[#nC]~=cfs[#cfs] then table.insert(nC,cfs[#cfs]); table.insert(nT,times[#times]) end
+            cfs,times=nC,nT
+        end
+        local positions=table.create(#cfs)
+        for i=1,#cfs do positions[i]=cfs[i].Position end
+        if draw then drawLine(cfs,S.lineColor) end
+        S.playing=true; S.playPositions=positions; S.playTimes=times; S.playIndex=1
+        S.playStartTime=os.clock(); S.playTotal=times[#times]
+        S.lastAnimSpeed=0; S.lastPlayCF=nil; S.smoothLook=nil
+        if S.humanoid then pcall(function() S.humanoid.AutoRotate=false end) end
+        S.onStopRestore=function() if S.humanoid then pcall(function() S.humanoid.AutoRotate=true end) end end
+        notify("Reproduzindo: "..(name or "traj"))
+        setStatus("Reproduzindo",T.cyan)
+        if not prepAnims() then return end
+        switchAnim("idle")
+        if timerGui then timerRota.Text=(name or "traj"); timerTempo.Text="0.0s"; timerGui.Enabled=true end
+        local pR=positions; local tR=times; local tot=#positions; local aC=0; local lVZ=0
+        S.playConn=RunService.Heartbeat:Connect(function(dt)
+            if not S.playing then return end
+            local h=S.hrp
+            if not h or not h.Parent then stopPlayback(true) return end
+            local el=os.clock()-S.playStartTime
+            if timerTempo then timerTempo.Text=string.format("%.1fs", el) end
+            if el>=S.playTotal then
+                local lP=pR[tot]
+                pcall(function() h.CFrame=CFrame.new(lP)*(h.CFrame-h.CFrame.Position); h.AssemblyLinearVelocity=Vector3.zero; h.AssemblyAngularVelocity=Vector3.zero end)
+                stopPlayback(true); notify("Reprodução concluída"); return
+            end
+            local idx=S.playIndex
+            while idx<tot and tR[idx+1]<=el do idx=idx+1 end
+            S.playIndex=idx
+            local i1=idx; local i2=(idx<tot) and (idx+1) or idx
+            local p1=pR[i1]; local p2=pR[i2]; local t1=tR[i1]; local t2=tR[i2]
+            local al=(t2>t1) and ((el-t1)/(t2-t1)) or 0
+            if al<0 then al=0 elseif al>1 then al=1 end
+            local iP=p1+(p2-p1)*al
+            local fCF
+            local lI=i1+5; if lI>tot then lI=tot end
+            local sE=pR[lI]; local md=sE-p1; md=Vector3.new(md.X,0,md.Z)
+            if md.Magnitude>0.1 then
+                md=md.Unit
+                if S.smoothLook then S.smoothLook=S.smoothLook:Lerp(md,0.25); local mg=S.smoothLook.Magnitude; if mg>0.01 then S.smoothLook=S.smoothLook/mg end
+                else S.smoothLook=md end
+                fCF=CFrame.lookAt(iP,iP+S.smoothLook)
+            else
+                if S.smoothLook then fCF=CFrame.lookAt(iP,iP+S.smoothLook) else fCF=CFrame.new(iP)*(h.CFrame-h.CFrame.Position) end
+            end
+            if tick()-lVZ>0.05 then lVZ=tick(); h.AssemblyLinearVelocity=Vector3.zero; h.AssemblyAngularVelocity=Vector3.zero end
+            h.CFrame=fCF
+            aC=aC+1
+            if aC>=5 then
+                aC=0
+                local lP=S.lastPlayCF and S.lastPlayCF.Position or iP
+                local dist=(iP-lP).Magnitude
+                local spd=dist/(dt*5)
+                if spd>150 then spd=S.lastAnimSpeed end
+                S.lastAnimSpeed=spd; updateAnim(spd)
+            end
+            S.lastPlayCF=fCF
+        end)
+    end
+
+    local function startRecording()
+        if not refreshChar() then notify("Personagem não encontrado") return end
+        S.frames=table.create(MAX_FRAMES); S.recording=true; S.recordStart=os.clock()
+        createTrail(); clearLine(); notify("Gravando...")
+        setStatus("Gravando",T.red)
+        if recBtn then recBtn.Text="Finalizar"; recBtn.BackgroundColor3=T.red end
+        local lP,lD; local acc=0
+        S.recordConn=RunService.Heartbeat:Connect(function(dt)
+            if not S.recording then return end
+            acc=acc+dt
+            if acc<RECORD_INTERVAL then return end
+            acc=0
+            local hrp=S.hrp
+            if hrp and hrp.Parent then
+                local cf=hrp.CFrame; local pos,dir=cf.Position,cf.LookVector
+                local sv=false
+                if not lP then sv=true
+                elseif (pos-lP).Magnitude>RECORD_MIN_DIST or (dir-lD).Magnitude>0.05 then sv=true end
+                if sv and #S.frames<MAX_FRAMES then S.frames[#S.frames+1]={cf=cf,t=os.clock()-S.recordStart}; lP,lD=pos,dir end
+            end
+        end)
+    end
+    local function stopRecording()
+        S.recording=false
+        if S.recordConn then S.recordConn:Disconnect() S.recordConn=nil end
+        setStatus("Pronto",T.green)
+        if recBtn then recBtn.Text="Gravar"; recBtn.BackgroundColor3=T.purple end
+        if #S.frames>1 then
+            local cfs={}; for i,f in ipairs(S.frames) do cfs[i]=f.cf end
+            drawLine(cfs,S.lineColor); notify(string.format("Gravado! %d pontos",#S.frames))
+        else notify("Nada foi gravado") end
+    end
+
+    local function loadSaves()
+        S.saves={}
+        if not hasFS then return 0 end
+        local ok,files=pcall(listfiles,SAVE_FOLDER)
+        if not ok or type(files)~="table" then return 0 end
+        for _,path in ipairs(files) do
+            if path:lower():match("%.json$") then
+                local name=path:match("([^/\\]+)%.json$") or "traj"
+                local okR,content=pcall(readfile,path)
+                if okR and content and #content>5 then
+                    local data=nil; pcall(function() data=HttpService:JSONDecode(content) end)
+                    if data and not data.deleted and type(data.frames)=="table" and #data.frames>=2 then
+                        local fr={}; local valido=true
+                        for i,f in ipairs(data.frames) do
+                            if not f or not f.p then valido=false; break end
+                            local x,y,z=tonumber(f.p[1]),tonumber(f.p[2]),tonumber(f.p[3])
+                            if not x or not y or not z then valido=false; break end
+                            fr[i]={cf=CFrame.new(x,y,z),t=tonumber(f.t) or ((i-1)/30)}
+                        end
+                        if valido and #fr>=2 then
+                            local isT=name:upper():find("^TORRE")~=nil
+                            local isC=name:upper():find("^CIVIL")~=nil
+                            S.saves[name]={name=name,frames=prepararFrames(fr),isTorre=isT,isCivil=isC}
+                        end
+                    end
+                end
+            end
+        end
+        local t=0; for _ in pairs(S.saves) do t=t+1 end; return t
+    end
+
+    local function doSave(name)
+        if #S.frames<2 then notify("Nada para salvar") return end
+        if name=="" then name="traj_"..os.date("%Y%m%d_%H%M%S") end
+        local isT=name:upper():find("^TORRE")~=nil
+        local isC=name:upper():find("^CIVIL")~=nil
+        local data={name=name,savedAt=os.time(),isTorre=isT,isCivil=isC,frames={}}
+        for i,f in ipairs(S.frames) do data.frames[i]={p={f.cf.Position.X,f.cf.Position.Y,f.cf.Position.Z},t=f.t} end
+        S.saves[name]={name=name,frames=prepararFrames(S.frames),isTorre=isT,isCivil=isC}
+        local ok=saveToDisk(name,data)
+        local dest=isT and "Torres 🗼" or (isC and "Civil 👮" or "Biblioteca 📚")
+        notify((ok and "Salvo em " or "Salvo memória em ")..dest..": "..name)
+        if not isT and not isC then
+            task.spawn(function() task.wait(0.1); if refreshLib then pcall(refreshLib) end; if switchTab then pcall(switchTab,"library") end end)
+        end
+    end
+
+    -- ============================================
+    -- UI: JANELA PRINCIPAL
+    -- ============================================
+    local gui=new("ScreenGui",{Name="PrimeHubUI",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=999},UI_PARENT)
+
+    local function makeDraggable(handle,target)
+        local drag,ds,sp=false,nil,nil
+        handle.InputBegan:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+                drag=true; ds=i.Position; sp=target.Position
+                i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then drag=false end end)
+            end
+        end)
+        handle.InputChanged:Connect(function(i)
+            if drag and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+                local d=i.Position-ds
+                target.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+            end
+        end)
+    end
+
+    -- Botão flutuante
+    local fb=new("TextButton",{Size=UDim2.new(0,48,0,48),Position=UDim2.new(0,16,.5,-24),BackgroundColor3=T.bg,BorderSizePixel=0,Text="",AutoButtonColor=false,ZIndex=500},gui)
+    corner(fb,24)
+    local fS=stroke(fb,T.purple,2,0)
+    local fbImg=new("ImageLabel",{Size=UDim2.new(.8,0,.8,0),Position=UDim2.new(.1,0,.1,0),BackgroundTransparency=1,Image=FOTO_ID,ZIndex=501},fb)
+    corner(fbImg,24)
+
+    -- Timer de rota
+    timerGui=new("ScreenGui",{Name="PrimeHubTimer",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=998,Enabled=false},UI_PARENT)
+    local timerFrame=new("Frame",{Size=UDim2.new(0,190,0,78),AnchorPoint=Vector2.new(.5,0),Position=UDim2.new(.5,0,0,16),BackgroundColor3=T.bg,BackgroundTransparency=.08,BorderSizePixel=0},timerGui)
+    corner(timerFrame,12); stroke(timerFrame,T.purple,1.5,.1)
+    local tDot=new("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,12,0,13),BackgroundColor3=T.cyan,BorderSizePixel=0},timerFrame); corner(tDot,4)
+    label(timerFrame,{Size=UDim2.new(1,-30,0,18),Position=UDim2.new(0,26,0,8),Text="ROTA EM ANDAMENTO",Font=GB,TextSize=10,TextColor3=T.purple,TextXAlignment=LEFT})
+    timerTempo=label(timerFrame,{Size=UDim2.new(1,-24,0,26),Position=UDim2.new(0,12,0,26),Text="0.0s",Font=GBK,TextSize=22,TextXAlignment=LEFT})
+    timerRota=label(timerFrame,{Size=UDim2.new(1,-24,0,14),Position=UDim2.new(0,12,0,54),Text="---",TextSize=10,TextColor3=T.textDim,TextXAlignment=LEFT,TextTruncate=Enum.TextTruncate.AtEnd})
+    label(timerFrame,{Size=UDim2.new(0,70,0,12),AnchorPoint=Vector2.new(1,1),Position=UDim2.new(1,-10,1,-6),Text="by "..CREATOR,TextSize=9,TextColor3=T.textMuted,TextXAlignment=Enum.TextXAlignment.Right})
+    makeDraggable(timerFrame,timerFrame)
+
+    -- Janela
+    local win=new("Frame",{AnchorPoint=Vector2.new(.5,.5),Size=UDim2.new(WIN_W,0,WIN_H,0),Position=UDim2.new(.5,0,.5,0),BackgroundColor3=T.bg,BorderSizePixel=0,Active=true,ClipsDescendants=true},gui)
+    corner(win,14); stroke(win,T.purpleSoft,1.5,0)
+    new("UISizeConstraint",{MaxSize=Vector2.new(760,440),MinSize=Vector2.new(360,240)},win)
+
+    -- Header
+    local header=new("Frame",{Size=UDim2.new(1,0,0,50),BackgroundColor3=T.panel,BorderSizePixel=0,ZIndex=10},win)
+    corner(header,14)
+    new("Frame",{Size=UDim2.new(1,0,0,14),Position=UDim2.new(0,0,1,-14),BackgroundColor3=T.panel,BorderSizePixel=0,ZIndex=10},header)
+    new("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=T.border,BorderSizePixel=0,ZIndex=11},header)
+    local logo=new("Frame",{Size=UDim2.new(0,30,0,30),Position=UDim2.new(0,14,0,10),BackgroundColor3=T.purple,BorderSizePixel=0,ZIndex=12},header); corner(logo,9)
+    label(logo,{Size=UDim2.new(1,0,1,0),Text="P",Font=GBK,TextSize=17,ZIndex=13})
+    label(header,{Size=UDim2.new(0,200,0,18),Position=UDim2.new(0,54,0,8),Text="PRIME HUB",Font=GBK,TextSize=15,TextXAlignment=LEFT,ZIndex=12})
+    label(header,{Size=UDim2.new(0,220,0,14),Position=UDim2.new(0,54,0,27),Text="Criador: "..CREATOR.."  •  "..VERSION,TextSize=10,TextColor3=T.textMuted,TextXAlignment=LEFT,ZIndex=12})
+    local pill=new("Frame",{Size=UDim2.new(0,104,0,24),AnchorPoint=Vector2.new(1,.5),Position=UDim2.new(1,-52,.5,0),BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=12},header)
+    corner(pill,12); stroke(pill,T.border,1,0)
+    stDot=new("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,10,.5,-4),BackgroundColor3=T.green,BorderSizePixel=0,ZIndex=13},pill); corner(stDot,4)
+    stLabel=label(pill,{Size=UDim2.new(1,-26,1,0),Position=UDim2.new(0,24,0,0),Text="Pronto",Font=GB,TextSize=10,TextColor3=T.textDim,TextXAlignment=LEFT,ZIndex=13})
+    local bClose=new("TextButton",{Size=UDim2.new(0,28,0,28),AnchorPoint=Vector2.new(1,.5),Position=UDim2.new(1,-12,.5,0),BackgroundColor3=T.card,BorderSizePixel=0,Text="✕",Font=GB,TextSize=13,TextColor3=T.textDim,AutoButtonColor=false,ZIndex=12},header)
+    corner(bClose,8)
+    makeDraggable(header,win)
+
+    -- Sidebar
+    local sidebar=new("ScrollingFrame",{Size=UDim2.new(0,148,1,-66),Position=UDim2.new(0,8,0,58),BackgroundColor3=T.panel,BorderSizePixel=0,ScrollBarThickness=2,ScrollBarImageColor3=T.purple,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,ZIndex=5},win)
+    corner(sidebar,12); stroke(sidebar,T.border,1,.2)
+    new("UIListLayout",{Padding=UDim.new(0,2),SortOrder=Enum.SortOrder.LayoutOrder},sidebar)
+    new("UIPadding",{PaddingTop=UDim.new(0,6),PaddingBottom=UDim.new(0,6),PaddingLeft=UDim.new(0,6),PaddingRight=UDim.new(0,6)},sidebar)
+
+    -- Conteúdo
+    local content=new("Frame",{Size=UDim2.new(1,-170,1,-66),Position=UDim2.new(0,162,0,58),BackgroundColor3=T.panel,BorderSizePixel=0,ClipsDescendants=true,ZIndex=5},win)
+    corner(content,12); stroke(content,T.border,1,.2)
+    local pT=label(content,{Size=UDim2.new(1,-28,0,20),Position=UDim2.new(0,14,0,10),Text="",Font=GBK,TextSize=15,TextXAlignment=LEFT})
+    local pS=label(content,{Size=UDim2.new(1,-28,0,14),Position=UDim2.new(0,14,0,31),Text="",TextSize=10,TextColor3=T.textMuted,TextXAlignment=LEFT})
+
+    -- ============================================
+    -- COMPONENTES
+    -- ============================================
+    local tabs={}
+    local onShow={}
+    local function createPanel(id)
+        local p=new("ScrollingFrame",{Size=UDim2.new(1,-16,1,-60),Position=UDim2.new(0,8,0,54),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=3,ScrollBarImageColor3=T.purple,CanvasSize=UDim2.new(),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false},content)
+        new("UIListLayout",{Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},p)
+        new("UIPadding",{PaddingRight=UDim.new(0,6),PaddingBottom=UDim.new(0,8)},p)
+        tabs[id]=p; return p
+    end
+    local function clearPanel(p)
+        for _,c in ipairs(p:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+    end
+    local function mkCard(parent,order,h)
+        local c=new("Frame",{Size=UDim2.new(1,0,0,h or 56),BackgroundColor3=T.card,BorderSizePixel=0,LayoutOrder=order},parent)
+        corner(c,10); stroke(c,T.border,1,.25); return c
+    end
+    local function mkBtn(parent,text,color,w,onClick)
+        local b=new("TextButton",{Size=UDim2.new(0,w or 70,0,30),BackgroundColor3=color,BorderSizePixel=0,Text=text,Font=GB,TextSize=11,TextColor3=T.text,AutoButtonColor=false},parent)
+        corner(b,8)
+        b.MouseButton1Down:Connect(function() b.BackgroundTransparency=.3 end)
+        b.MouseButton1Up:Connect(function() b.BackgroundTransparency=0 end)
+        b.MouseLeave:Connect(function() b.BackgroundTransparency=0 end)
+        b.MouseButton1Click:Connect(function() if onClick then pcall(onClick) end end)
+        return b
+    end
+    local function mkRow(parent,order,icon,title,sub,accent,rightW)
+        local c=mkCard(parent,order,56)
+        local badge=new("Frame",{Size=UDim2.new(0,34,0,34),Position=UDim2.new(0,10,.5,-17),BackgroundColor3=accent,BackgroundTransparency=.8,BorderSizePixel=0},c); corner(badge,9)
+        label(badge,{Size=UDim2.new(1,0,1,0),Text=icon,Font=GB,TextSize=16,TextColor3=accent})
+        label(c,{Size=UDim2.new(1,-(62+rightW),0,18),Position=UDim2.new(0,54,0,10),Text=title,Font=GB,TextSize=12,TextXAlignment=LEFT,TextTruncate=Enum.TextTruncate.AtEnd})
+        label(c,{Size=UDim2.new(1,-(62+rightW),0,14),Position=UDim2.new(0,54,0,29),Text=sub,TextSize=10,TextColor3=T.textMuted,TextXAlignment=LEFT,TextTruncate=Enum.TextTruncate.AtEnd})
+        local right=new("Frame",{Size=UDim2.new(0,rightW,1,0),AnchorPoint=Vector2.new(1,0),Position=UDim2.new(1,-8,0,0),BackgroundTransparency=1},c)
+        new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,HorizontalAlignment=Enum.HorizontalAlignment.Right,VerticalAlignment=Enum.VerticalAlignment.Center,Padding=UDim.new(0,6),SortOrder=Enum.SortOrder.LayoutOrder},right)
+        return c,right
+    end
+    local function mkToggle(parent,order,icon,title,sub,accent,cb)
+        local _,right=mkRow(parent,order,icon,title,sub,accent,60)
+        local sw=new("TextButton",{Size=UDim2.new(0,44,0,24),BackgroundColor3=T.off,Text="",AutoButtonColor=false,BorderSizePixel=0},right); corner(sw,12)
+        local knob=new("Frame",{Size=UDim2.new(0,18,0,18),Position=UDim2.new(0,3,.5,-9),BackgroundColor3=Color3.new(1,1,1),BorderSizePixel=0},sw); corner(knob,9)
+        local state=false
+        local function set(v)
+            state=v
+            TweenService:Create(sw,TweenInfo.new(.2),{BackgroundColor3=v and accent or T.off}):Play()
+            TweenService:Create(knob,TweenInfo.new(.2),{Position=v and UDim2.new(0,23,.5,-9) or UDim2.new(0,3,.5,-9)}):Play()
+        end
+        sw.MouseButton1Click:Connect(function() set(not state); if cb then pcall(cb,state) end end)
+        return set
+    end
+    local function mkSection(parent,order,text,color)
+        return label(parent,{Size=UDim2.new(1,0,0,18),Text=string.upper(text),Font=GB,TextSize=10,TextColor3=color or T.textMuted,TextXAlignment=LEFT,LayoutOrder=order})
+    end
+    local function mkEmpty(parent,order,text)
+        return label(parent,{Size=UDim2.new(1,0,0,70),Text=text,TextSize=11,TextColor3=T.textMuted,TextWrapped=true,LayoutOrder=order})
+    end
+
+    local CORES={{n="Roxo",c=Color3.fromRGB(160,100,240)},{n="Ciano",c=Color3.fromRGB(95,215,250)},{n="Verde",c=Color3.fromRGB(85,220,150)},{n="Vermelho",c=Color3.fromRGB(240,90,110)},{n="Amarelo",c=Color3.fromRGB(255,200,70)},{n="Rosa",c=Color3.fromRGB(255,120,200)},{n="Azul",c=Color3.fromRGB(70,130,240)},{n="Branco",c=Color3.fromRGB(245,245,250)}}
+    local function buildColorPicker(parent,order)
+        local c=mkCard(parent,order,74)
+        label(c,{Size=UDim2.new(1,-20,0,18),Position=UDim2.new(0,12,0,8),Text="🎨  Cor da linha",Font=GB,TextXAlignment=LEFT})
+        local row=new("Frame",{Size=UDim2.new(1,-20,0,32),Position=UDim2.new(0,10,0,32),BackgroundTransparency=1},c)
+        new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8),VerticalAlignment=Enum.VerticalAlignment.Center,SortOrder=Enum.SortOrder.LayoutOrder},row)
+        local strokes={}
+        for i,info in ipairs(CORES) do
+            local b=new("TextButton",{Size=UDim2.new(0,28,0,28),BackgroundColor3=info.c,Text="",AutoButtonColor=false,BorderSizePixel=0,LayoutOrder=i},row)
+            corner(b,14)
+            strokes[i]=stroke(b,T.text,2,(S.lineColor==info.c) and 0 or 1)
+            b.MouseButton1Click:Connect(function()
+                S.lineColor=info.c
+                for j,s in ipairs(strokes) do s.Transparency=(j==i) and 0 or 1 end
+                notify("Cor: "..info.n)
+                if S.showingLine and S.currentCfs then drawLine(S.currentCfs,S.lineColor) end
+            end)
+        end
+    end
+
+    local lineBtn=nil
+    local function resetLineBtn()
+        if lineBtn and lineBtn.Parent then lineBtn.Text="Ver linha"; lineBtn.BackgroundColor3=T.cyan end
+        lineBtn=nil
+    end
+    local function buildRoute(parent,order,icon,nome,frames,extra)
+        local _,right=mkRow(parent,order,icon,nome,#frames.." pontos",T.purple,extra and 196 or 160)
+        local bR=mkBtn(right,"▶ Rodar",T.purple,72,function() playFrames(frames,nome,true) end); bR.LayoutOrder=1
+        local bV
+        bV=mkBtn(right,"Ver linha",T.cyan,78,function()
+            if lineBtn==bV then
+                clearLine(); S.showingLine=false; S.currentCfs=nil; resetLineBtn(); notify("Linha ocultada")
+            else
+                local cfs=frames.cfsCache
+                if not cfs then cfs=table.create(#frames); for j,f in ipairs(frames) do if f.cf then cfs[j]=f.cf elseif f.p then cfs[j]=CFrame.new(f.p[1],f.p[2],f.p[3]) end end; frames.cfsCache=cfs end
+                if #cfs>=2 then
+                    resetLineBtn()
+                    drawLine(cfs,S.lineColor); S.showingLine=true; S.currentCfs=cfs
+                    bV.Text="Ocultar"; bV.BackgroundColor3=T.red; lineBtn=bV
+                    notify("Mostrando: "..nome)
+                else notify("Trajetória inválida") end
+            end
+        end)
+        bV.LayoutOrder=2
+        if extra then extra(right) end
+    end
+
+    -- ============================================
+    -- ABAS (sidebar)
+    -- ============================================
+    local TAB_DEFS={
+        {"main","🏠","Principal","GRAVAÇÃO","Gravador","Grave, reproduza e salve trajetórias"},
+        {"library","📚","Biblioteca",nil,"Biblioteca","Suas trajetórias salvas"},
+        {"parkour","🕵️","Parkour","ROTAS","Parkour","Rotas prontas de parkour"},
+        {"torres","🗼","Torres",nil,"Torres","Torres globais"},
+        {"civil","👮","Civil",nil,"Civil","Rotas civis"},
+        {"farm","🏗","Farm","AUTOMAÇÃO","Farm automático","Coleta e entrega automática"},
+        {"auxilios","⭐","Auxílios",nil,"Auxílios","Ajudas para o parkour"},
+        {"colas","🗒","Colas","EXTRAS","Colas","Textos prontos para copiar"},
+        {"ia","🤖","IA",nil,"Corretor","Corretor gramatical rápido"},
+        {"config","⚙️","Config","SISTEMA","Configurações","Ajustes do menu"},
+        {"about","💎","Sobre",nil,"Sobre","Créditos e comunidade"},
+    }
+    local TAB_INFO={}
+    local tabButtons={}
+    for i,d in ipairs(TAB_DEFS) do
+        local id,icon,name,group,title,sub=d[1],d[2],d[3],d[4],d[5],d[6]
+        TAB_INFO[id]={title=title,sub=sub}
+        if group then
+            local g=label(sidebar,{Size=UDim2.new(1,0,0,22),Text="  "..group,Font=GB,TextSize=9,TextColor3=T.textMuted,TextXAlignment=LEFT,LayoutOrder=i*2-1})
+        end
+        local b=new("TextButton",{Size=UDim2.new(1,0,0,34),BackgroundColor3=T.active,BackgroundTransparency=1,BorderSizePixel=0,Text="",AutoButtonColor=false,LayoutOrder=i*2,ZIndex=6},sidebar)
+        corner(b,8)
+        local bar=new("Frame",{Size=UDim2.new(0,3,0,16),Position=UDim2.new(0,2,.5,-8),BackgroundColor3=T.purple,BorderSizePixel=0,Visible=false,ZIndex=7},b); corner(bar,2)
+        local ic=label(b,{Size=UDim2.new(0,24,1,0),Position=UDim2.new(0,12,0,0),Text=icon,Font=GB,TextSize=14,TextColor3=T.textDim,ZIndex=7})
+        local nl=label(b,{Size=UDim2.new(1,-44,1,0),Position=UDim2.new(0,40,0,0),Text=name,Font=GB,TextSize=12,TextColor3=T.textDim,TextXAlignment=LEFT,ZIndex=7})
+        tabButtons[id]={btn=b,bar=bar,name=nl}
+        createPanel(id)
+        b.MouseButton1Click:Connect(function() switchTab(id) end)
+    end
+    switchTab=function(id)
+        if S.activeTab==id then return end
+        S.activeTab=id
+        local info=TAB_INFO[id]
+        pT.Text=info.title; pS.Text=info.sub
+        for tid,t in pairs(tabButtons) do
+            local on=(tid==id)
+            t.btn.BackgroundTransparency=on and 0 or 1
+            t.bar.Visible=on
+            t.name.TextColor3=on and T.text or T.textDim
+        end
+        for tid,p in pairs(tabs) do p.Visible=(tid==id) end
+        if onShow[id] then task.spawn(onShow[id]) end
+    end
+
+    -- ============================================
+    -- PRINCIPAL
+    -- ============================================
+    do
+        local p=tabs.main
+        local _,r1=mkRow(p,1,"⏺","Gravar","Grava seu trajeto a 60 FPS",T.purple,100)
+        recBtn=mkBtn(r1,"Gravar",T.purple,90,function()
+            if S.recording then stopRecording() else if S.playing then stopPlayback(true) end; startRecording() end
+        end)
+        local _,r2=mkRow(p,2,"▶","Reproduzir","Roda a trajetória gravada",T.cyan,100)
+        mkBtn(r2,"Rodar",T.cyan,90,function()
+            if S.playing then return end
+            if #S.frames<2 then notify("Nada gravado") return end
+            playFrames(S.frames,"traj",false)
+        end)
+        local _,r3=mkRow(p,3,"⏹","Parar","Interrompe a reprodução",T.yellow,100)
+        mkBtn(r3,"Parar",T.yellow,90,function() if S.playing then stopPlayback(false) else notify("Nada rodando") end end)
+        local _,r4=mkRow(p,4,"💾","Salvar","Salva a trajetória com um nome",T.green,100)
+        mkBtn(r4,"Salvar",T.green,90,function() if #S.frames<2 then notify("Nada para salvar") return end; if openModal then openModal() end end)
+        local _,r5=mkRow(p,5,"🗑","Apagar","Limpa a gravação atual",T.red,100)
+        mkBtn(r5,"Apagar",T.red,90,function()
+            if S.recording then stopRecording() end
+            if S.playing then stopPlayback(true) end
+            S.frames=table.create(MAX_FRAMES); clearLine(); notify("Apagado")
+        end)
+    end
+
+    -- ============================================
+    -- BIBLIOTECA
+    -- ============================================
+    refreshLib=function()
+        local p=tabs.library
+        clearPanel(p); resetLineBtn()
+        buildColorPicker(p,0)
+        local names={}
+        for key,d in pairs(S.saves) do if not d.isTorre and not d.isCivil then names[#names+1]=key end end
+        table.sort(names,function(a,b) return a:lower()<b:lower() end)
+        if #names==0 then mkEmpty(p,1,"📭  Biblioteca vazia.\nGrave uma trajetória e salve para ela aparecer aqui."); return end
+        for i,name in ipairs(names) do
+            local d=S.saves[name]
+            if d and d.frames then
+                buildRoute(p,i,"▶",name,d.frames,function(right)
+                    local b=mkBtn(right,"🗑",T.red,34,function()
+                        S.saves[name]=nil; deleteFromDisk(name); notify("Removido: "..name); refreshLib()
+                    end)
+                    b.LayoutOrder=3
+                end)
+            end
+        end
+    end
+    onShow.library=function() refreshLib() end
+
+    -- ============================================
+    -- PARKOUR
+    -- ============================================
+    local parkPanel=tabs.parkour
+    local parkourConstruido=false
+    local function montarParkour()
+        clearPanel(parkPanel); resetLineBtn(); clearLine(); S.currentCfs=nil
+        buildColorPicker(parkPanel,0)
+        for i,pk in ipairs(PARKOURS) do buildRoute(parkPanel,i,"🕵️",pk.nome,pk.frames) end
+        local w=mkCard(parkPanel,999,48)
+        w.BackgroundColor3=T.redSoft
+        label(w,{Size=UDim2.new(1,-16,1,0),Position=UDim2.new(0,8,0,0),Text="⚠️  SEM BURLA!  ⚠️",Font=GBK,TextSize=16,TextColor3=T.red})
+        if #PARKOURS_FIXOS==0 then carregarParkoursFixos() end
+        for i,pk in ipairs(PARKOURS_FIXOS) do buildRoute(parkPanel,1000+i,"🚫",pk.nome,pk.frames) end
+        parkourConstruido=true
+    end
+    onShow.parkour=function()
+        if #PARKOURS>0 then
+            if not parkourConstruido then montarParkour() end
+            return
+        end
+        if parkourCarregando then return end
+        parkourCarregando=true
+        clearPanel(parkPanel); S.currentCfs=nil
+        buildColorPicker(parkPanel,0)
+        local loadTxt=label(parkPanel,{Size=UDim2.new(1,0,0,60),Text="⏳  Carregando parkours...",Font=GB,TextColor3=T.yellow,TextWrapped=true,LayoutOrder=1})
+        task.wait(.1)
+        local ok=baixarParkours()
+        parkourCarregando=false
+        if not ok or #PARKOURS==0 then
+            if loadTxt and loadTxt.Parent then loadTxt.Text="⚠️  Falha ao carregar.\nToque na aba novamente."; loadTxt.TextColor3=T.red end
+            return
+        end
+        montarParkour()
+        notify("✅ "..#PARKOURS.." parkours carregados")
+    end
+
+    -- ============================================
+    -- CIVIL
+    -- ============================================
+    local civilConstruido=false
+    onShow.civil=function()
+        if civilConstruido then return end
+        local p=tabs.civil
+        clearPanel(p); clearLine(); resetLineBtn(); S.currentCfs=nil
+        if #CIVIS_GLOBAIS==0 then carregarCivisGlobais() end
+        if #CIVIS_GLOBAIS>0 then
+            local cv=CIVIS_GLOBAIS[1]
+            buildColorPicker(p,0)
+            buildRoute(p,1,"👮",cv.nome,cv.frames)
+        else
+            mkEmpty(p,1,"👮  Nenhuma rota civil ainda.")
+        end
+        civilConstruido=true
+    end
+
+    -- ============================================
+    -- TORRES
+    -- ============================================
+    local torresCountSalvo=-1
+    onShow.torres=function()
+        if torresCountSalvo==#TORRES_GLOBAIS and torresCountSalvo>0 then return end
+        local p=tabs.torres
+        clearPanel(p); clearLine(); resetLineBtn(); S.currentCfs=nil
+        if #TORRES_GLOBAIS==0 then
+            mkEmpty(p,1,"🗼  Aguarde, carregando torres globais...\nToque na aba novamente em instantes.")
+            torresCountSalvo=0; return
+        end
+        buildColorPicker(p,0)
+        local lista={}
+        for _,tor in ipairs(TORRES_GLOBAIS) do table.insert(lista,{nome=tor.nome.." 🌐",frames=tor.frames}) end
+        table.sort(lista,function(a,b) return a.nome:lower()<b.nome:lower() end)
+        mkSection(p,1,"Torres globais ("..#lista..")",T.purple)
+        for i,tor in ipairs(lista) do buildRoute(p,i+1,"🗼",tor.nome,tor.frames) end
+        torresCountSalvo=#TORRES_GLOBAIS
+    end
+
+    -- ============================================
+    -- FARM
+    -- ============================================
+    local autoLixo,autoGrama,autoCaixa=false,false,false
+    local Lixos={
+        Vector3.new(470.87,3.04,-885.88),Vector3.new(377.87,3.04,-940.65),Vector3.new(225.02,3.04,-974.52),
+        Vector3.new(102.27,3.04,-889.48),Vector3.new(-160.73,3.04,-803.28),Vector3.new(-389.38,3.04,-1075.70),
+        Vector3.new(-421.97,3.04,-970.06),
+    }
+    local Lixeira=Vector3.new(-394.31,3.04,-779.87)
+    local Foice=Vector3.new(-351.95,3.12,-631.06)
+    local Gramas={
+        Vector3.new(82.63,3.00,-671.36),Vector3.new(-45.00,3.00,-671.39),Vector3.new(-15.39,3.00,-619.51),
+        Vector3.new(218.96,3.00,-758.32),Vector3.new(112.01,3.00,-652.70),Vector3.new(123.73,3.00,-741.72),
+        Vector3.new(51.76,3.00,-1001.02),Vector3.new(173.18,3.00,-987.78),Vector3.new(175.72,3.00,-931.94),
+        Vector3.new(120.00,3.00,-848.69),Vector3.new(54.60,3.00,-780.14),Vector3.new(10.21,3.00,-744.73),
+    }
+    local CaixaPega=Vector3.new(77.48,3.04,-429.99)
+    local CaixaEntrega=Vector3.new(440.87,3.85,-224.70)
+    local function teleportarFarm(pos)
+        local char=LocalPlayer.Character
+        local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then hrp.CFrame=CFrame.new(pos+Vector3.new(0,3,0)) end
+    end
+    local function ativarPromptsProximos()
+        local char=LocalPlayer.Character
+        local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        for _=1,4 do
+            for _,obj in pairs(workspace:GetDescendants()) do
+                if obj:IsA("ProximityPrompt") and obj.Enabled then
+                    local parent=obj.Parent
+                    if parent and parent:IsA("BasePart") then
+                        if (parent.Position-hrp.Position).Magnitude<18 then
+                            pcall(function() fireproximityprompt(obj) end)
+                        end
+                    end
+                end
+            end
+            task.wait(0.2)
+        end
+    end
+    local function iniciarAutoLixo()
+        task.spawn(function()
+            while autoLixo do
+                for i=1,#Lixos do
+                    if not autoLixo then break end
+                    teleportarFarm(Lixos[i]); task.wait(1.1)
+                    ativarPromptsProximos(); task.wait(1.3)
+                    teleportarFarm(Lixeira); task.wait(1.1)
+                    ativarPromptsProximos(); task.wait(1.3)
+                end
+            end
+        end)
+    end
+    local function iniciarAutoGrama()
+        task.spawn(function()
+            teleportarFarm(Foice); task.wait(1.3)
+            ativarPromptsProximos(); task.wait(1.6)
+            while autoGrama do
+                for i=1,#Gramas do
+                    if not autoGrama then break end
+                    teleportarFarm(Gramas[i]); task.wait(1.1)
+                    ativarPromptsProximos(); task.wait(1.3)
+                end
+            end
+        end)
+    end
+    local function iniciarAutoCaixa()
+        task.spawn(function()
+            while autoCaixa do
+                teleportarFarm(CaixaPega); task.wait(1.1)
+                ativarPromptsProximos(); task.wait(1.3)
+                teleportarFarm(CaixaEntrega); task.wait(1.1)
+                ativarPromptsProximos(); task.wait(1.3)
+                task.wait(28)
+            end
+        end)
+    end
+    local setLixo,setGrama,setCaixa
+    do
+        local p=tabs.farm
+        setLixo=mkToggle(p,1,"🗑","Auto Lixo","Coleta lixo e entrega na lixeira",Color3.fromRGB(230,160,30),function(on)
+            autoLixo=on
+            if on then iniciarAutoLixo(); notify("🗑 Auto Lixo: ON") else notify("🗑 Auto Lixo: OFF") end
+        end)
+        setGrama=mkToggle(p,2,"🌿","Auto Grama","Corta grama em todas as áreas",T.green,function(on)
+            autoGrama=on
+            if on then iniciarAutoGrama(); notify("🌿 Auto Grama: ON") else notify("🌿 Auto Grama: OFF") end
+        end)
+        setCaixa=mkToggle(p,3,"📦","Auto Caixa","Pega e entrega caixas",T.cyan,function(on)
+            autoCaixa=on
+            if on then iniciarAutoCaixa(); notify("📦 Auto Caixa: ON") else notify("📦 Auto Caixa: OFF") end
+        end)
+    end
+
+    -- ============================================
+    -- AUXÍLIOS
+    -- ============================================
+    local function criarHitboxes()
+        local data=carregarHitboxData()
+        if #data==0 then return end
+        for _,v in ipairs(data) do
+            if v.pos and v.size then
+                local p=Instance.new("Part")
+                p.Name="PrimeHub_Hitbox"; p.Size=v.size; p.Position=v.pos
+                p.Anchored=true; p.Transparency=1; p.CanCollide=false
+                p.CanQuery=false; p.CanTouch=false; p.CastShadow=false; p.Parent=workspace
+                local box=Instance.new("SelectionBox")
+                box.Adornee=p; box.Color3=Color3.fromRGB(180,100,255)
+                box.SurfaceColor3=Color3.fromRGB(160,100,240)
+                box.SurfaceTransparency=0.55; box.LineThickness=0.08; box.Parent=p
+                table.insert(hitboxes,p)
+            end
+        end
+    end
+    local function limparHitboxes()
+        for _,v in pairs(hitboxes) do pcall(function() v:Destroy() end) end
+        table.clear(hitboxes)
+    end
+    RunService.Heartbeat:Connect(function()
+        if not parkourAuxAtivo then return end
+        local char=LocalPlayer.Character
+        local hrp=char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local velY=hrp.AssemblyLinearVelocity.Y
+        for _,part in pairs(hitboxes) do
+            if part and part.Parent then
+                part.CanCollide=(velY<=0.5 and hrp.Position.Y>(part.Position.Y+part.Size.Y/2-1))
+            end
+        end
+    end)
+    local setAux
+    do
+        setAux=mkToggle(tabs.auxilios,1,"⭐","Parkour Auxiliar","Mostra hitboxes roxas de apoio",T.purple,function(on)
+            parkourAuxAtivo=on
+            if on then
+                task.spawn(criarHitboxes); notify("⭐ Parkour Auxiliar ATIVADO")
+            else
+                limparHitboxes(); notify("⭐ Parkour Auxiliar DESATIVADO")
+            end
+        end)
+    end
+
+    -- ============================================
+    -- COLAS
+    -- ============================================
+    onShow.colas=function()
+        local p=tabs.colas
+        clearPanel(p)
+        local order=1
+        for _,cat in ipairs(COLAS) do
+            mkSection(p,order,cat.nome,cat.cor); order=order+1
+            for _,texto in ipairs(cat.itens) do
+                local item=mkCard(p,order,52); order=order+1
+                local bar=new("Frame",{Size=UDim2.new(0,3,1,-16),Position=UDim2.new(0,8,0,8),BackgroundColor3=cat.cor,BorderSizePixel=0},item); corner(bar,2)
+                label(item,{Size=UDim2.new(1,-120,1,-8),Position=UDim2.new(0,20,0,4),Text=texto,TextSize=11,TextXAlignment=LEFT,TextWrapped=true})
+                local bc
+                bc=mkBtn(item,"Copiar",T.hover,72,function()
+                    pcall(function() if setclipboard then setclipboard(texto) elseif toclipboard then toclipboard(texto) end end)
+                    bc.Text="✓ OK"; task.wait(1); if bc and bc.Parent then bc.Text="Copiar" end
+                end)
+                bc.AnchorPoint=Vector2.new(1,.5); bc.Position=UDim2.new(1,-8,.5,0)
+            end
+        end
+    end
+
+    -- ============================================
+    -- IA / CORRETOR
+    -- ============================================
+    do
+        local p=tabs.ia
+        local inCard=mkCard(p,1,110)
+        local iaI=new("TextBox",{Size=UDim2.new(1,-20,1,-20),Position=UDim2.new(0,10,0,10),BackgroundTransparency=1,Text="",PlaceholderText="Digite sua mensagem...",PlaceholderColor3=T.textMuted,Font=GR,TextSize=12,TextColor3=T.text,TextXAlignment=LEFT,TextYAlignment=Enum.TextYAlignment.Top,TextWrapped=true,MultiLine=true,ClearTextOnFocus=false},inCard)
+        local br=new("Frame",{Size=UDim2.new(1,0,0,36),BackgroundTransparency=1,LayoutOrder=2},p)
+        new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8),SortOrder=Enum.SortOrder.LayoutOrder},br)
+        local resCard=new("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundColor3=T.card,BorderSizePixel=0,LayoutOrder=3,Visible=false},p)
+        corner(resCard,10); stroke(resCard,T.purple,1,.4)
+        new("UIPadding",{PaddingTop=UDim.new(0,10),PaddingBottom=UDim.new(0,10),PaddingLeft=UDim.new(0,12),PaddingRight=UDim.new(0,12)},resCard)
+        local resTxt=label(resCard,{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,Text="",TextSize=11,TextXAlignment=LEFT,TextYAlignment=Enum.TextYAlignment.Top,TextWrapped=true})
+        local b1=mkBtn(br,"✨ Corrigir e copiar",T.purple,0,function()
+            local txt=iaI.Text
+            if txt=="" or txt:match("^%s*$") then notify("Digite algo!") return end
+            local c=corrigir(txt); resTxt.Text=c; resCard.Visible=true
+            pcall(function() if setclipboard then setclipboard(c) elseif toclipboard then toclipboard(c) end end)
+            notify("Corrigido e copiado!")
+        end)
+        b1.Size=UDim2.new(.7,-4,1,0); b1.LayoutOrder=1
+        local b2=mkBtn(br,"Limpar",T.hover,0,function() iaI.Text=""; resTxt.Text=""; resCard.Visible=false end)
+        b2.Size=UDim2.new(.3,-4,1,0); b2.LayoutOrder=2
+    end
+
+    -- ============================================
+    -- CONFIG
+    -- ============================================
+    local portasVipGuardadas={}
+    local function removerPortaVIP()
+        portasVipGuardadas={}
+        local nomesPossiveis={"PASSE LIVRE","PasseLivre","Passe_Livre","PortaVIP","Porta_VIP","PortaVip","VIPDoor","Porta VIP","Laser","Lazer","Door","Porta","Portão","Portao"}
+        local count=0
+        for _,obj in ipairs(workspace:GetDescendants()) do
+            local nomeObj=obj.Name:lower()
+            local nomePai=obj.Parent and obj.Parent.Name:lower() or ""
+            local deveRemover=false
+            for _,nome in ipairs(nomesPossiveis) do if nomeObj:find(nome:lower(),1,true) or nomePai:find(nome:lower(),1,true) then deveRemover=true; break end end
+            if deveRemover then
+                local isBasePart=obj:IsA("BasePart")
+                table.insert(portasVipGuardadas,{obj=obj,transparency=isBasePart and obj.Transparency or nil,canCollide=isBasePart and obj.CanCollide or nil})
+                if isBasePart then obj.Transparency=1; obj.CanCollide=false; obj.CanQuery=false; obj.CanTouch=false
+                elseif obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency=1
+                elseif obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then obj.Enabled=false
+                elseif obj:IsA("Beam") then obj.Enabled=false
+                elseif obj:IsA("Model") then
+                    for _,p in ipairs(obj:GetDescendants()) do
+                        if p:IsA("BasePart") then p.Transparency=1; p.CanCollide=false; p.CanQuery=false; p.CanTouch=false
+                        elseif p:IsA("Decal") or p:IsA("Texture") then p.Transparency=1
+                        elseif p:IsA("SurfaceGui") or p:IsA("BillboardGui") then p.Enabled=false
+                        elseif p:IsA("Beam") then p.Enabled=false end
+                    end
+                end
+                count=count+1
+            end
+        end
+        return count
+    end
+    local function restaurarPortaVIP()
+        for _,dados in ipairs(portasVipGuardadas) do
+            pcall(function()
+                local obj=dados.obj
+                if obj and obj.Parent then
+                    if obj:IsA("BasePart") then
+                        if dados.transparency~=nil then obj.Transparency=dados.transparency end
+                        if dados.canCollide~=nil then obj.CanCollide=dados.canCollide end
+                        obj.CanQuery=true; obj.CanTouch=true
+                    elseif obj:IsA("Decal") or obj:IsA("Texture") then obj.Transparency=0
+                    elseif obj:IsA("SurfaceGui") or obj:IsA("BillboardGui") then obj.Enabled=true
+                    elseif obj:IsA("Beam") then obj.Enabled=true
+                    elseif obj:IsA("Model") then
+                        for _,p in ipairs(obj:GetDescendants()) do
+                            if p:IsA("BasePart") then p.Transparency=0; p.CanCollide=true; p.CanQuery=true; p.CanTouch=true
+                            elseif p:IsA("Decal") or p:IsA("Texture") then p.Transparency=0
+                            elseif p:IsA("SurfaceGui") or p:IsA("BillboardGui") then p.Enabled=true
+                            elseif p:IsA("Beam") then p.Enabled=true end
+                        end
+                    end
+                end
+            end)
+        end
+        portasVipGuardadas={}
+    end
+    mkToggle(tabs.config,1,"🚪","Remover portas + Portão","Remove apenas a porta e o portão",T.purple,function(on)
+        if on then
+            local n=removerPortaVIP(); notify("⚙️ "..n.." objetos removidos")
+        else
+            restaurarPortaVIP(); notify("⚙️ Porta/Portão restaurados")
+        end
+    end)
+
+    -- ============================================
+    -- SOBRE / CRÉDITOS
+    -- ============================================
+    do
+        local p=tabs.about
+        local hero=mkCard(p,1,86)
+        hero.BackgroundColor3=T.active
+        label(hero,{Size=UDim2.new(1,0,0,36),Position=UDim2.new(0,0,0,12),Text="PRIME HUB",Font=GBK,TextSize=28,TextColor3=T.purple})
+        label(hero,{Size=UDim2.new(1,0,0,16),Position=UDim2.new(0,0,0,52),Text="Menu de gravação e rotas • "..VERSION,TextSize=11,TextColor3=T.textDim})
+        mkRow(p,2,"👤","Criador",CREATOR,T.purple,10)
+        local _,rc=mkRow(p,3,"💬","Comunidade",DISCORD,T.cyan,86)
+        local bcp
+        bcp=mkBtn(rc,"Copiar",T.cyan,76,function()
+            local ok=pcall(function() if setclipboard then setclipboard(DISCORD) elseif toclipboard then toclipboard(DISCORD) else error("sem clipboard") end end)
+            notify(ok and "Link do Discord copiado!" or "Copie: "..DISCORD)
+            bcp.Text="✓ OK"; task.wait(1); if bcp and bcp.Parent then bcp.Text="Copiar" end
+        end)
+        mkRow(p,4,"🏷","Versão",VERSION,T.green,10)
+    end
+
+    -- ============================================
+    -- MODAL: SALVAR
+    -- ============================================
+    local overlay=new("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(0,0,0),BackgroundTransparency=1,BorderSizePixel=0,Text="",AutoButtonColor=false,Visible=false,ZIndex=200},gui)
+    local modal=new("Frame",{Size=UDim2.new(0,320,0,172),AnchorPoint=Vector2.new(.5,.5),Position=UDim2.new(.5,0,.4,0),BackgroundColor3=T.panel,BorderSizePixel=0,Visible=false,ZIndex=201},gui)
+    corner(modal,14); stroke(modal,T.purple,1.5,0)
+    label(modal,{Size=UDim2.new(1,-40,0,22),Position=UDim2.new(0,20,0,16),Text="💾  Salvar trajetória",Font=GBK,TextSize=14,TextXAlignment=LEFT,ZIndex=202})
+    local iBox=new("TextBox",{Size=UDim2.new(1,-40,0,40),Position=UDim2.new(0,20,0,50),BackgroundColor3=T.input,BorderSizePixel=0,Text="",PlaceholderText="Nome da trajetória...",PlaceholderColor3=T.textMuted,Font=GR,TextSize=12,TextColor3=T.text,TextXAlignment=LEFT,ClearTextOnFocus=false,ZIndex=202},modal)
+    corner(iBox,8); stroke(iBox,T.border,1,0)
+    new("UIPadding",{PaddingLeft=UDim.new(0,12)},iBox)
+    local function mBtn(t,pos,c)
+        local b=mkBtn(modal,t,c,0)
+        b.Size=UDim2.new(.5,-26,0,36); b.Position=pos; b.ZIndex=202
+        return b
+    end
+    local bCan=mBtn("Cancelar",UDim2.new(0,20,1,-54),T.hover)
+    local bCon=mBtn("Salvar",UDim2.new(.5,6,1,-54),T.purple)
+    openModal=function()
+        modal.Visible=true; overlay.Visible=true; iBox.Text=""
+        overlay.BackgroundTransparency=.5
+        task.wait(.1); iBox:CaptureFocus()
+    end
+    local function closeModal() modal.Visible=false; overlay.Visible=false; overlay.BackgroundTransparency=1 end
+    bCan.MouseButton1Click:Connect(closeModal); overlay.MouseButton1Click:Connect(closeModal)
+    bCon.MouseButton1Click:Connect(function()
+        local n=iBox.Text:gsub("^%s+",""):gsub("%s+$","")
+        closeModal(); task.wait(.1); doSave(n)
+    end)
+    iBox.FocusLost:Connect(function(e)
+        if e then local n=iBox.Text:gsub("^%s+",""):gsub("%s+$",""); closeModal(); task.wait(.1); doSave(n) end
+    end)
+
+    -- ============================================
+    -- ABRIR / FECHAR MENU
+    -- ============================================
+    local isOpen=true
+    local function toggleMenu()
+        isOpen=not isOpen
+        if isOpen then
+            win.Visible=true; win.Size=UDim2.new(0,0,0,0)
+            TweenService:Create(win,TweenInfo.new(.25,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(WIN_W,0,WIN_H,0)}):Play()
+            TweenService:Create(fS,TweenInfo.new(.2),{Color=T.red}):Play()
+        else
+            TweenService:Create(win,TweenInfo.new(.2,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play()
+            task.delay(.2,function() if not isOpen then win.Visible=false end end)
+            TweenService:Create(fS,TweenInfo.new(.2),{Color=T.purple}):Play()
+        end
+    end
+    bClose.MouseButton1Click:Connect(function() if isOpen then toggleMenu() end end)
+
+    -- botão flutuante: arrasta e toca para abrir/fechar
+    local fbDrag,fbStart,fbPos,fbMoved=false,nil,nil,0
+    fb.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            fbDrag=true; fbStart=i.Position; fbPos=fb.Position; fbMoved=0
+            i.Changed:Connect(function()
+                if i.UserInputState==Enum.UserInputState.End then
+                    fbDrag=false
+                    if fbMoved<8 then toggleMenu() end
+                end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if fbDrag and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+            local d=i.Position-fbStart
+            fbMoved=math.max(fbMoved,d.Magnitude)
+            fb.Position=UDim2.new(fbPos.X.Scale,fbPos.X.Offset+d.X,fbPos.Y.Scale,fbPos.Y.Offset+d.Y)
+        end
+    end)
+
+    LocalPlayer.CharacterAdded:Connect(function()
+        task.wait(1); destroyTrail(); stopAnims()
+        if S.recording then S.recording=false; if S.recordConn then S.recordConn:Disconnect() end; if recBtn then recBtn.Text="Gravar"; recBtn.BackgroundColor3=T.purple end end
+        if S.playing then stopPlayback(true) end
+        limparHitboxes(); parkourAuxAtivo=false
+        autoLixo=false; autoGrama=false; autoCaixa=false
+        if setLixo then setLixo(false) end
+        if setGrama then setGrama(false) end
+        if setCaixa then setCaixa(false) end
+        if setAux then setAux(false) end
+        setStatus("Pronto",T.green)
+    end)
+
+    pcall(ensureFolder)
+    pcall(function() loadSaves() end)
+    switchTab("main")
+    notify("PRIME HUB "..VERSION.." • by "..CREATOR)
 end)
