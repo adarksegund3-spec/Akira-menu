@@ -1,4 +1,4 @@
---[[ PRIME HUB — v8.0.0 (UI Pro)
+--[[ AGN MENU — v8.0.1 (UI Pro)
      Criador: angel
      Comunidade: https://discord.gg/9jaEtmEJ7 ]]
 
@@ -12,7 +12,7 @@ local LocalPlayer=Players.LocalPlayer
 
 local CREATOR="angel"
 local DISCORD="https://discord.gg/9jaEtmEJ7"
-local VERSION="v8.0.0"
+local VERSION="v8.0.1"
 
 local GB=Enum.Font.GothamBold
 local GBK=Enum.Font.GothamBlack
@@ -63,18 +63,18 @@ pcall(function()
 end)
 
 local function notify(m)
-    pcall(function() StarterGui:SetCore("SendNotification",{Title="PRIME HUB",Text=m,Duration=2}) end)
+    pcall(function() StarterGui:SetCore("SendNotification",{Title="AGN MENU",Text=m,Duration=2}) end)
 end
 
 -- ============================================
 -- INTRO
 -- ============================================
 local function rodarIntro()
-    local gui=new("ScreenGui",{Name="PrimeHubIntro",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=9999},UI_PARENT)
+    local gui=new("ScreenGui",{Name="PrimeHubIntro",ResetOnSpawn=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling,IgnoreGuiInset=true,DisplayOrder=9999},UI_PARENT)
     local fundo=new("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(8,6,16),BorderSizePixel=0},gui)
     local grp=new("CanvasGroup",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,GroupTransparency=1},fundo)
     local box=new("Frame",{Size=UDim2.new(0,440,0,210),AnchorPoint=Vector2.new(.5,.5),Position=UDim2.new(.5,0,.5,0),BackgroundTransparency=1},grp)
-    label(box,{Size=UDim2.new(1,0,0,56),Text="PRIME HUB",Font=GBK,TextSize=46,TextColor3=T.purple})
+    label(box,{Size=UDim2.new(1,0,0,56),Text="AGN MENU",Font=GBK,TextSize=46,TextColor3=T.purple})
     label(box,{Position=UDim2.new(0,0,0,58),Size=UDim2.new(1,0,0,22),Text="Criador: "..CREATOR,Font=GB,TextSize=15})
     local barBg=new("Frame",{Size=UDim2.new(.8,0,0,6),Position=UDim2.new(.1,0,0,108),BackgroundColor3=T.border,BorderSizePixel=0},box); corner(barBg,3)
     local barFill=new("Frame",{Size=UDim2.new(0,0,1,0),BackgroundColor3=T.purple,BorderSizePixel=0},barBg); corner(barFill,3)
@@ -581,7 +581,7 @@ task.spawn(function()
     -- ============================================
     -- UI: JANELA PRINCIPAL
     -- ============================================
-    local gui=new("ScreenGui",{Name="PrimeHubUI",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=999},UI_PARENT)
+    local gui=new("ScreenGui",{Name="PrimeHubUI",ResetOnSpawn=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling,IgnoreGuiInset=true,DisplayOrder=999},UI_PARENT)
 
     local function makeDraggable(handle,target)
         local drag,ds,sp=false,nil,nil
@@ -607,7 +607,7 @@ task.spawn(function()
     corner(fbImg,24)
 
     -- Timer de rota
-    timerGui=new("ScreenGui",{Name="PrimeHubTimer",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=998,Enabled=false},UI_PARENT)
+    timerGui=new("ScreenGui",{Name="PrimeHubTimer",ResetOnSpawn=false,ZIndexBehavior=Enum.ZIndexBehavior.Sibling,IgnoreGuiInset=true,DisplayOrder=998,Enabled=false},UI_PARENT)
     local timerFrame=new("Frame",{Size=UDim2.new(0,190,0,78),AnchorPoint=Vector2.new(.5,0),Position=UDim2.new(.5,0,0,16),BackgroundColor3=T.bg,BackgroundTransparency=.08,BorderSizePixel=0},timerGui)
     corner(timerFrame,12); stroke(timerFrame,T.purple,1.5,.1)
     local tDot=new("Frame",{Size=UDim2.new(0,8,0,8),Position=UDim2.new(0,12,0,13),BackgroundColor3=T.cyan,BorderSizePixel=0},timerFrame); corner(tDot,4)
@@ -628,8 +628,8 @@ task.spawn(function()
     new("Frame",{Size=UDim2.new(1,0,0,14),Position=UDim2.new(0,0,1,-14),BackgroundColor3=T.panel,BorderSizePixel=0,ZIndex=10},header)
     new("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=T.border,BorderSizePixel=0,ZIndex=11},header)
     local logo=new("Frame",{Size=UDim2.new(0,30,0,30),Position=UDim2.new(0,14,0,10),BackgroundColor3=T.purple,BorderSizePixel=0,ZIndex=12},header); corner(logo,9)
-    label(logo,{Size=UDim2.new(1,0,1,0),Text="P",Font=GBK,TextSize=17,ZIndex=13})
-    label(header,{Size=UDim2.new(0,200,0,18),Position=UDim2.new(0,54,0,8),Text="PRIME HUB",Font=GBK,TextSize=15,TextXAlignment=LEFT,ZIndex=12})
+    label(logo,{Size=UDim2.new(1,0,1,0),Text="A",Font=GBK,TextSize=17,ZIndex=13})
+    label(header,{Size=UDim2.new(0,200,0,18),Position=UDim2.new(0,54,0,8),Text="AGN MENU",Font=GBK,TextSize=15,TextXAlignment=LEFT,ZIndex=12})
     label(header,{Size=UDim2.new(0,220,0,14),Position=UDim2.new(0,54,0,27),Text="Criador: "..CREATOR.."  •  "..VERSION,TextSize=10,TextColor3=T.textMuted,TextXAlignment=LEFT,ZIndex=12})
     local pill=new("Frame",{Size=UDim2.new(0,104,0,24),AnchorPoint=Vector2.new(1,.5),Position=UDim2.new(1,-52,.5,0),BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=12},header)
     corner(pill,12); stroke(pill,T.border,1,0)
@@ -1197,7 +1197,7 @@ task.spawn(function()
         local p=tabs.about
         local hero=mkCard(p,1,86)
         hero.BackgroundColor3=T.active
-        label(hero,{Size=UDim2.new(1,0,0,36),Position=UDim2.new(0,0,0,12),Text="PRIME HUB",Font=GBK,TextSize=28,TextColor3=T.purple})
+        label(hero,{Size=UDim2.new(1,0,0,36),Position=UDim2.new(0,0,0,12),Text="AGN MENU",Font=GBK,TextSize=28,TextColor3=T.purple})
         label(hero,{Size=UDim2.new(1,0,0,16),Position=UDim2.new(0,0,0,52),Text="Menu de gravação e rotas • "..VERSION,TextSize=11,TextColor3=T.textDim})
         mkRow(p,2,"👤","Criador",CREATOR,T.purple,10)
         local _,rc=mkRow(p,3,"💬","Comunidade",DISCORD,T.cyan,86)
@@ -1297,5 +1297,5 @@ task.spawn(function()
     pcall(ensureFolder)
     pcall(function() loadSaves() end)
     switchTab("main")
-    notify("PRIME HUB "..VERSION.." • by "..CREATOR)
+    notify("AGN MENU "..VERSION.." • by "..CREATOR)
 end)
