@@ -10,8 +10,6 @@ local bypassAtivo = false
 local noclipConnection = nil
 local antiTpConnection = nil
 local ultimaPosicao = nil
-local textoConnections = {} -- conexões do detector/apagador do texto da prisão
-local textosOcultos = {}    -- [label] = Visible original (para restaurar ao desativar)
 
 -- ============================================
 -- UI (TAMANHO E ESTILO DA FOTO)
@@ -125,58 +123,6 @@ BypassBtn.MouseButton1Click:Connect(function()
             end
         end)
 
-        -- Detectar e apagar o texto da prisão (somente na sua tela)
-        local function normalizar(s)
-            s = string.gsub(tostring(s), "<[^>]+>", "")
-            s = string.gsub(s, "ã", "a")
-            s = string.gsub(s, "Ã", "a")
-            return string.lower(s)
-        end
-
-        local function contem(texto, palavra)
-            return string.find(texto, palavra, 1, true) ~= nil
-        end
-
-        -- DETECTAR: cita prisão E fala de polichinelos/minutos
-        -- Ex.: "Faça polichinelos para sair da prisão mais rápido! 50 polichinelos = -1 minuto na prisão"
-        local function ehMensagemDePrisao(obj)
-            local t = normalizar(obj.Text)
-            local prisao = contem(t, "prisao") or contem(t, "preso") or contem(t, "prison") or contem(t, "jail")
-            local regra = contem(t, "polichinelo") or contem(t, "minut")
-            return prisao and regra
-        end
-
-        -- APAGAR: oculta o texto e mantém oculto se o jogo tentar mostrar de novo
-        local function apagar(obj)
-            if textosOcultos[obj] ~= nil then return end
-            textosOcultos[obj] = obj.Visible
-            obj.Visible = false
-            table.insert(textoConnections, obj:GetPropertyChangedSignal("Visible"):Connect(function()
-                if bypassAtivo and obj.Visible then obj.Visible = false end
-            end))
-        end
-
-        local function verificar(obj)
-            if ehMensagemDePrisao(obj) then apagar(obj) end
-        end
-
-        -- Verifica o texto agora e sempre que mudar (ex.: definido só ao ser preso)
-        local function observar(obj)
-            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and not obj:IsDescendantOf(ScreenGui) then
-                verificar(obj)
-                table.insert(textoConnections, obj:GetPropertyChangedSignal("Text"):Connect(function()
-                    verificar(obj)
-                end))
-            end
-        end
-
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-        for _, d in ipairs(playerGui:GetDescendants()) do
-            observar(d)
-        end
-        -- Textos criados depois (nova prisão)
-        table.insert(textoConnections, playerGui.DescendantAdded:Connect(observar))
-
     else
         -- DESATIVAR (VERMELHO)
         BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
@@ -191,15 +137,5 @@ BypassBtn.MouseButton1Click:Connect(function()
             antiTpConnection = nil
         end
         ultimaPosicao = nil
-
-        -- Para o detector e restaura o texto da prisão
-        for _, c in ipairs(textoConnections) do
-            c:Disconnect()
-        end
-        textoConnections = {}
-        for obj, visivelOriginal in pairs(textosOcultos) do
-            if obj.Parent then obj.Visible = visivelOriginal end
-        end
-        textosOcultos = {}
     end
 end)
