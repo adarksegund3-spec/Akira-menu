@@ -84,7 +84,7 @@ stroke(FloatButton, C.Turq, 2)
 gradient(FloatButton, C.Bg3, C.Bg, 90)
 
 local MainFrame = new("Frame", {
-    Size = UDim2.new(0, 240, 0, 322), Position = UDim2.new(0.5, -120, 0.5, -161),
+    Size = UDim2.new(0, 264, 0, 364), Position = UDim2.new(0.5, -132, 0.5, -182),
     BackgroundColor3 = C.Bg, BorderSizePixel = 0, Active = true, Visible = false,
 }, ScreenGui)
 corner(MainFrame, 12)
@@ -120,6 +120,7 @@ local TABS = {
     { key = "andar",  label = "🚶 Andar",  animate = "walk", hint = "Toque em Gravar e ANDE normalmente." },
     { key = "correr", label = "🏃 Correr", animate = "run",  hint = "Toque em Gravar e CORRA." },
     { key = "pular",  label = "🦘 Pular",  animate = "jump", hint = "Toque em Gravar e PULE varias vezes." },
+    { key = "teste",  label = "🧪 Teste",  test = true },
 }
 
 local TabBar = new("Frame", {
@@ -131,10 +132,10 @@ corner(TabBar, 8)
 local tabButtons = {}
 for i, t in ipairs(TABS) do
     local b = new("TextButton", {
-        Size = UDim2.new(1 / 3, -4, 1, -6),
-        Position = UDim2.new((i - 1) / 3, 3, 0, 3),
+        Size = UDim2.new(1 / #TABS, -4, 1, -6),
+        Position = UDim2.new((i - 1) / #TABS, 3, 0, 3),
         BackgroundColor3 = C.Bg2, Font = Enum.Font.GothamBold, Text = t.label,
-        TextColor3 = C.TextDim, TextSize = 11, BorderSizePixel = 0, AutoButtonColor = false,
+        TextColor3 = C.TextDim, TextSize = 10, BorderSizePixel = 0, AutoButtonColor = false,
     }, TabBar)
     corner(b, 6)
     tabButtons[i] = b
@@ -200,8 +201,84 @@ local PreviewText = new("TextLabel", {
 
 local RecordBtn = makeButton(Body, "🔴 Gravar", C.TurqDark, C.TurqBright,
     UDim2.new(0.5, -12, 0, 38), UDim2.new(0, 8, 0, 198), 13)
-local CopyBtn = makeButton(Body, "📋 Copiar", C.Blue, Color3.fromRGB(215, 235, 255),
+local CopyBtn = makeButton(Body, "📋 Copiar ID", C.Blue, Color3.fromRGB(215, 235, 255),
     UDim2.new(0.5, -12, 0, 38), UDim2.new(0.5, 4, 0, 198), 13)
+local FullBtn = makeButton(Body, "📄 Copiar codigo completo", C.Bg3, C.TextDim,
+    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 242), 12)
+
+-- ======================================================================== --
+-- PAGINA TESTE (UI)
+-- ======================================================================== --
+local TestPage = new("Frame", {
+    Size = UDim2.new(1, 0, 1, -74), Position = UDim2.new(0, 0, 0, 74),
+    BackgroundTransparency = 1, Visible = false,
+}, MainFrame)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 8, 0, 0),
+    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "ID da animacao",
+    TextColor3 = C.TextDim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+}, TestPage)
+
+local IdBox = new("TextBox", {
+    Size = UDim2.new(1, -16, 0, 32), Position = UDim2.new(0, 8, 0, 16),
+    BackgroundColor3 = C.Bg2, BorderSizePixel = 0, Font = Enum.Font.Code, Text = "",
+    PlaceholderText = "cole o ID aqui", PlaceholderColor3 = Color3.fromRGB(95, 125, 135),
+    TextColor3 = C.Text, TextSize = 12, ClearTextOnFocus = false,
+}, TestPage)
+corner(IdBox, 8)
+stroke(IdBox, C.TurqDark, 1)
+
+local LoopBtn = makeButton(TestPage, "🔁 Loop: ON", C.Bg3, C.Text,
+    UDim2.new(0.4, -10, 0, 28), UDim2.new(0, 8, 0, 54), 11)
+local PrioBtn = makeButton(TestPage, "Prio: Action4", C.Bg3, C.Text,
+    UDim2.new(0.6, -10, 0, 28), UDim2.new(0.4, 2, 0, 54), 11)
+
+local TestStatusRow = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 8, 0, 88), BackgroundTransparency = 1,
+}, TestPage)
+local TestDot = new("Frame", {
+    Size = UDim2.new(0, 8, 0, 8), Position = UDim2.new(0, 2, 0.5, -4),
+    BackgroundColor3 = C.TextDim, BorderSizePixel = 0,
+}, TestStatusRow)
+corner(TestDot, 4)
+local TestStatusLabel = new("TextLabel", {
+    Size = UDim2.new(1, -18, 1, 0), Position = UDim2.new(0, 16, 0, 0),
+    BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "Cole um ID e toque em Reproduzir",
+    TextColor3 = C.TextDim, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+}, TestStatusRow)
+
+local function testStatus(text, kind)
+    local color = C.TextDim
+    if kind == "rec" then color = C.Red
+    elseif kind == "play" then color = C.Turq
+    elseif kind == "ok" then color = C.Green
+    elseif kind == "warn" then color = C.Amber end
+    TestStatusLabel.Text = text
+    TestStatusLabel.TextColor3 = kind and C.Text or C.TextDim
+    TestDot.BackgroundColor3 = color
+end
+
+local SaveIdBtn = makeButton(TestPage, "💾 Gravar", C.TurqDark, C.TurqBright,
+    UDim2.new(0.5, -12, 0, 38), UDim2.new(0, 8, 0, 110), 13)
+local PlayBtn = makeButton(TestPage, "▶️ Reproduzir", C.Blue, Color3.fromRGB(215, 235, 255),
+    UDim2.new(0.5, -12, 0, 38), UDim2.new(0.5, 4, 0, 110), 13)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 8, 0, 154),
+    BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = "IDs gravados (toque para usar)",
+    TextColor3 = C.TextDim, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+}, TestPage)
+
+local IdList = new("ScrollingFrame", {
+    Size = UDim2.new(1, -16, 1, -176), Position = UDim2.new(0, 8, 0, 170),
+    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
+    ScrollBarImageColor3 = C.Turq, CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
+    Active = true,
+}, TestPage)
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, IdList)
 
 -- ======================================================================== --
 -- ARRASTAR
@@ -356,7 +433,12 @@ local function buildResult(tabInfo, r)
         table.insert(P, "O jogo pode tocar animacoes por outro Animator.")
     end
 
-    return { text = table.concat(L, "\n"), preview = table.concat(P, "\n") }
+    local idLines = {}
+    for _, s in ipairs(list) do
+        table.insert(idLines, string.format("%s -- %s (%.0f%%)", tostring(s.Id), s.Nome, (s.count / frames) * 100))
+    end
+
+    return { text = table.concat(L, "\n"), preview = table.concat(P, "\n"), ids = table.concat(idLines, "\n") }
 end
 
 local function showTab()
@@ -370,6 +452,14 @@ local function showTab()
             b.TextColor3 = C.TextDim
         end
     end
+    if info.test then
+        Body.Visible = false
+        TestPage.Visible = true
+        return
+    end
+    Body.Visible = true
+    TestPage.Visible = false
+
     local res = results[info.key]
     if res then
         PreviewText.Text = res.preview
@@ -495,20 +585,250 @@ track(RecordBtn.MouseButton1Click:Connect(function()
     if rec then stopRecording(false) else startRecording() end
 end))
 
-track(CopyBtn.MouseButton1Click:Connect(function()
+local function doCopy(field, okText)
     if rec then setStatus("Pare a gravacao antes", "warn") return end
     local res = results[TABS[currentTab].key]
     if not res then setStatus("Nada gravado nesta aba", "warn") return end
     if not setclipboard then setStatus("Executor sem clipboard", "warn") return end
-    local ok = pcall(function() setclipboard(res.text) end)
-    setStatus(ok and "Codigo copiado" or "Falha ao copiar", ok and "ok" or "warn")
-end))
+    local content = res[field]
+    if not content or content == "" then setStatus("Nenhuma animacao detectada", "warn") return end
+    local ok = pcall(function() setclipboard(content) end)
+    setStatus(ok and okText or "Falha ao copiar", ok and "ok" or "warn")
+end
+
+track(CopyBtn.MouseButton1Click:Connect(function() doCopy("ids", "ID copiado") end))
+track(FullBtn.MouseButton1Click:Connect(function() doCopy("text", "Codigo completo copiado") end))
 
 track(LocalPlayer.CharacterAdded:Connect(function()
     if rec then stopRecording(true) end
 end))
 
+-- ======================================================================== --
+-- ABA TESTE (LOGICA)
+-- ======================================================================== --
+local HttpService = game:GetService("HttpService")
+local IDS_FOLDER = "AngelAnimId"
+local IDS_FILE = IDS_FOLDER .. "/ids.json"
+local canFS = (writefile and readfile and isfile and makefolder and isfolder) and true or false
+
+local savedIds = {}
+local testTrack, testConn = nil, nil
+local testToken = 0
+local testPlaying = false
+local loopOn = true
+local PRIOS = { "Core", "Idle", "Movement", "Action", "Action2", "Action3", "Action4" }
+local prioIndex = 7
+
+local function normalizeId(text)
+    local digits = tostring(text or ""):match("%d+")
+    if not digits or #digits < 3 then return nil end
+    return "rbxassetid://" .. digits
+end
+
+local function saveIdsToDisk()
+    if not canFS then return end
+    pcall(function()
+        if not isfolder(IDS_FOLDER) then makefolder(IDS_FOLDER) end
+        writefile(IDS_FILE, HttpService:JSONEncode(savedIds))
+    end)
+end
+
+local function loadIdsFromDisk()
+    if not canFS then return end
+    pcall(function()
+        if isfile(IDS_FILE) then
+            local data = HttpService:JSONDecode(readfile(IDS_FILE))
+            if type(data) == "table" then
+                for _, e in ipairs(data) do
+                    if type(e) == "table" and type(e.id) == "string" then
+                        table.insert(savedIds, { id = e.id, ok = e.ok, len = e.len })
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local refreshIdList
+refreshIdList = function()
+    for _, ch in ipairs(IdList:GetChildren()) do
+        if ch:IsA("Frame") or ch:IsA("TextLabel") then ch:Destroy() end
+    end
+    if #savedIds == 0 then
+        new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Font = Enum.Font.Gotham,
+            Text = "Nenhum ID gravado ainda", TextColor3 = C.TextDim, TextSize = 10,
+        }, IdList)
+        return
+    end
+    for i, e in ipairs(savedIds) do
+        local icon = "⚪"
+        if e.ok == true then icon = "✅" elseif e.ok == false then icon = "❌" end
+        local digits = e.id:match("%d+") or e.id
+        local lenText = e.len and string.format("  %.1fs", e.len) or ""
+
+        local row = new("Frame", {
+            Size = UDim2.new(1, -4, 0, 28), BackgroundColor3 = C.Bg2,
+            BorderSizePixel = 0, LayoutOrder = i,
+        }, IdList)
+        corner(row, 7)
+
+        local main = new("TextButton", {
+            Size = UDim2.new(1, -34, 1, 0), BackgroundTransparency = 1, Font = Enum.Font.Code,
+            Text = icon .. " " .. digits .. lenText, TextColor3 = C.Text, TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+            AutoButtonColor = false,
+        }, row)
+        new("UIPadding", { PaddingLeft = UDim.new(0, 8) }, main)
+        track(main.MouseButton1Click:Connect(function()
+            IdBox.Text = e.id
+            testStatus("ID carregado na caixa", nil)
+        end))
+
+        local del = new("TextButton", {
+            Size = UDim2.new(0, 26, 0, 22), Position = UDim2.new(1, -30, 0.5, -11),
+            BackgroundColor3 = Color3.fromRGB(125, 38, 50), Font = Enum.Font.GothamBold,
+            Text = "🗑️", TextSize = 11, BorderSizePixel = 0, AutoButtonColor = true,
+        }, row)
+        corner(del, 6)
+        track(del.MouseButton1Click:Connect(function()
+            for idx, item in ipairs(savedIds) do
+                if item == e then table.remove(savedIds, idx) break end
+            end
+            saveIdsToDisk()
+            refreshIdList()
+        end))
+    end
+end
+
+local function markResult(id, ok, len)
+    for _, e in ipairs(savedIds) do
+        if e.id == id then
+            e.ok = ok
+            if len then e.len = len end
+        end
+    end
+    saveIdsToDisk()
+    refreshIdList()
+end
+
+local function stopTest()
+    testToken = testToken + 1
+    if testConn then testConn:Disconnect() testConn = nil end
+    if testTrack then
+        pcall(function() testTrack:Stop(0.1) end)
+        testTrack = nil
+    end
+    testPlaying = false
+    PlayBtn.Text = "▶️ Reproduzir"
+    PlayBtn.BackgroundColor3 = C.Blue
+end
+
+local function playTest()
+    local id = normalizeId(IdBox.Text)
+    if not id then testStatus("ID invalido (cole so os numeros)", "warn") return end
+    IdBox.Text = id
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local animator = hum and getAnimator(hum)
+    if not animator then testStatus("Personagem sem Animator", "warn") return end
+
+    stopTest()
+    testPlaying = true
+    local myToken = testToken
+    PlayBtn.Text = "🛑 Parar"
+    PlayBtn.BackgroundColor3 = C.Red
+    testStatus("Carregando...", "play")
+
+    task.spawn(function()
+        local anim = Instance.new("Animation")
+        anim.AnimationId = id
+        local ok, tr = pcall(function() return animator:LoadAnimation(anim) end)
+        if myToken ~= testToken then return end
+        if not ok or not tr then
+            stopTest()
+            testStatus("Falhou: nao foi possivel carregar", "warn")
+            markResult(id, false)
+            return
+        end
+
+        testTrack = tr
+        tr.Priority = Enum.AnimationPriority[PRIOS[prioIndex]]
+        tr.Looped = loopOn
+        tr:Play(0.1)
+
+        local t0 = os.clock()
+        while tr.Length == 0 and os.clock() - t0 < 3 do task.wait(0.1) end
+        if myToken ~= testToken then return end
+
+        if tr.Length == 0 then
+            stopTest()
+            testStatus("Falhou: ID invalido ou sem acesso", "warn")
+            markResult(id, false)
+            return
+        end
+
+        testStatus(string.format("Funcionando | %.2fs | %s", tr.Length, PRIOS[prioIndex]), "ok")
+        markResult(id, true, tr.Length)
+
+        testConn = tr.Stopped:Connect(function()
+            if myToken == testToken then
+                stopTest()
+                testStatus("Terminou (funcionou)", "ok")
+            end
+        end)
+    end)
+end
+
+track(PlayBtn.MouseButton1Click:Connect(function()
+    if testPlaying then
+        stopTest()
+        testStatus("Parado", nil)
+    else
+        playTest()
+    end
+end))
+
+track(SaveIdBtn.MouseButton1Click:Connect(function()
+    local id = normalizeId(IdBox.Text)
+    if not id then testStatus("ID invalido (cole so os numeros)", "warn") return end
+    IdBox.Text = id
+    for _, e in ipairs(savedIds) do
+        if e.id == id then
+            testStatus("Esse ID ja esta gravado", "warn")
+            return
+        end
+    end
+    table.insert(savedIds, 1, { id = id })
+    saveIdsToDisk()
+    refreshIdList()
+    testStatus(canFS and "ID gravado no aparelho" or "ID gravado so nesta sessao", "ok")
+end))
+
+track(LoopBtn.MouseButton1Click:Connect(function()
+    loopOn = not loopOn
+    LoopBtn.Text = loopOn and "🔁 Loop: ON" or "🔁 Loop: OFF"
+    if testTrack then pcall(function() testTrack.Looped = loopOn end) end
+end))
+
+track(PrioBtn.MouseButton1Click:Connect(function()
+    prioIndex = prioIndex % #PRIOS + 1
+    PrioBtn.Text = "Prio: " .. PRIOS[prioIndex]
+    if testTrack then
+        pcall(function() testTrack.Priority = Enum.AnimationPriority[PRIOS[prioIndex]] end)
+    end
+end))
+
+track(LocalPlayer.CharacterAdded:Connect(function()
+    stopTest()
+end))
+
+loadIdsFromDisk()
+refreshIdList()
+
 env.AngelAnimIdCleanup = function()
+    pcall(stopTest)
     if recConn then recConn:Disconnect() end
     for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
     if ScreenGui then ScreenGui:Destroy() end
