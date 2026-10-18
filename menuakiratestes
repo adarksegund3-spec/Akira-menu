@@ -1,30 +1,14 @@
 --!nonstrict
 --[[
-	=====================================================================
-	DIAGNÓSTICO DA MECÂNICA DE PRISÃO  —  LocalScript (LuaU / Roblox)
-	=====================================================================
-	O QUE FAZ
-	  • Varre, no CLIENTE, os elementos que o jogo disponibiliza:
-	    PlayerGui (textos/GUIs), nomes de objetos, Remotes, valores e
-	    atributos replicados, textos 3D (Surface/BillboardGui) e
-	    ProximityPrompts.
-	  • Fica "escutando" mudanças de texto na interface desde que o script
-	    inicia, para capturar mensagens que aparecem só quando o jogador
-	    é preso (e que podem sumir depois).
-	  • Gera um relatório em seções, copiável.
-
-	O QUE NÃO FAZ (limites reais do Roblox)
-	  • Não acessa scripts de servidor (Script no ServerScriptService etc.).
-	  • Não lê o código de LocalScripts/ModuleScripts em jogos normais
-	    (a propriedade Source não é legível pelo cliente). O script tenta
-	    ler e informa no relatório se foi possível ou não.
-	  • Não dispara Remotes nem altera nada no jogo: é somente leitura.
-
-	INSTALAÇÃO
-	  • Studio: crie um LocalScript em StarterPlayer > StarterPlayerScripts
-	    e cole este código.
-	  • Use em jogos seus ou com permissão do desenvolvedor.
-	=====================================================================
+	DETECTAR + APAGAR TEXTO DA PRISÃO — LocalScript (LuaU / Roblox)
+	Versão resumida do diagnóstico:
+	  • "Diagnóstico"         -> detecta a mensagem de prisão exibida na tela
+	  • "Copiar diagnóstico"  -> copia o resultado curto
+	  • "Apagar texto da tela"-> oculta o texto (só no SEU cliente) e o mantém
+	                             oculto se o jogo tentar mostrá-lo de novo.
+	                             Tocar de novo restaura o texto.
+	Instalação: LocalScript em StarterPlayer > StarterPlayerScripts.
+	Obs.: afeta somente a sua interface; não altera a sentença nem o servidor.
 ]]
 
 local Players = game:GetService("Players")
@@ -35,98 +19,50 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
--- Remove instância anterior (evita duplicar ao reexecutar)
-local old = playerGui:FindFirstChild("PrisonDiagnosticUI")
+local old = playerGui:FindFirstChild("PrisonTextUI")
 if old then old:Destroy() end
 
 --=====================================================================
--- 1. CONFIGURAÇÃO
+-- CONFIG
 --=====================================================================
-local CONFIG = {
-	LOGO_ICON = "🔍",          -- pode trocar por 🔒
-	TOP_BAND_RATIO = 0.25,     -- "parte superior" = 25% de cima da tela
-	MAX_ENTRIES = 40,          -- limite de itens por categoria
-	MAX_TEXT_LEN = 400,        -- limite de caracteres exibidos por texto
-	PREVIEW_LIMIT = 15000,     -- limite do preview no menu (a cópia é completa)
-	YIELD_EVERY = 400,         -- cede o frame a cada N objetos (evita travar)
-}
-
--- Termos pedidos (já sem acentos; o texto analisado também é normalizado)
-local KEYWORDS_REQUESTED = { "prison", "prisao", "preso", "jail", "cell", "cela", "sentence", "detention" }
--- Termos extras (variações comuns) — aparecem no relatório como "extras"
-local KEYWORDS_EXTRA = { "cadeia", "arrest", "prisoner", "prisioneiro", "inmate" }
-local KEYWORDS = {}
-for _, k in ipairs(KEYWORDS_REQUESTED) do table.insert(KEYWORDS, k) end
-for _, k in ipairs(KEYWORDS_EXTRA) do table.insert(KEYWORDS, k) end
-
--- Termos que indicam tempo/ação/regra (usados para achar regras de redução)
-local RULE_WORDS = {
-	"minut", "minute", "segundo", "second", "remov", "reduz", "reduc", "diminu",
-	"jj", "jumping", "jack", "polichinelo", "agach", "flexao", "pushup", "push-up",
-	"squat", "restante", "remaining", "tempo",
-}
-
-local SERVICES_TO_SCAN = {
-	Workspace,
-	game:GetService("ReplicatedStorage"),
-	game:GetService("ReplicatedFirst"),
-	game:GetService("StarterGui"),
-	game:GetService("StarterPack"),
-	game:GetService("StarterPlayer"),
-	game:GetService("Lighting"),
-}
-
+local LOGO_ICON = "🔍"
+local TOP_BAND = 0.25 -- "parte superior" = 25% de cima da tela
+local KEYWORDS = { "prison", "prisao", "preso", "jail", "cell", "cela", "sentence", "detention", "cadeia", "arrest" }
+local RULE_WORDS = { "minut", "minute", "segundo", "second", "remov", "reduz", "jj", "jack", "polichinelo", "tempo" }
 local COLORS = {
-	panel = Color3.fromRGB(24, 26, 33),
-	panel2 = Color3.fromRGB(16, 17, 22),
-	accent = Color3.fromRGB(88, 101, 242),
-	text = Color3.fromRGB(235, 237, 245),
-	muted = Color3.fromRGB(150, 155, 170),
-	ok = Color3.fromRGB(46, 160, 100),
+	panel = Color3.fromRGB(24, 26, 33), panel2 = Color3.fromRGB(16, 17, 22),
+	accent = Color3.fromRGB(88, 101, 242), btn = Color3.fromRGB(52, 56, 72),
+	danger = Color3.fromRGB(190, 70, 70), text = Color3.fromRGB(235, 237, 245),
+	muted = Color3.fromRGB(150, 155, 170), ok = Color3.fromRGB(46, 160, 100),
 	warn = Color3.fromRGB(200, 140, 40),
 }
 
 --=====================================================================
--- 2. UTILITÁRIOS DE TEXTO
+-- UTILITÁRIOS
 --=====================================================================
--- Mapa de acentos -> ASCII (para "PRISÃO" == "prisao")
 local ACCENTS = {
-	["ã"] = "a", ["á"] = "a", ["à"] = "a", ["â"] = "a", ["ä"] = "a",
-	["Ã"] = "a", ["Á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a",
-	["é"] = "e", ["ê"] = "e", ["è"] = "e", ["É"] = "e", ["Ê"] = "e", ["È"] = "e",
-	["í"] = "i", ["Í"] = "i",
+	["ã"] = "a", ["á"] = "a", ["à"] = "a", ["â"] = "a", ["Ã"] = "a", ["Á"] = "a", ["Â"] = "a",
+	["é"] = "e", ["ê"] = "e", ["É"] = "e", ["Ê"] = "e", ["í"] = "i", ["Í"] = "i",
 	["ó"] = "o", ["ô"] = "o", ["õ"] = "o", ["Ó"] = "o", ["Ô"] = "o", ["Õ"] = "o",
-	["ú"] = "u", ["ü"] = "u", ["Ú"] = "u", ["Ü"] = "u",
-	["ç"] = "c", ["Ç"] = "c",
+	["ú"] = "u", ["Ú"] = "u", ["ç"] = "c", ["Ç"] = "c",
 }
 
--- Remove tags RichText, tira acentos e põe em minúsculas
+-- minúsculas, sem acentos e sem tags RichText ("PRISÃO" == "prisao")
 local function normalize(s)
 	s = tostring(s or "")
-	if string.find(s, "<", 1, true) then
-		s = string.gsub(s, "<[^>]+>", "")
-	end
+	s = string.gsub(s, "<[^>]+>", "")
 	if string.find(s, "[\128-\255]") then
 		s = string.gsub(s, utf8.charpattern, function(c) return ACCENTS[c] or c end)
 	end
 	return string.lower(s)
 end
 
--- Texto "limpo" para exibição (sem tags RichText, sem espaços sobrando)
 local function cleanText(s)
-	s = tostring(s or "")
-	s = string.gsub(s, "<[^>]+>", "")
+	s = string.gsub(tostring(s or ""), "<[^>]+>", "")
 	s = string.gsub(s, "%s+", " ")
 	return (string.gsub(s, "^%s*(.-)%s*$", "%1"))
 end
 
-local function clip(s, n)
-	s = tostring(s)
-	if #s > n then return string.sub(s, 1, n) .. "…[truncado]" end
-	return s
-end
-
--- Retorna a lista de termos (de 'list') encontrados no texto normalizado
 local function findHits(norm, list)
 	local out = {}
 	for _, k in ipairs(list) do
@@ -135,17 +71,6 @@ local function findHits(norm, list)
 	return out
 end
 
-local function numbersIn(text)
-	local seen, out = {}, {}
-	for n in string.gmatch(text, "%d+[%.,]?%d*") do
-		if not seen[n] then seen[n] = true; table.insert(out, n) end
-	end
-	return out
-end
-
---=====================================================================
--- 3. ESTADO + INTERFACE BASE (ScreenGui criado cedo p/ ser ignorado nas varreduras)
---=====================================================================
 local function new(class, props, parent)
 	local inst = Instance.new(class)
 	for k, v in pairs(props) do inst[k] = v end
@@ -154,524 +79,141 @@ local function new(class, props, parent)
 end
 
 local screenGui = new("ScreenGui", {
-	Name = "PrisonDiagnosticUI",
-	ResetOnSpawn = false,
-	IgnoreGuiInset = true,
-	DisplayOrder = 999,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	Name = "PrisonTextUI", ResetOnSpawn = false, IgnoreGuiInset = true,
+	DisplayOrder = 999, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, playerGui)
 
-local lastReport = nil       -- último relatório gerado (string)
-local running = false        -- evita rodar duas análises ao mesmo tempo
-local captured = {}          -- path -> entrada com termo de prisão (vista em tempo real)
-local capturedTop = {}       -- path -> entrada visível na faixa superior
-local hooked = setmetatable({}, { __mode = "k" })
-local pending = setmetatable({}, { __mode = "k" })
-
-local function isOwnGui(obj) return obj:IsDescendantOf(screenGui) end
-local function isTextObject(obj)
-	return obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")
-end
+local function isText(obj) return obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox") end
 
 --=====================================================================
--- 4. ANÁLISE DE ELEMENTOS DE TEXTO
+-- DETECÇÃO DO TEXTO
 --=====================================================================
--- Visível de verdade? (considera Visible dos ancestrais, Enabled da ScreenGui e transparência)
-local function isEffectivelyVisible(obj)
+-- Visível de verdade? (ancestrais, ScreenGui.Enabled e transparência)
+local function isVisible(obj)
 	local cur = obj
 	while cur and cur ~= game do
 		if cur:IsA("GuiObject") and not cur.Visible then return false end
 		if cur:IsA("LayerCollector") and not cur.Enabled then return false end
 		cur = cur.Parent
 	end
-	if obj.TextTransparency >= 1 or obj.Text == "" then return false end
-	return true
+	return obj.TextTransparency < 1 and obj.Text ~= ""
 end
 
--- Posição vertical relativa na tela (0 = topo, 1 = base)
-local function screenPosition(obj)
+-- Posição vertical relativa (0 = topo, 1 = base)
+local function verticalRatio(obj)
 	local cam = Workspace.CurrentCamera
-	if not (obj:IsA("GuiObject") and cam) then return nil, "indeterminada" end
-	local lc = obj:FindFirstAncestorWhichIsA("LayerCollector")
-	if lc and not lc:IsA("ScreenGui") then
-		return nil, "mundo 3D (" .. lc.ClassName .. ")"
+	if not (cam and obj:IsA("GuiObject")) then return nil end
+	return (obj.AbsolutePosition.Y + obj.AbsoluteSize.Y / 2) / math.max(cam.ViewportSize.Y, 1)
+end
+
+local hiddenByUs = {}   -- [obj] = conexão que mantém o texto oculto
+local hiddenKeys = {}   -- ["NomeDoLabel|NomeDoPai"] = true (para textos recriados pelo jogo)
+
+-- Procura o melhor candidato à "mensagem de prisão"
+-- Pontuação: termos de prisão + visível + topo da tela + números + palavras de regra
+local function detect()
+	local best, bestScore = nil, -1
+	for i, obj in ipairs(playerGui:GetDescendants()) do
+		if i % 400 == 0 then task.wait() end
+		if obj.Parent and isText(obj) and not obj:IsDescendantOf(screenGui) and obj.Text ~= "" then
+			local norm = normalize(obj.Text)
+			local hits = findHits(norm, KEYWORDS)
+			if #hits > 0 then
+				local ratio = verticalRatio(obj)
+				local visible = isVisible(obj) or hiddenByUs[obj] ~= nil -- oculto por nós ainda conta
+				local score = #hits * 3
+				if visible then score += 4 end
+				if ratio and ratio < TOP_BAND then score += 4 end
+				if string.find(norm, "%d") then score += 2 end
+				if #findHits(norm, RULE_WORDS) > 0 then score += 3 end
+				if #obj.Text > 20 then score += 1 end
+				if score > bestScore then
+					bestScore = score
+					best = { obj = obj, text = cleanText(obj.Text), path = obj:GetFullName(),
+						visible = visible, ratio = ratio, hits = hits }
+				end
+			end
+		end
 	end
-	local vp = cam.ViewportSize
-	local ratio = (obj.AbsolutePosition.Y + obj.AbsoluteSize.Y / 2) / math.max(vp.Y, 1)
-	local region = "centro"
-	if ratio < CONFIG.TOP_BAND_RATIO then region = "SUPERIOR"
-	elseif ratio > 0.75 then region = "inferior" end
-	return ratio, region
+	return best
 end
 
-local function describeTextObject(obj)
-	local norm = normalize(obj.Text)
-	local ratio, region = screenPosition(obj)
-	local lc = obj:FindFirstAncestorWhichIsA("LayerCollector")
-	return {
-		path = obj:GetFullName(),
-		class = obj.ClassName,
-		text = cleanText(obj.Text),
-		visible = isEffectivelyVisible(obj),
-		ratio = ratio,
-		region = region,
-		gui = lc and lc:GetFullName() or "?",
-		hits = findHits(norm, KEYWORDS),
-		ruleHits = findHits(norm, RULE_WORDS),
-	}
-end
-
--- Guarda a entrada mantendo até 5 textos anteriores (ex.: contador que muda)
-local function store(tbl, e)
-	local prior = tbl[e.path]
-	e.history = prior and prior.history or {}
-	if prior and prior.text ~= e.text then
-		table.insert(e.history, prior.text)
-		if #e.history > 5 then table.remove(e.history, 1) end
+local function buildReport(best)
+	local L = { "DIAGNÓSTICO — TEXTO DA PRISÃO", "Gerado em: " .. os.date("%Y-%m-%d %H:%M:%S"), "" }
+	if not best then
+		table.insert(L, "Mensagem: NÃO ENCONTRADA")
+		table.insert(L, "Nenhum texto com os termos buscados na interface.")
+		table.insert(L, "Fique preso (mensagem na tela) e rode de novo.")
+		return table.concat(L, "\n")
 	end
-	e.seenAt = os.date("%H:%M:%S")
-	tbl[e.path] = e
+	local inTop = best.ratio and best.ratio < TOP_BAND
+	local conf = (best.visible and inTop) and "ALTA (visível e na faixa superior)"
+		or best.visible and "MÉDIA (visível, fora do topo)"
+		or "BAIXA (não visível agora)"
+	table.insert(L, 'Mensagem: "' .. best.text .. '"')
+	table.insert(L, "Local: " .. best.path)
+	table.insert(L, string.format("Posição: %s%s", inTop and "SUPERIOR" or "outra região",
+		best.ratio and string.format(" (%.0f%% da altura)", best.ratio * 100) or ""))
+	table.insert(L, "Confiança: " .. conf)
+	table.insert(L, "Termos: " .. table.concat(best.hits, ", "))
+	table.insert(L, "Texto na tela: " .. (hiddenByUs[best.obj] and "APAGADO por você" or "visível"))
+	return table.concat(L, "\n")
 end
 
-local function recordObject(obj)
-	if not obj.Parent or isOwnGui(obj) or obj.Text == "" then return end
-	local e = describeTextObject(obj)
-	if #e.hits > 0 then store(captured, e) end
-	if e.visible and e.ratio and e.ratio < CONFIG.TOP_BAND_RATIO then store(capturedTop, e) end
-end
+--=====================================================================
+-- REMOÇÃO DO TEXTO (somente no cliente)
+--=====================================================================
+local function keyOf(obj) return obj.Name .. "|" .. (obj.Parent and obj.Parent.Name or "") end
 
--- Escuta mudanças de Text/Visible (com debounce de 0.2s)
-local function hookText(obj)
-	if hooked[obj] or isOwnGui(obj) then return end
-	hooked[obj] = true
-	local function schedule()
-		if pending[obj] then return end
-		pending[obj] = true
-		task.delay(0.2, function()
-			pending[obj] = nil
-			recordObject(obj)
-		end)
-	end
-	obj:GetPropertyChangedSignal("Text"):Connect(schedule)
-	obj:GetPropertyChangedSignal("Visible"):Connect(schedule)
-	recordObject(obj)
-end
-
--- Vigia permanente: pega textos que aparecem quando o jogador é preso
-task.spawn(function()
-	playerGui.DescendantAdded:Connect(function(d)
-		if isTextObject(d) then task.defer(hookText, d) end
+-- Oculta o label e o mantém oculto se o jogo tentar reexibi-lo
+local function hideLabel(obj)
+	if hiddenByUs[obj] then return end
+	obj.Visible = false
+	hiddenByUs[obj] = obj:GetPropertyChangedSignal("Visible"):Connect(function()
+		if obj.Visible then obj.Visible = false end
 	end)
-	for i, d in ipairs(playerGui:GetDescendants()) do
-		if i % CONFIG.YIELD_EVERY == 0 then task.wait() end
-		if isTextObject(d) then hookText(d) end
+end
+
+local function restoreAll()
+	for obj, conn in pairs(hiddenByUs) do
+		conn:Disconnect()
+		if obj.Parent then obj.Visible = true end
+	end
+	hiddenByUs = {}
+	hiddenKeys = {}
+end
+
+-- Se o jogo recriar o texto (ex.: nova prisão), oculta de novo
+playerGui.DescendantAdded:Connect(function(d)
+	if isText(d) and next(hiddenKeys) then
+		task.defer(function()
+			if d.Parent and hiddenKeys[keyOf(d)] then hideLabel(d) end
+		end)
 	end
 end)
 
--- Varredura completa do PlayerGui
-local function scanPlayerGui()
-	local result = { total = 0, hits = {}, top = {}, ruleTexts = {} }
-	for i, obj in ipairs(playerGui:GetDescendants()) do
-		if i % CONFIG.YIELD_EVERY == 0 then task.wait() end
-		if obj.Parent and isTextObject(obj) and not isOwnGui(obj) then
-			result.total += 1
-			hookText(obj)
-			if obj.Text ~= "" then
-				local e = describeTextObject(obj)
-				if #e.hits > 0 then table.insert(result.hits, e) end
-				if e.visible and e.ratio and e.ratio < CONFIG.TOP_BAND_RATIO then table.insert(result.top, e) end
-				if #e.ruleHits > 0 then table.insert(result.ruleTexts, e) end
-			end
+-- Oculta a mensagem detectada e labels equivalentes (mesmo nome e mesmo pai)
+local function hideMessage(best)
+	local key = keyOf(best.obj)
+	hiddenKeys[key] = true
+	local n = 0
+	for _, obj in ipairs(playerGui:GetDescendants()) do
+		if isText(obj) and not obj:IsDescendantOf(screenGui) and keyOf(obj) == key then
+			hideLabel(obj)
+			n += 1
 		end
 	end
-	return result
+	return n
 end
 
 --=====================================================================
--- 5. VARREDURA DE INSTÂNCIAS (nomes, remotes, scripts, textos 3D, prompts)
+-- INTERFACE (logo + menu arrastáveis, com animação)
 --=====================================================================
-local REMOTE_CLASSES = {
-	RemoteEvent = true, RemoteFunction = true, UnreliableRemoteEvent = true,
-	BindableEvent = true, BindableFunction = true,
-}
-
--- Extrai linhas de código que mencionam os termos (só se Source for legível)
-local function extractSnippets(scriptObj, src, store_)
-	local perScript = 0
-	for line in string.gmatch(src, "[^\r\n]+") do
-		if perScript >= 8 or #store_ >= 40 then break end
-		local hits = findHits(normalize(line), KEYWORDS)
-		if #hits > 0 then
-			perScript += 1
-			table.insert(store_, {
-				path = scriptObj:GetFullName(),
-				line = clip(cleanText(line), 160),
-				hits = hits,
-			})
-		end
-	end
-end
-
-local function scanWorld()
-	local out = {
-		scanned = 0, names = {}, otherText = {}, prompts = {}, snippets = {},
-		scriptsSeen = 0, scriptsReadable = 0, sourceBlocked = false,
-	}
-	local failures = 0
-	for _, svc in ipairs(SERVICES_TO_SCAN) do
-		local ok, list = pcall(function() return svc:GetDescendants() end)
-		if ok then
-			for _, d in ipairs(list) do
-				out.scanned += 1
-				if out.scanned % 1500 == 0 then task.wait() end
-
-				-- (a) nome do objeto contém termo?
-				local nameHits = findHits(normalize(d.Name), KEYWORDS)
-				if #nameHits > 0 and #out.names < CONFIG.MAX_ENTRIES then
-					table.insert(out.names, { path = d:GetFullName(), class = d.ClassName, hits = nameHits })
-				end
-
-				if d:IsA("LuaSourceContainer") then
-					-- (b) tenta ler o código (em jogos normais o cliente NÃO consegue)
-					out.scriptsSeen += 1
-					if not out.sourceBlocked then
-						local okSrc, src = pcall(function() return d.Source end)
-						if okSrc and type(src) == "string" and #src > 0 then
-							out.scriptsReadable += 1
-							extractSnippets(d, src, out.snippets)
-						else
-							failures += 1
-							if failures >= 5 and out.scriptsReadable == 0 then out.sourceBlocked = true end
-						end
-					end
-				elseif isTextObject(d) then
-					-- (c) textos fora do PlayerGui (modelos em StarterGui, SurfaceGui, etc.)
-					local hits = findHits(normalize(d.Text), KEYWORDS)
-					if #hits > 0 and #out.otherText < CONFIG.MAX_ENTRIES then
-						table.insert(out.otherText, {
-							path = d:GetFullName(), class = d.ClassName,
-							text = cleanText(d.Text), hits = hits,
-						})
-					end
-				elseif d:IsA("ProximityPrompt") then
-					-- (d) prompts de interação (ex.: "Soltar preso")
-					local combined = d.ActionText .. " " .. d.ObjectText
-					local hits = findHits(normalize(combined), KEYWORDS)
-					if #hits > 0 and #out.prompts < CONFIG.MAX_ENTRIES then
-						table.insert(out.prompts, {
-							path = d:GetFullName(),
-							action = d.ActionText, object = d.ObjectText, hits = hits,
-						})
-					end
-				end
-			end
-		end
-	end
-	return out
-end
-
--- Atributos e valores (leaderstats etc.) do jogador, personagem e Workspace
-local function scanPlayerData()
-	local out = {}
-	local function checkAttrs(inst, label)
-		for k, v in pairs(inst:GetAttributes()) do
-			local hits = findHits(normalize(k .. " " .. tostring(v)), KEYWORDS)
-			if #hits > 0 then
-				table.insert(out, { kind = "Atributo", where = label, name = k, value = tostring(v), hits = hits })
-			end
-		end
-	end
-	local function checkValues(root, label)
-		for _, d in ipairs(root:GetDescendants()) do
-			if d:IsA("ValueBase") then
-				local okV, val = pcall(function() return d.Value end)
-				local hits = findHits(normalize(d.Name .. " " .. tostring(okV and val or "")), KEYWORDS)
-				if #hits > 0 then
-					table.insert(out, { kind = "Valor", where = d:GetFullName(), name = d.Name,
-						value = tostring(okV and val or "?"), hits = hits })
-				end
-			end
-		end
-	end
-	checkAttrs(player, "Player")
-	checkAttrs(Workspace, "Workspace")
-	checkValues(player, "Player")
-	if player.Character then
-		checkAttrs(player.Character, "Character")
-		checkValues(player.Character, "Character")
-	end
-	return out
-end
-
---=====================================================================
--- 6. RELATÓRIO
---=====================================================================
-local function fmtEntry(e, idx, funcNote)
-	local pos = e.ratio and string.format("%s (%.0f%% da altura)", e.region, e.ratio * 100) or e.region
-	local lines = {
-		string.format("[%d] %s", idx, e.path),
-		string.format("    Classe: %s | Visível agora: %s | Região: %s", e.class, e.visible and "sim" or "não", pos),
-	}
-	if e.source then table.insert(lines, "    Origem: " .. e.source) end
-	table.insert(lines, '    Texto: "' .. clip(e.text, CONFIG.MAX_TEXT_LEN) .. '"')
-	if e.hits and #e.hits > 0 then table.insert(lines, "    Termos encontrados: " .. table.concat(e.hits, ", ")) end
-	if e.history and #e.history > 0 then
-		local h = {}
-		for _, t in ipairs(e.history) do table.insert(h, '"' .. clip(t, 120) .. '"') end
-		table.insert(lines, "    Variações anteriores observadas: " .. table.concat(h, " | "))
-	end
-	if funcNote then table.insert(lines, "    ↳ Função: " .. funcNote) end
-	return table.concat(lines, "\n")
-end
-
-local function scoreEntry(e)
-	local s = #e.hits * 3
-	if e.visible then s += 4 end
-	if e.ratio and e.ratio < CONFIG.TOP_BAND_RATIO then s += 4 end
-	if string.find(e.text, "%d") then s += 2 end
-	if #e.ruleHits > 0 then s += 3 end
-	if #e.text > 20 then s += 1 end
-	return s
-end
-
-local function buildReport(gui, world, pdata, startedAt, elapsed)
-	local R = {}
-	local function add(s) table.insert(R, s) end
-	local function section(title)
-		add("")
-		add(string.rep("=", 60))
-		add(title)
-		add(string.rep("=", 60))
-	end
-
-	add("RELATÓRIO DE DIAGNÓSTICO — MECÂNICA DE PRISÃO")
-	add("Gerado em: " .. startedAt .. " | Duração: " .. string.format("%.1fs", elapsed))
-	add("PlaceId: " .. tostring(game.PlaceId) .. " | Jogador: " .. player.Name)
-
-	-- Mescla textos atuais com os capturados em tempo real
-	local all = {}
-	for _, e in ipairs(gui.hits) do
-		e.source = "encontrado na varredura atual"
-		if captured[e.path] then e.history = captured[e.path].history end
-		all[e.path] = e
-	end
-	for path, e in pairs(captured) do
-		if not all[path] then
-			e.source = "capturado em tempo real (pode não estar mais na tela)"
-			all[path] = e
-		end
-	end
-	local candidates = {}
-	for _, e in pairs(all) do table.insert(candidates, e) end
-	table.sort(candidates, function(a, b) return scoreEntry(a) > scoreEntry(b) end)
-
-	-- 1. STATUS
-	section("1. STATUS DA ANÁLISE")
-	add("Concluída. Textos analisados no PlayerGui: " .. gui.total)
-	add("Instâncias analisadas fora do PlayerGui: " .. world.scanned)
-	add("Textos com termo de prisão: " .. #candidates)
-	add("Obs.: este relatório só descreve o que o CLIENTE consegue ver. Não é possível")
-	add("afirmar se o jogador está preso neste momento.")
-	add("Termos buscados: " .. table.concat(KEYWORDS_REQUESTED, ", ")
-		.. " (extras: " .. table.concat(KEYWORDS_EXTRA, ", ") .. ")")
-
-	-- 2. MENSAGEM
-	section("2. MENSAGEM DE PRISÃO IDENTIFICADA")
-	local best = candidates[1]
-	if best then
-		local inTop = best.ratio and best.ratio < CONFIG.TOP_BAND_RATIO
-		local conf
-		if best.visible and inTop then
-			conf = "ALTA — visível agora na faixa superior e contém termo de prisão."
-		elseif best.visible then
-			conf = "MÉDIA — visível agora, porém fora da faixa superior."
-		elseif inTop then
-			conf = "MÉDIA — vista na faixa superior durante a sessão, mas não visível agora."
-		else
-			conf = "BAIXA — o texto existe, mas não está visível nem no topo (pode ser modelo oculto até a prisão)."
-		end
-		add("Melhor candidato (texto literal, sem alterações):")
-		add('"' .. clip(best.text, CONFIG.MAX_TEXT_LEN) .. '"')
-		add("Confiança: " .. conf)
-		add("↳ Função: texto da interface com termo de prisão; provável mensagem ao jogador.")
-		add("   Confirme lendo o texto acima: nada foi presumido.")
-		if #candidates > 1 then
-			add("")
-			add("Outros candidatos:")
-			for i = 2, math.min(#candidates, 4) do
-				add(string.format('  - "%s"  (%s)', clip(candidates[i].text, 200), candidates[i].path))
-			end
-		end
-	else
-		add("NÃO ENCONTRADA. Nenhum texto com os termos buscados foi visto na interface.")
-		add("Possíveis motivos: o jogador não está preso agora; a mensagem usa outras palavras;")
-		add("o texto é uma imagem; ou é montado fora do alcance do cliente.")
-		add("Sugestão: deixe o script ativo, seja preso e rode o Diagnóstico de novo.")
-	end
-
-	-- 3. LOCALIZAÇÃO
-	section("3. LOCALIZAÇÃO DO TEXTO NA INTERFACE")
-	if best then
-		add(fmtEntry(best, 1, "indica onde o texto está na hierarquia de GUI e em que parte da tela aparece."))
-		add("    ScreenGui pai: " .. best.gui)
-	else
-		add("Sem texto de prisão para localizar.")
-	end
-	add("")
-	add("Textos visíveis na faixa superior da tela (podem ou não ser da prisão):")
-	local topAll, seenTop = {}, {}
-	for _, e in ipairs(gui.top) do seenTop[e.path] = true; e.source = "visível agora"; table.insert(topAll, e) end
-	for path, e in pairs(capturedTop) do
-		if not seenTop[path] then e.source = "visto durante a sessão"; table.insert(topAll, e) end
-	end
-	if #topAll == 0 then
-		add("  (nenhum encontrado)")
-	else
-		for i, e in ipairs(topAll) do
-			if i > 15 then add("  ... (+" .. (#topAll - 15) .. " omitidos)"); break end
-			add(string.format('  [%d] "%s"  (%s)', i, clip(e.text, 160), e.path))
-		end
-		add("↳ Função: mensagens fixas no topo costumam ser avisos/status; confira se alguma é a de prisão.")
-	end
-
-	-- 4. REFERÊNCIAS
-	section("4. REFERÊNCIAS A PRISÃO ENCONTRADAS")
-	add("-- 4.1 Textos de interface (PlayerGui) --")
-	if #candidates == 0 then add("  (nenhum)") end
-	for i, e in ipairs(candidates) do
-		if i > CONFIG.MAX_ENTRIES then break end
-		add(fmtEntry(e, i, "texto de interface que cita prisão (mensagem, título ou rótulo)."))
-	end
-
-	add("")
-	add("-- 4.2 Objetos com nome relacionado --")
-	local remotes, others = {}, {}
-	for _, n in ipairs(world.names) do
-		table.insert(REMOTE_CLASSES[n.class] and remotes or others, n)
-	end
-	add("Remotes/Bindables:")
-	if #remotes == 0 then add("  (nenhum)") end
-	for i, n in ipairs(remotes) do
-		add(string.format("  [%d] %s (%s) termos: %s", i, n.path, n.class, table.concat(n.hits, ", ")))
-	end
-	if #remotes > 0 then
-		add("  ↳ Função: canal cliente↔servidor. Só o NOME é visível; dados e lógica ficam no servidor (não acessados).")
-	end
-	add("Outros objetos:")
-	if #others == 0 then add("  (nenhum)") end
-	for i, n in ipairs(others) do
-		add(string.format("  [%d] %s (%s) termos: %s", i, n.path, n.class, table.concat(n.hits, ", ")))
-	end
-	if #others > 0 then
-		add("  ↳ Função: objeto cujo nome cita prisão (pasta, cela, área, script...). Papel exato não confirmado.")
-	end
-
-	add("")
-	add("-- 4.3 Valores e atributos replicados ao cliente --")
-	if #pdata == 0 then add("  (nenhum)") end
-	for i, v in ipairs(pdata) do
-		add(string.format("  [%d] %s em %s: %s = %s", i, v.kind, v.where, v.name, v.value))
-	end
-	if #pdata > 0 then
-		add("  ↳ Função: dado replicado com nome/valor relacionado; pode refletir estado ou tempo de pena (não confirmado).")
-	end
-
-	add("")
-	add("-- 4.4 Textos fora do PlayerGui (modelos/3D) e ProximityPrompts --")
-	if #world.otherText == 0 and #world.prompts == 0 then add("  (nenhum)") end
-	for i, t in ipairs(world.otherText) do
-		add(string.format('  [T%d] %s (%s): "%s"', i, t.path, t.class, clip(t.text, 200)))
-	end
-	for i, p in ipairs(world.prompts) do
-		add(string.format('  [P%d] %s — Ação: "%s" | Objeto: "%s"', i, p.path, p.action, p.object))
-	end
-	if #world.otherText + #world.prompts > 0 then
-		add("  ↳ Função: textos de modelos ainda não exibidos, placas 3D ou interações relacionadas à prisão.")
-	end
-
-	-- 5. REGRAS
-	section("5. REGRAS E REQUISITOS PARA REDUZIR A SENTENÇA")
-	local guisWithHits = {}
-	for _, e in ipairs(candidates) do guisWithHits[e.gui] = true end
-	local ruleList, seenRule = {}, {}
-	local function consider(e)
-		if #e.ruleHits > 0 and not seenRule[e.path] then
-			if #e.hits > 0 or guisWithHits[e.gui] or (e.visible and e.ratio and e.ratio < CONFIG.TOP_BAND_RATIO) then
-				seenRule[e.path] = true
-				table.insert(ruleList, e)
-			end
-		end
-	end
-	for _, e in ipairs(candidates) do consider(e) end
-	for _, e in ipairs(gui.ruleTexts) do consider(e) end
-	if #ruleList == 0 then
-		add("NÃO ENCONTRADO. Nenhum texto com termos de tempo/ação (minutos, remover, reduzir, JJ...)")
-		add("foi visto junto da interface de prisão. A regra pode estar no servidor ou só aparecer")
-		add("durante a prisão.")
-	else
-		for i, e in ipairs(ruleList) do
-			if i > 25 then break end
-			add(string.format('[%d] "%s"', i, clip(e.text, CONFIG.MAX_TEXT_LEN)))
-			add("    Local: " .. e.path)
-			add("    Termos de regra: " .. table.concat(e.ruleHits, ", "))
-			local nums = numbersIn(e.text)
-			if #nums > 0 then add("    Números no texto: " .. table.concat(nums, ", ")) end
-			add("    ↳ Função: texto com termos de tempo/ação; o significado exato é o do texto literal (nada inferido).")
-		end
-	end
-
-	-- 6. LIMITAÇÕES
-	section("6. LIMITAÇÕES DA ANÁLISE")
-	add("• Scripts de servidor e ServerStorage/ServerScriptService não são acessíveis ao cliente.")
-	add("• CoreGui (interface do próprio Roblox) não é acessível a LocalScripts normais.")
-	if world.sourceBlocked or world.scriptsReadable == 0 then
-		add(string.format("• Código-fonte ILEGÍVEL: %d scripts vistos, 0 legíveis (esperado em jogos normais).", world.scriptsSeen))
-	else
-		add(string.format("• Código-fonte legível em %d de %d scripts vistos.", world.scriptsReadable, world.scriptsSeen))
-	end
-	add("• Mensagens montadas no servidor só aparecem enquanto exibidas; o vigia só registra o que ocorreu")
-	add("  desde que este script iniciou. Se um painel apenas ficou visível (sem mudar o texto), rode o")
-	add("  Diagnóstico enquanto a mensagem estiver na tela.")
-	add("• Busca por substring: pode haver falsos positivos (ex.: 'cell' em 'cellphone').")
-	add("• Mensagens em imagem, com outro idioma ou outras palavras não são detectadas.")
-	add("• Para concluir: rodar com o jogador preso, ou ter acesso (como desenvolvedor) ao código da")
-	add("  interface de prisão e aos Remotes/ModuleScripts relacionados.")
-
-	-- 7. CÓDIGO
-	section("7. TRECHOS RELEVANTES DE CÓDIGO ACESSÍVEL")
-	if #world.snippets == 0 then
-		add("Nenhum trecho acessível (Source não está disponível ao cliente neste jogo).")
-	else
-		for i, s in ipairs(world.snippets) do
-			add(string.format("[%d] %s", i, s.path))
-			add("    " .. s.line)
-			add("    -- ↳ Função: linha que cita " .. table.concat(s.hits, ", ") .. "; a lógica completa exige ler o script inteiro.")
-		end
-	end
-
-	return table.concat(R, "\n")
-end
-
-local function runDiagnostic()
-	local t0 = os.clock()
-	local startedAt = os.date("%Y-%m-%d %H:%M:%S")
-	local gui = scanPlayerGui()
-	local world = scanWorld()
-	local pdata = scanPlayerData()
-	return buildReport(gui, world, pdata, startedAt, os.clock() - t0)
-end
-
---=====================================================================
--- 7. INTERFACE: LOGO, MENU, ARRASTAR, ANIMAÇÕES
---=====================================================================
--- Arrasto genérico (mouse e toque) com limite de tela e detecção de "toque simples"
 local function makeDraggable(handle, target, onTap)
 	local dragging, moved, startInput, startMouse, startCenter = false, false, nil, nil, nil
 	handle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging, moved = true, false
-			startInput = input
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging, moved, startInput = true, false, input
 			startMouse = input.Position
 			startCenter = target.AbsolutePosition + target.AbsoluteSize * target.AnchorPoint
 			local conn
@@ -692,8 +234,7 @@ local function makeDraggable(handle, target, onTap)
 		local delta = input.Position - startMouse
 		if delta.Magnitude > 6 then moved = true end
 		if moved then
-			local screen = screenGui.AbsoluteSize
-			local size, a = target.AbsoluteSize, target.AnchorPoint
+			local screen, size, a = screenGui.AbsoluteSize, target.AbsoluteSize, target.AnchorPoint
 			local x = math.clamp(startCenter.X + delta.X, size.X * a.X, screen.X - size.X * (1 - a.X))
 			local y = math.clamp(startCenter.Y + delta.Y, size.Y * a.Y, screen.Y - size.Y * (1 - a.Y))
 			target.Position = UDim2.fromOffset(x, y)
@@ -701,99 +242,71 @@ local function makeDraggable(handle, target, onTap)
 	end)
 end
 
-local function round(inst, radius)
-	new("UICorner", { CornerRadius = radius }, inst)
-end
+local function round(inst, r) new("UICorner", { CornerRadius = r }, inst) end
 
--- Logo flutuante (lado esquerdo, um pouco acima do centro)
 local logo = new("TextButton", {
-	Name = "Logo",
-	Size = UDim2.fromOffset(44, 44),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0, 34, 0.42, 0),
-	BackgroundColor3 = COLORS.panel,
-	BackgroundTransparency = 0.1,
-	Text = CONFIG.LOGO_ICON,
-	TextSize = 22,
-	Font = Enum.Font.GothamMedium,
-	TextColor3 = COLORS.text,
-	AutoButtonColor = false,
+	Name = "Logo", Size = UDim2.fromOffset(44, 44), AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0, 34, 0.42, 0), BackgroundColor3 = COLORS.panel, BackgroundTransparency = 0.1,
+	Text = LOGO_ICON, TextSize = 22, Font = Enum.Font.GothamMedium, TextColor3 = COLORS.text, AutoButtonColor = false,
 }, screenGui)
 round(logo, UDim.new(0.5, 0))
 new("UIStroke", { Color = COLORS.accent, Transparency = 0.4, Thickness = 1.5 }, logo)
 
--- Menu compacto (CanvasGroup permite fade do conjunto)
 local menu = new("CanvasGroup", {
-	Name = "Menu",
-	Size = UDim2.fromOffset(320, 340),
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.5),
-	BackgroundColor3 = COLORS.panel,
-	GroupTransparency = 1,
-	Visible = false,
+	Name = "Menu", Size = UDim2.fromOffset(320, 262), AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = COLORS.panel, GroupTransparency = 1, Visible = false,
 }, screenGui)
 round(menu, UDim.new(0, 12))
 new("UIStroke", { Color = COLORS.accent, Transparency = 0.6, Thickness = 1 }, menu)
 local menuScale = new("UIScale", { Scale = 0.9 }, menu)
 
--- Barra de título (área de arrastar) + botão fechar
-local titleBar = new("Frame", {
-	Size = UDim2.new(1, -44, 0, 38), BackgroundTransparency = 1, Active = true,
-}, menu)
+local titleBar = new("Frame", { Size = UDim2.new(1, -44, 0, 38), BackgroundTransparency = 1, Active = true }, menu)
 new("TextLabel", {
-	Size = UDim2.new(1, -12, 1, 0), Position = UDim2.fromOffset(12, 0),
-	BackgroundTransparency = 1, Text = CONFIG.LOGO_ICON .. "  Diagnóstico de Prisão",
-	Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = COLORS.text,
-	TextXAlignment = Enum.TextXAlignment.Left,
+	Size = UDim2.new(1, -12, 1, 0), Position = UDim2.fromOffset(12, 0), BackgroundTransparency = 1,
+	Text = LOGO_ICON .. "  Diagnóstico de Prisão", Font = Enum.Font.GothamBold, TextSize = 14,
+	TextColor3 = COLORS.text, TextXAlignment = Enum.TextXAlignment.Left,
 }, titleBar)
 local closeBtn = new("TextButton", {
-	Size = UDim2.fromOffset(30, 30), Position = UDim2.new(1, -38, 0, 4),
-	BackgroundTransparency = 1, Text = "✕", Font = Enum.Font.GothamBold,
-	TextSize = 14, TextColor3 = COLORS.muted,
+	Size = UDim2.fromOffset(30, 30), Position = UDim2.new(1, -38, 0, 4), BackgroundTransparency = 1,
+	Text = "✕", Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = COLORS.muted,
 }, menu)
 
-local function makeButton(text, x, color)
+local function makeButton(text, x, y, w, color)
 	local b = new("TextButton", {
-		Size = UDim2.fromOffset(144, 34), Position = UDim2.fromOffset(x, 46),
-		BackgroundColor3 = color, Text = text, Font = Enum.Font.GothamMedium,
-		TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
+		Size = UDim2.fromOffset(w, 34), Position = UDim2.fromOffset(x, y), BackgroundColor3 = color,
+		Text = text, Font = Enum.Font.GothamMedium, TextSize = 13, TextColor3 = Color3.new(1, 1, 1),
 	}, menu)
 	round(b, UDim.new(0, 8))
 	return b
 end
-local diagBtn = makeButton("Diagnóstico", 12, COLORS.accent)
-local copyBtn = makeButton("Copiar diagnóstico", 164, Color3.fromRGB(52, 56, 72))
+local diagBtn = makeButton("Diagnóstico", 12, 46, 144, COLORS.accent)
+local copyBtn = makeButton("Copiar diagnóstico", 164, 46, 144, COLORS.btn)
+local eraseBtn = makeButton("Apagar texto da tela", 12, 86, 296, COLORS.danger)
 
 local statusLabel = new("TextLabel", {
-	Size = UDim2.fromOffset(296, 18), Position = UDim2.fromOffset(12, 86),
-	BackgroundTransparency = 1, Text = "Pronto. Toque em Diagnóstico.",
-	Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = COLORS.muted,
+	Size = UDim2.fromOffset(296, 18), Position = UDim2.fromOffset(12, 126), BackgroundTransparency = 1,
+	Text = "Pronto.", Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = COLORS.muted,
 	TextXAlignment = Enum.TextXAlignment.Left,
 }, menu)
 
 local resultFrame = new("ScrollingFrame", {
-	Size = UDim2.fromOffset(296, 220), Position = UDim2.fromOffset(12, 108),
-	BackgroundColor3 = COLORS.panel2, BorderSizePixel = 0,
-	ScrollBarThickness = 4, CanvasSize = UDim2.new(),
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	ScrollingDirection = Enum.ScrollingDirection.Y,
+	Size = UDim2.fromOffset(296, 100), Position = UDim2.fromOffset(12, 148), BackgroundColor3 = COLORS.panel2,
+	BorderSizePixel = 0, ScrollBarThickness = 4, CanvasSize = UDim2.new(),
+	AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollingDirection = Enum.ScrollingDirection.Y,
 }, menu)
 round(resultFrame, UDim.new(0, 8))
 local resultBox = new("TextBox", {
-	Size = UDim2.new(1, -8, 0, 0), Position = UDim2.fromOffset(4, 4),
-	AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1,
-	MultiLine = true, TextWrapped = true, TextEditable = false, ClearTextOnFocus = false,
-	Font = Enum.Font.Code, TextSize = 11, TextColor3 = COLORS.text,
-	TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-	Text = "O relatório aparecerá aqui.",
+	Size = UDim2.new(1, -8, 0, 0), Position = UDim2.fromOffset(4, 4), AutomaticSize = Enum.AutomaticSize.Y,
+	BackgroundTransparency = 1, MultiLine = true, TextWrapped = true, TextEditable = false, ClearTextOnFocus = false,
+	Font = Enum.Font.Code, TextSize = 11, TextColor3 = COLORS.text, TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top, Text = "O resultado aparecerá aqui.",
 }, resultFrame)
 
--- Aviso (toast) temporário
+-- Aviso temporário
 local toast = new("TextLabel", {
-	AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16),
-	Size = UDim2.fromOffset(0, 28), AutomaticSize = Enum.AutomaticSize.X,
-	BackgroundColor3 = COLORS.ok, BackgroundTransparency = 1, TextTransparency = 1,
-	Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
+	AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -112), Size = UDim2.fromOffset(0, 28),
+	AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = COLORS.ok, BackgroundTransparency = 1,
+	TextTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = Color3.new(1, 1, 1),
 	Text = "", ZIndex = 5,
 }, menu)
 round(toast, UDim.new(0, 14))
@@ -803,37 +316,30 @@ local toastToken = 0
 local function showToast(text, color)
 	toastToken += 1
 	local my = toastToken
-	toast.Text = text
-	toast.BackgroundColor3 = color
-	toast.BackgroundTransparency = 0.05
-	toast.TextTransparency = 0
+	toast.Text, toast.BackgroundColor3 = text, color
+	toast.BackgroundTransparency, toast.TextTransparency = 0.05, 0
 	task.delay(2.4, function()
-		if my ~= toastToken then return end
-		local info = TweenInfo.new(0.3)
-		TweenService:Create(toast, info, { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
+		if my == toastToken then
+			TweenService:Create(toast, TweenInfo.new(0.3), { BackgroundTransparency = 1, TextTransparency = 1 }):Play()
+		end
 	end)
 end
 
--- Abrir / fechar com animação suave
+-- Abrir / fechar com animação
 local menuOpen = false
-local TWEEN_FADE_IN = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TWEEN_SCALE_IN = TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local TWEEN_OUT = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-
 local function setMenu(open)
 	if open == menuOpen then return end
 	menuOpen = open
 	if open then
 		menu.Visible = true
-		TweenService:Create(menu, TWEEN_FADE_IN, { GroupTransparency = 0 }):Play()
-		TweenService:Create(menuScale, TWEEN_SCALE_IN, { Scale = 1 }):Play()
+		TweenService:Create(menu, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { GroupTransparency = 0 }):Play()
+		TweenService:Create(menuScale, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Scale = 1 }):Play()
 	else
-		local t = TweenService:Create(menu, TWEEN_OUT, { GroupTransparency = 1 })
-		TweenService:Create(menuScale, TWEEN_OUT, { Scale = 0.9 }):Play()
+		local info = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		local t = TweenService:Create(menu, info, { GroupTransparency = 1 })
+		TweenService:Create(menuScale, info, { Scale = 0.9 }):Play()
 		t:Play()
-		t.Completed:Once(function()
-			if not menuOpen then menu.Visible = false end
-		end)
+		t.Completed:Once(function() if not menuOpen then menu.Visible = false end end)
 	end
 end
 
@@ -841,38 +347,62 @@ makeDraggable(logo, logo, function() setMenu(not menuOpen) end)
 makeDraggable(titleBar, menu, nil)
 closeBtn.Activated:Connect(function() setMenu(false) end)
 
--- Botão "Diagnóstico"
-diagBtn.Activated:Connect(function()
-	if running then return end
-	running = true
-	statusLabel.Text = "Analisando..."
-	local ok, result = pcall(runDiagnostic)
-	if ok then
-		lastReport = result
-		local preview = result
-		if #preview > CONFIG.PREVIEW_LIMIT then
-			preview = string.sub(preview, 1, CONFIG.PREVIEW_LIMIT)
-				.. "\n\n[Preview truncado. 'Copiar diagnóstico' copia o relatório completo.]"
-		end
-		resultBox.TextEditable = false
-		resultBox.Text = preview
-		resultFrame.CanvasPosition = Vector2.zero
-		statusLabel.Text = "Concluído. Use 'Copiar diagnóstico'."
-	else
-		lastReport = "STATUS: a análise falhou.\nErro: " .. tostring(result)
-		resultBox.Text = lastReport
-		statusLabel.Text = "Falha na análise (veja detalhes abaixo)."
+--=====================================================================
+-- BOTÕES
+--=====================================================================
+local lastReport, busy = nil, false
+
+local function runDetect()
+	local ok, best = pcall(detect)
+	if not ok then
+		lastReport = "Falha na análise: " .. tostring(best)
+		return nil
 	end
-	running = false
+	lastReport = buildReport(best)
+	return best
+end
+
+diagBtn.Activated:Connect(function()
+	if busy then return end
+	busy = true
+	statusLabel.Text = "Analisando..."
+	local best = runDetect()
+	resultBox.TextEditable = false
+	resultBox.Text = lastReport
+	statusLabel.Text = best and "Mensagem detectada." or "Mensagem não encontrada."
+	busy = false
 end)
 
--- Botão "Copiar diagnóstico"
+eraseBtn.Activated:Connect(function()
+	if busy then return end
+	-- Segundo toque: restaura o texto
+	if next(hiddenByUs) then
+		restoreAll()
+		statusLabel.Text = "Texto restaurado."
+		showToast("Texto restaurado", COLORS.warn)
+		return
+	end
+	busy = true
+	statusLabel.Text = "Procurando texto..."
+	local best = runDetect()
+	if best then
+		local n = hideMessage(best)
+		lastReport = buildReport(best) -- reflete o estado "APAGADO"
+		resultBox.TextEditable = false
+		resultBox.Text = lastReport
+		statusLabel.Text = "Texto apagado. Toque de novo para restaurar."
+		showToast("✔ Texto apagado (" .. n .. ")", COLORS.ok)
+	else
+		resultBox.Text = lastReport or ""
+		statusLabel.Text = "Nada para apagar."
+		showToast("⚠ Texto não encontrado. Rode quando estiver preso", COLORS.warn)
+	end
+	busy = false
+end)
+
 local function getClipboardFn()
-	local ok, fn = pcall(function()
-		return setclipboard or toclipboard or (Clipboard and Clipboard.set)
-	end)
+	local ok, fn = pcall(function() return setclipboard or toclipboard or (Clipboard and Clipboard.set) end)
 	if ok and type(fn) == "function" then return fn end
-	return nil
 end
 
 copyBtn.Activated:Connect(function()
@@ -880,13 +410,12 @@ copyBtn.Activated:Connect(function()
 		showToast("⚠ Execute o Diagnóstico primeiro", COLORS.warn)
 		return
 	end
-	local clipFn = getClipboardFn()
-	if clipFn and pcall(clipFn, lastReport) then
+	local clip = getClipboardFn()
+	if clip and pcall(clip, lastReport) then
 		showToast("✔ Diagnóstico copiado!", COLORS.ok)
 	else
-		-- Roblox padrão não expõe área de transferência: libera seleção manual
 		resultBox.Text = lastReport
-		resultBox.TextEditable = true
-		showToast("Sem acesso à área de transferência: selecione o texto", COLORS.warn)
+		resultBox.TextEditable = true -- permite selecionar e copiar manualmente
+		showToast("Sem área de transferência: selecione o texto", COLORS.warn)
 	end
 end)
