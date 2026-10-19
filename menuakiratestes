@@ -1,16 +1,28 @@
 -- ======================================================================== --
--- BYPASS PRISON BY WILLZ & JP  —  v4 (corrigido: sem "puxão pra cima")
+-- BYPASS PRISON BY WILLZ & JP  —  v6 (anti-puxão extremo com raycast)
+-- Botão único: liga Noclip + Anti-TP + Remover texto.
+-- Ao DESLIGAR o botão, só o Noclip desliga (Anti-TP e Remover texto continuam).
+-- O "✕" (ou executar o script de novo) desliga tudo e fecha o menu.
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-if _G.BypassPrisonCleanup then pcall(_G.BypassPrisonCleanup) end
+-- ============================================
+-- LIMPEZA DE EXECUÇÃO ANTERIOR
+-- ============================================
+if _G.BypassPrisonCleanup then
+    pcall(_G.BypassPrisonCleanup)
+end
 local antiga = PlayerGui:FindFirstChild("BypassPrisonGui")
 if antiga then antiga:Destroy() end
 
+-- ============================================
+-- UI
+-- ============================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "BypassPrisonGui"
 ScreenGui.ResetOnSpawn = false
@@ -43,6 +55,7 @@ Title.TextColor3 = Color3.fromRGB(0, 255, 200)
 Title.TextSize = 12
 Title.Parent = MainFrame
 
+-- "✕": desliga tudo e fecha o menu
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 26, 0, 26)
 CloseBtn.Position = UDim2.new(1, -30, 0, 2)
@@ -53,6 +66,7 @@ CloseBtn.TextColor3 = Color3.fromRGB(150, 155, 170)
 CloseBtn.TextSize = 13
 CloseBtn.Parent = MainFrame
 
+-- Botão único
 local BypassBtn = Instance.new("TextButton")
 BypassBtn.Size = UDim2.new(1, -20, 0, 46)
 BypassBtn.Position = UDim2.new(0, 10, 0, 34)
@@ -88,7 +102,7 @@ CreditsCorner.CornerRadius = UDim.new(0, 6)
 CreditsCorner.Parent = Credits
 
 -- ============================================
--- 1) NOCLIP
+-- 1) NOCLIP — com trava de queda
 -- ============================================
 local noclipConnection = nil
 local colisaoOriginal = {}
@@ -106,6 +120,13 @@ local function ligarNoclip()
                 p.CanCollide = false
             end
         end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local v = hrp.AssemblyLinearVelocity
+            if v.Y < -50 then
+                hrp.AssemblyLinearVelocity = Vector3.new(v.X, -50, v.Z)
+            end
+        end
     end)
 end
 
@@ -121,103 +142,130 @@ local function desligarNoclip()
 end
 
 -- ============================================
--- 2) ANTI-TP (v4) — CORRIGIDO
+-- 2) ANTI-PUXÃO EXTREMO (v6)
 -- ============================================
 local antiTpConnections = {}
-local ultimaPosicao = nil
 local ultimoChar = nil
+local ultimaPosicao = nil
+local ultimoPulo = 0
+local ultimaAltura = nil
+local ultimoChaoY = nil
 
-local MARGEM = 3
-local MARGEM_VEL = 10
-local QUEDA_MAX = 400
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function limitesDoBoneco(hum)
-    local andar = hum and hum.WalkSpeed or 16
-    local pulo = 50
-    if hum then
-        if hum.UseJumpPower then
-            pulo = hum.JumpPower
-        else
-            pulo = math.sqrt(2 * workspace.Gravity * hum.JumpHeight)
-        end
-    end
-    return andar + MARGEM_VEL, pulo + MARGEM_VEL
+local function chaoAbaixo(char, hrp)
+    rayParams.FilterDescendantsInstances = {char}
+    local r = workspace:Raycast(hrp.Position, Vector3.new(0, -60, 0), rayParams)
+    return r and r.Position.Y or nil
 end
 
-local function checarTeleporte(dt)
+local espacoConn = UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Space then
+        ultimoPulo = tick()
+    end
+end)
+
+local function checarPuxao(dt)
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and (hum.SeatPart or hum.Health <= 0) then
+        ultimoChar = char
+        ultimaPosicao = hrp.CFrame
+        ultimaAltura = nil
+        ultimoChaoY = nil
+        return
+    end
 
     if char ~= ultimoChar or not ultimaPosicao then
         ultimoChar = char
         ultimaPosicao = hrp.CFrame
+        ultimaAltura = nil
+        ultimoChaoY = nil
         return
     end
 
-    if hum and (hum.SeatPart or hum.Health <= 0) then
-        ultimaPosicao = hrp.CFrame
-        return
+    if hum then
+        local st = hum:GetState()
+        if st == Enum.HumanoidStateType.Jumping then
+            ultimoPulo = tick()
+        end
     end
 
-    dt = math.clamp(dt, 1 / 240, 0.1)
-    local maxH, maxCima = limitesDoBoneco(hum)
+    local podeSubir = (tick() - ultimoPulo) < 1.0
 
-    -- a) Limita velocidade anormal (força externa)
     local v = hrp.AssemblyLinearVelocity
-    local h = Vector3.new(v.X, 0, v.Z)
-    local vy = v.Y
-    local mudou = false
-    if h.Magnitude > maxH then
-        h = h.Unit * maxH
-        mudou = true
-    end
-    -- ⬇️ AQUI ESTÁ A CORREÇÃO PRINCIPAL: zera em vez de setar em maxCima
-    if vy > maxCima then
-        vy = 0
-        mudou = true
-    end
-    if mudou then
-        hrp.AssemblyLinearVelocity = Vector3.new(h.X, vy, h.Z)
+    local posAtual = hrp.Position
+    local posAntiga = ultimaPosicao.Position
+
+    -- 1) Mata velocidade forçada pra cima
+    if not podeSubir and v.Y > 2 then
+        hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+        v = hrp.AssemblyLinearVelocity
     end
 
-    -- b) Teleporte por salto de posição
-    local delta = hrp.Position - ultimaPosicao.Position
-    local horiz = Vector3.new(delta.X, 0, delta.Z).Magnitude
-    local permitidoH = maxH * dt + MARGEM
-    local permitidoCima = maxCima * dt + MARGEM + 2   -- folga extra pra cima
-    local permitidoBaixo = QUEDA_MAX * dt + MARGEM
+    -- 2) Mata teleporte instantâneo
+    local deltaY = posAtual.Y - posAntiga.Y
+    if not podeSubir and deltaY > 3 then
+        hrp.CFrame = hrp.CFrame - Vector3.new(0, deltaY, 0)
+        posAtual = hrp.Position
+    end
 
-    if horiz > permitidoH or delta.Y > permitidoCima or -delta.Y > permitidoBaixo then
-        hrp.CFrame = ultimaPosicao
-        hrp.AssemblyLinearVelocity = Vector3.zero
-        hrp.AssemblyAngularVelocity = Vector3.zero
+    -- 3) Chão + altura
+    local chaoY = chaoAbaixo(char, hrp)
+    if chaoY then
+        local altura = posAtual.Y - chaoY
+
+        -- 3a) Puxão violento (flutuando alto)
+        if not podeSubir and altura > 6 and v.Y >= 0 then
+            hrp.CFrame = hrp.CFrame - Vector3.new(0, altura - 3, 0)
+            hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+            posAtual = hrp.Position
+            altura = posAtual.Y - chaoY
+        end
+
+        -- 3b) Pull lento (altura cresce com chão parado)
+        if ultimaAltura and ultimoChaoY and not podeSubir then
+            local chaoEstavel = math.abs(chaoY - ultimoChaoY) < 2
+            local alturaCresceu = (altura - ultimaAltura) > 4
+            if chaoEstavel and alturaCresceu and v.Y > -0.5 then
+                hrp.CFrame = hrp.CFrame - Vector3.new(0, altura - 3, 0)
+                hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+                posAtual = hrp.Position
+                altura = posAtual.Y - chaoY
+            end
+        end
+
+        ultimaAltura = altura
+        ultimoChaoY = chaoY
     else
-        ultimaPosicao = hrp.CFrame
+        ultimaAltura = nil
+        ultimoChaoY = nil
     end
+
+    ultimaPosicao = hrp.CFrame
 end
 
 local function ligarAntiTp()
     if #antiTpConnections > 0 then return end
-    ultimaPosicao = nil
     ultimoChar = nil
-    table.insert(antiTpConnections, RunService.Stepped:Connect(function(_, dt)
-        checarTeleporte(dt)
-    end))
-    table.insert(antiTpConnections, RunService.Heartbeat:Connect(function(dt)
-        checarTeleporte(dt)
-    end))
-    table.insert(antiTpConnections, RunService.RenderStepped:Connect(function(dt)
-        checarTeleporte(dt)
-    end))
+    ultimaPosicao = nil
+    ultimaAltura = nil
+    ultimoChaoY = nil
+    ultimoPulo = 0
+    table.insert(antiTpConnections, RunService.Heartbeat:Connect(checarPuxao))
 end
 
 local function desligarAntiTp()
     for _, c in ipairs(antiTpConnections) do c:Disconnect() end
     antiTpConnections = {}
-    ultimaPosicao = nil
     ultimoChar = nil
+    ultimaPosicao = nil
+    ultimaAltura = nil
+    ultimoChaoY = nil
 end
 
 -- ============================================
@@ -270,13 +318,17 @@ end
 local function ligarRemoverTexto()
     if textoAtivo then return end
     textoAtivo = true
-    for _, d in ipairs(PlayerGui:GetDescendants()) do observar(d) end
+    for _, d in ipairs(PlayerGui:GetDescendants()) do
+        observar(d)
+    end
     table.insert(textoConnections, PlayerGui.DescendantAdded:Connect(observar))
 end
 
 local function desligarRemoverTexto()
     textoAtivo = false
-    for _, c in ipairs(textoConnections) do c:Disconnect() end
+    for _, c in ipairs(textoConnections) do
+        c:Disconnect()
+    end
     textoConnections = {}
     for obj, visivelOriginal in pairs(textosOcultos) do
         if obj.Parent then obj.Visible = visivelOriginal end
@@ -285,7 +337,7 @@ local function desligarRemoverTexto()
 end
 
 -- ============================================
--- BOTÃO
+-- BOTÃO ÚNICO
 -- ============================================
 local noclipAtivo = false
 
@@ -297,6 +349,7 @@ local function atualizarBotao()
         BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
         BypassBtn.Text = "Desativado"
     end
+
     if #antiTpConnections > 0 then
         StatusLabel.Text = "Anti-TP: ATIVO"
         StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 200)
@@ -318,6 +371,7 @@ BypassBtn.MouseButton1Click:Connect(function()
     atualizarBotao()
 end)
 
+-- Desliga TUDO e fecha o menu
 local function desligarTudo()
     noclipAtivo = false
     desligarAntiTp()
@@ -327,6 +381,7 @@ end
 
 local function limpar()
     desligarTudo()
+    if espacoConn then espacoConn:Disconnect() end
     if ScreenGui.Parent then ScreenGui:Destroy() end
 end
 
