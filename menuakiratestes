@@ -1,8 +1,5 @@
 -- ======================================================================== --
--- BYPASS PRISON BY WILLZ & JP  —  v3
--- Botão único: liga Noclip + Anti-TP + Remover texto.
--- Ao DESLIGAR o botão, só o Noclip desliga (Anti-TP e Remover texto continuam).
--- O "✕" (ou executar o script de novo) desliga tudo e fecha o menu.
+-- BYPASS PRISON BY WILLZ & JP  —  v4 (corrigido: sem "puxão pra cima")
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
@@ -10,18 +7,10 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- ============================================
--- LIMPEZA DE EXECUÇÃO ANTERIOR
--- ============================================
-if _G.BypassPrisonCleanup then
-    pcall(_G.BypassPrisonCleanup)
-end
+if _G.BypassPrisonCleanup then pcall(_G.BypassPrisonCleanup) end
 local antiga = PlayerGui:FindFirstChild("BypassPrisonGui")
 if antiga then antiga:Destroy() end
 
--- ============================================
--- UI
--- ============================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "BypassPrisonGui"
 ScreenGui.ResetOnSpawn = false
@@ -54,7 +43,6 @@ Title.TextColor3 = Color3.fromRGB(0, 255, 200)
 Title.TextSize = 12
 Title.Parent = MainFrame
 
--- "✕": desliga tudo e fecha o menu
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 26, 0, 26)
 CloseBtn.Position = UDim2.new(1, -30, 0, 2)
@@ -65,7 +53,6 @@ CloseBtn.TextColor3 = Color3.fromRGB(150, 155, 170)
 CloseBtn.TextSize = 13
 CloseBtn.Parent = MainFrame
 
--- Botão único (verde = noclip ligado, vermelho = noclip desligado)
 local BypassBtn = Instance.new("TextButton")
 BypassBtn.Size = UDim2.new(1, -20, 0, 46)
 BypassBtn.Position = UDim2.new(0, 10, 0, 34)
@@ -78,7 +65,6 @@ local BtnCorner = Instance.new("UICorner")
 BtnCorner.CornerRadius = UDim.new(0, 6)
 BtnCorner.Parent = BypassBtn
 
--- Linha de status do Anti-TP
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, -20, 0, 16)
 StatusLabel.Position = UDim2.new(0, 10, 0, 84)
@@ -103,10 +89,9 @@ CreditsCorner.Parent = Credits
 
 -- ============================================
 -- 1) NOCLIP
--- Desliga de verdade: devolve a colisão original de cada parte.
 -- ============================================
 local noclipConnection = nil
-local colisaoOriginal = {} -- [parte] = CanCollide original
+local colisaoOriginal = {}
 
 local function ligarNoclip()
     if noclipConnection then return end
@@ -136,22 +121,16 @@ local function desligarNoclip()
 end
 
 -- ============================================
--- 2) ANTI-TP (v3)
--- Duas proteções:
---  a) Limita velocidade que NÃO vem do próprio boneco (puxão por força/velocidade,
---     que era o que te puxava "uns metros pra cima").
---  b) Detecta salto de posição (teleporte) e volta para a última posição válida.
--- Não considera a velocidade atual como desculpa para o salto (a v2 fazia isso).
+-- 2) ANTI-TP (v4) — CORRIGIDO
 -- ============================================
 local antiTpConnections = {}
 local ultimaPosicao = nil
 local ultimoChar = nil
 
-local MARGEM = 3      -- studs de tolerância por frame além do movimento normal
-local MARGEM_VEL = 10 -- studs/s de tolerância acima da velocidade do boneco
-local QUEDA_MAX = 400 -- studs/s: queda livre permitida
+local MARGEM = 3
+local MARGEM_VEL = 10
+local QUEDA_MAX = 400
 
--- Velocidades que o próprio Humanoid consegue fazer (andar e pular)
 local function limitesDoBoneco(hum)
     local andar = hum and hum.WalkSpeed or 16
     local pulo = 50
@@ -162,7 +141,7 @@ local function limitesDoBoneco(hum)
             pulo = math.sqrt(2 * workspace.Gravity * hum.JumpHeight)
         end
     end
-    return andar + MARGEM_VEL, pulo + MARGEM_VEL -- (máx horizontal, máx para cima)
+    return andar + MARGEM_VEL, pulo + MARGEM_VEL
 end
 
 local function checarTeleporte(dt)
@@ -171,14 +150,12 @@ local function checarTeleporte(dt)
     if not hrp then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
 
-    -- Personagem novo (respawn): aceita a posição atual como referência
     if char ~= ultimoChar or not ultimaPosicao then
         ultimoChar = char
         ultimaPosicao = hrp.CFrame
         return
     end
 
-    -- Sentado (carro/cavalo/cadeira) ou morto: não interfere
     if hum and (hum.SeatPart or hum.Health <= 0) then
         ultimaPosicao = hrp.CFrame
         return
@@ -187,7 +164,7 @@ local function checarTeleporte(dt)
     dt = math.clamp(dt, 1 / 240, 0.1)
     local maxH, maxCima = limitesDoBoneco(hum)
 
-    -- a) Limita velocidade que o boneco não conseguiria fazer sozinho
+    -- a) Limita velocidade anormal (força externa)
     local v = hrp.AssemblyLinearVelocity
     local h = Vector3.new(v.X, 0, v.Z)
     local vy = v.Y
@@ -196,19 +173,20 @@ local function checarTeleporte(dt)
         h = h.Unit * maxH
         mudou = true
     end
+    -- ⬇️ AQUI ESTÁ A CORREÇÃO PRINCIPAL: zera em vez de setar em maxCima
     if vy > maxCima then
-        vy = maxCima
+        vy = 0
         mudou = true
     end
     if mudou then
         hrp.AssemblyLinearVelocity = Vector3.new(h.X, vy, h.Z)
     end
 
-    -- b) Salto de posição (teleporte)
+    -- b) Teleporte por salto de posição
     local delta = hrp.Position - ultimaPosicao.Position
     local horiz = Vector3.new(delta.X, 0, delta.Z).Magnitude
     local permitidoH = maxH * dt + MARGEM
-    local permitidoCima = maxCima * dt + MARGEM
+    local permitidoCima = maxCima * dt + MARGEM + 2   -- folga extra pra cima
     local permitidoBaixo = QUEDA_MAX * dt + MARGEM
 
     if horiz > permitidoH or delta.Y > permitidoCima or -delta.Y > permitidoBaixo then
@@ -224,7 +202,6 @@ local function ligarAntiTp()
     if #antiTpConnections > 0 then return end
     ultimaPosicao = nil
     ultimoChar = nil
-    -- Antes da física (Stepped), depois (Heartbeat) e antes de desenhar (RenderStepped)
     table.insert(antiTpConnections, RunService.Stepped:Connect(function(_, dt)
         checarTeleporte(dt)
     end))
@@ -237,19 +214,17 @@ local function ligarAntiTp()
 end
 
 local function desligarAntiTp()
-    for _, c in ipairs(antiTpConnections) do
-        c:Disconnect()
-    end
+    for _, c in ipairs(antiTpConnections) do c:Disconnect() end
     antiTpConnections = {}
     ultimaPosicao = nil
     ultimoChar = nil
 end
 
 -- ============================================
--- 3) REMOVER TEXTO (detecta e apaga o texto da prisão)
+-- 3) REMOVER TEXTO
 -- ============================================
 local textoConnections = {}
-local textosOcultos = {} -- [label] = Visible original
+local textosOcultos = {}
 local textoAtivo = false
 
 local function normalizar(s)
@@ -263,7 +238,6 @@ local function contem(texto, palavra)
     return string.find(texto, palavra, 1, true) ~= nil
 end
 
--- DETECTAR: cita prisão E fala de polichinelos/minutos
 local function ehMensagemDePrisao(obj)
     local t = normalizar(obj.Text)
     local prisao = contem(t, "prisao") or contem(t, "preso") or contem(t, "prison") or contem(t, "jail")
@@ -271,7 +245,6 @@ local function ehMensagemDePrisao(obj)
     return prisao and regra
 end
 
--- APAGAR: oculta e mantém oculto se o jogo tentar mostrar de novo
 local function apagar(obj)
     if textosOcultos[obj] ~= nil then return end
     textosOcultos[obj] = obj.Visible
@@ -297,17 +270,13 @@ end
 local function ligarRemoverTexto()
     if textoAtivo then return end
     textoAtivo = true
-    for _, d in ipairs(PlayerGui:GetDescendants()) do
-        observar(d)
-    end
+    for _, d in ipairs(PlayerGui:GetDescendants()) do observar(d) end
     table.insert(textoConnections, PlayerGui.DescendantAdded:Connect(observar))
 end
 
 local function desligarRemoverTexto()
     textoAtivo = false
-    for _, c in ipairs(textoConnections) do
-        c:Disconnect()
-    end
+    for _, c in ipairs(textoConnections) do c:Disconnect() end
     textoConnections = {}
     for obj, visivelOriginal in pairs(textosOcultos) do
         if obj.Parent then obj.Visible = visivelOriginal end
@@ -316,9 +285,7 @@ local function desligarRemoverTexto()
 end
 
 -- ============================================
--- BOTÃO ÚNICO
---  Ligar   -> Noclip + Anti-TP + Remover texto
---  Desligar-> só o Noclip (Anti-TP e Remover texto continuam)
+-- BOTÃO
 -- ============================================
 local noclipAtivo = false
 
@@ -330,7 +297,6 @@ local function atualizarBotao()
         BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
         BypassBtn.Text = "Desativado"
     end
-
     if #antiTpConnections > 0 then
         StatusLabel.Text = "Anti-TP: ATIVO"
         StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 200)
@@ -343,16 +309,15 @@ end
 BypassBtn.MouseButton1Click:Connect(function()
     noclipAtivo = not noclipAtivo
     if noclipAtivo then
-        ligarAntiTp()        -- liga antes de sair da cela
+        ligarAntiTp()
         ligarRemoverTexto()
         ligarNoclip()
     else
-        desligarNoclip()     -- só o noclip desliga
+        desligarNoclip()
     end
     atualizarBotao()
 end)
 
--- Desliga TUDO e fecha o menu (✕, ou executar o script de novo)
 local function desligarTudo()
     noclipAtivo = false
     desligarAntiTp()
