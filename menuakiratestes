@@ -1,392 +1,536 @@
--- ======================================================================== --
--- BYPASS PRISON BY WILLZ & JP  —  v6 (anti-puxão extremo com raycast)
--- Botão único: liga Noclip + Anti-TP + Remover texto.
--- Ao DESLIGAR o botão, só o Noclip desliga (Anti-TP e Remover texto continuam).
--- O "✕" (ou executar o script de novo) desliga tudo e fecha o menu.
--- ======================================================================== --
+--!strict
+-- Menu de Treinamento — Estrutura base
+-- Local: StarterPlayer > StarterPlayerScripts (LocalScript)
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- ============================================
--- LIMPEZA DE EXECUÇÃO ANTERIOR
--- ============================================
-if _G.BypassPrisonCleanup then
-    pcall(_G.BypassPrisonCleanup)
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- =========================================================
+-- TEMA
+-- =========================================================
+local Theme = {
+    Surface      = Color3.fromRGB(34, 34, 46),
+    SurfaceAlt   = Color3.fromRGB(46, 46, 60),
+    Accent       = Color3.fromRGB(120, 100, 255),
+    Text         = Color3.fromRGB(240, 240, 245),
+    TextMuted    = Color3.fromRGB(160, 160, 175),
+    Border       = Color3.fromRGB(60, 60, 78),
+}
+
+local ACCENT_HEX = "7864FF" -- corresponde a Theme.Accent, usado no RichText
+
+-- =========================================================
+-- HELPERS
+-- =========================================================
+local function create(className, props, parent)
+    local inst = Instance.new(className)
+    for k, v in pairs(props or {}) do
+        inst[k] = v
+    end
+    if parent then inst.Parent = parent end
+    return inst
 end
-local antiga = PlayerGui:FindFirstChild("BypassPrisonGui")
-if antiga then antiga:Destroy() end
 
--- ============================================
--- UI
--- ============================================
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "BypassPrisonGui"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = PlayerGui
+local function addCorner(parent, radius)
+    return create("UICorner", { CornerRadius = radius or UDim.new(0, 8) }, parent)
+end
 
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 158)
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -79)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 20, 25)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
+local function addStroke(parent, color, thickness)
+    return create("UIStroke", {
+        Color = color or Theme.Border,
+        Thickness = thickness or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, parent)
+end
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
+local function addPadding(parent, p)
+    return create("UIPadding", {
+        PaddingLeft = UDim.new(0, p), PaddingRight = UDim.new(0, p),
+        PaddingTop = UDim.new(0, p), PaddingBottom = UDim.new(0, p),
+    }, parent)
+end
 
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Color = Color3.fromRGB(0, 255, 200)
-UIStroke.Thickness = 1.5
-UIStroke.Parent = MainFrame
+-- ---------------------------------------------------------
+-- Drag: arrasta `target` a partir de `handle`
+-- ---------------------------------------------------------
+local function makeDraggable(target, handle)
+    handle = handle or target
+    local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
 
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 30)
-Title.BackgroundTransparency = 1
-Title.Font = Enum.Font.GothamBold
-Title.Text = "BYPASS PRISON"
-Title.TextColor3 = Color3.fromRGB(0, 255, 200)
-Title.TextSize = 12
-Title.Parent = MainFrame
-
--- "✕": desliga tudo e fecha o menu
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 26, 0, 26)
-CloseBtn.Position = UDim2.new(1, -30, 0, 2)
-CloseBtn.BackgroundTransparency = 1
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(150, 155, 170)
-CloseBtn.TextSize = 13
-CloseBtn.Parent = MainFrame
-
--- Botão único
-local BypassBtn = Instance.new("TextButton")
-BypassBtn.Size = UDim2.new(1, -20, 0, 46)
-BypassBtn.Position = UDim2.new(0, 10, 0, 34)
-BypassBtn.Font = Enum.Font.GothamBold
-BypassBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-BypassBtn.TextSize = 14
-BypassBtn.Parent = MainFrame
-
-local BtnCorner = Instance.new("UICorner")
-BtnCorner.CornerRadius = UDim.new(0, 6)
-BtnCorner.Parent = BypassBtn
-
-local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(1, -20, 0, 16)
-StatusLabel.Position = UDim2.new(0, 10, 0, 84)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Font = Enum.Font.GothamMedium
-StatusLabel.TextSize = 11
-StatusLabel.Parent = MainFrame
-
-local Credits = Instance.new("TextLabel")
-Credits.Size = UDim2.new(1, -20, 0, 40)
-Credits.Position = UDim2.new(0, 10, 0, 108)
-Credits.BackgroundColor3 = Color3.fromRGB(25, 30, 35)
-Credits.Font = Enum.Font.GothamMedium
-Credits.Text = "Créditos\nby willz & jp"
-Credits.TextColor3 = Color3.fromRGB(200, 200, 200)
-Credits.TextSize = 11
-Credits.Parent = MainFrame
-
-local CreditsCorner = Instance.new("UICorner")
-CreditsCorner.CornerRadius = UDim.new(0, 6)
-CreditsCorner.Parent = Credits
-
--- ============================================
--- 1) NOCLIP — com trava de queda
--- ============================================
-local noclipConnection = nil
-local colisaoOriginal = {}
-
-local function ligarNoclip()
-    if noclipConnection then return end
-    noclipConnection = RunService.Stepped:Connect(function()
-        local char = LocalPlayer.Character
-        if not char then return end
-        for _, p in ipairs(char:GetDescendants()) do
-            if p:IsA("BasePart") then
-                if colisaoOriginal[p] == nil then
-                    colisaoOriginal[p] = p.CanCollide
-                end
-                p.CanCollide = false
-            end
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = target.Position
         end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local v = hrp.AssemblyLinearVelocity
-            if v.Y < -50 then
-                hrp.AssemblyLinearVelocity = Vector3.new(v.X, -50, v.Z)
-            end
+    end)
+
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
         end
     end)
 end
 
-local function desligarNoclip()
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
-    end
-    for p, valor in pairs(colisaoOriginal) do
-        if p.Parent then p.CanCollide = valor end
-    end
-    colisaoOriginal = {}
-end
+-- ---------------------------------------------------------
+-- Clique + drag (usado no logo): diferencia clique de arraste
+-- ---------------------------------------------------------
+local function makeClickableDraggable(target, onClick)
+    local dragging, moved, dragInput, dragStart, startPos = false, false, nil, nil, nil
 
--- ============================================
--- 2) ANTI-PUXÃO EXTREMO (v6)
--- ============================================
-local antiTpConnections = {}
-local ultimoChar = nil
-local ultimaPosicao = nil
-local ultimoPulo = 0
-local ultimaAltura = nil
-local ultimoChaoY = nil
-
-local rayParams = RaycastParams.new()
-rayParams.FilterType = Enum.RaycastFilterType.Exclude
-
-local function chaoAbaixo(char, hrp)
-    rayParams.FilterDescendantsInstances = {char}
-    local r = workspace:Raycast(hrp.Position, Vector3.new(0, -60, 0), rayParams)
-    return r and r.Position.Y or nil
-end
-
-local espacoConn = UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.Space then
-        ultimoPulo = tick()
-    end
-end)
-
-local function checarPuxao(dt)
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and (hum.SeatPart or hum.Health <= 0) then
-        ultimoChar = char
-        ultimaPosicao = hrp.CFrame
-        ultimaAltura = nil
-        ultimoChaoY = nil
-        return
-    end
-
-    if char ~= ultimoChar or not ultimaPosicao then
-        ultimoChar = char
-        ultimaPosicao = hrp.CFrame
-        ultimaAltura = nil
-        ultimoChaoY = nil
-        return
-    end
-
-    if hum then
-        local st = hum:GetState()
-        if st == Enum.HumanoidStateType.Jumping then
-            ultimoPulo = tick()
+    target.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            moved = false
+            dragStart = input.Position
+            startPos = target.Position
         end
-    end
+    end)
 
-    local podeSubir = (tick() - ultimoPulo) < 1.0
-
-    local v = hrp.AssemblyLinearVelocity
-    local posAtual = hrp.Position
-    local posAntiga = ultimaPosicao.Position
-
-    -- 1) Mata velocidade forçada pra cima
-    if not podeSubir and v.Y > 2 then
-        hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
-        v = hrp.AssemblyLinearVelocity
-    end
-
-    -- 2) Mata teleporte instantâneo
-    local deltaY = posAtual.Y - posAntiga.Y
-    if not podeSubir and deltaY > 3 then
-        hrp.CFrame = hrp.CFrame - Vector3.new(0, deltaY, 0)
-        posAtual = hrp.Position
-    end
-
-    -- 3) Chão + altura
-    local chaoY = chaoAbaixo(char, hrp)
-    if chaoY then
-        local altura = posAtual.Y - chaoY
-
-        -- 3a) Puxão violento (flutuando alto)
-        if not podeSubir and altura > 6 and v.Y >= 0 then
-            hrp.CFrame = hrp.CFrame - Vector3.new(0, altura - 3, 0)
-            hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
-            posAtual = hrp.Position
-            altura = posAtual.Y - chaoY
+    target.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
         end
+    end)
 
-        -- 3b) Pull lento (altura cresce com chão parado)
-        if ultimaAltura and ultimoChaoY and not podeSubir then
-            local chaoEstavel = math.abs(chaoY - ultimoChaoY) < 2
-            local alturaCresceu = (altura - ultimaAltura) > 4
-            if chaoEstavel and alturaCresceu and v.Y > -0.5 then
-                hrp.CFrame = hrp.CFrame - Vector3.new(0, altura - 3, 0)
-                hrp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
-                posAtual = hrp.Position
-                altura = posAtual.Y - chaoY
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - dragStart
+            if math.abs(delta.X) > 3 or math.abs(delta.Y) > 3 then
+                moved = true
             end
+            target.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
         end
+    end)
 
-        ultimaAltura = altura
-        ultimoChaoY = chaoY
-    else
-        ultimaAltura = nil
-        ultimoChaoY = nil
+    UserInputService.InputEnded:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch) and dragging then
+            dragging = false
+            if not moved then onClick() end
+        end
+    end)
+end
+
+-- =========================================================
+-- GUI RAIZ
+-- =========================================================
+local screenGui = create("ScreenGui", {
+    Name = "TrainingMenu",
+    ResetOnSpawn = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, playerGui)
+
+-- =========================================================
+-- LOGO FLUTUANTE (arrastável + toggle do menu)
+-- =========================================================
+local logo = create("TextButton", {
+    Name = "FloatingLogo",
+    Size = UDim2.fromOffset(56, 56),
+    Position = UDim2.new(0, 24, 0.35, 0),
+    BackgroundColor3 = Theme.Accent,
+    Text = "☰",
+    TextSize = 26,
+    Font = Enum.Font.GothamBold,
+    TextColor3 = Theme.Text,
+    AutoButtonColor = false,
+    BorderSizePixel = 0,
+    ZIndex = 10,
+}, screenGui)
+addCorner(logo, UDim.new(0, 14))
+addStroke(logo, Theme.Accent)
+
+-- =========================================================
+-- MENU PRINCIPAL
+-- =========================================================
+local mainFrame = create("Frame", {
+    Name = "MainMenu",
+    Size = UDim2.fromOffset(520, 480),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundColor3 = Theme.Surface,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 5,
+}, screenGui)
+addCorner(mainFrame, UDim.new(0, 14))
+addStroke(mainFrame, Theme.Border, 1)
+
+-- Responsividade: escala o menu para caber em telas menores
+local uiScale = create("UIScale", {}, mainFrame)
+local function updateScale()
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    uiScale.Scale = math.clamp(math.min(vp.X / 1000, vp.Y / 780), 0.65, 1)
+end
+updateScale()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+end
+
+-- Cabeçalho (também serve como alça de arraste)
+local header = create("Frame", {
+    Name = "Header",
+    Size = UDim2.new(1, 0, 0, 56),
+    BackgroundTransparency = 1,
+}, mainFrame)
+create("UIPadding", {
+    PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+}, header)
+
+local headerButton = create("TextButton", {
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "Menu Principal",
+    TextColor3 = Theme.Text,
+    TextSize = 22,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    AutoButtonColor = false,
+}, header)
+makeDraggable(mainFrame, headerButton)
+
+-- Divisor
+create("Frame", {
+    Size = UDim2.new(1, -40, 0, 1),
+    Position = UDim2.new(0, 20, 0, 56),
+    BackgroundColor3 = Theme.Border,
+    BorderSizePixel = 0,
+}, mainFrame)
+
+-- Container de conteúdo
+local content = create("Frame", {
+    Name = "Content",
+    Size = UDim2.new(1, -40, 1, -76),
+    Position = UDim2.new(0, 20, 0, 66),
+    BackgroundTransparency = 1,
+}, mainFrame)
+
+-- =========================================================
+-- SISTEMA DE VIEWS (abas)
+-- =========================================================
+local views = {}
+local function createView(name)
+    local v = create("Frame", {
+        Name = name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Visible = false,
+    }, content)
+    views[name] = v
+    return v
+end
+
+local function showView(name)
+    for n, v in pairs(views) do
+        v.Visible = (n == name)
     end
-
-    ultimaPosicao = hrp.CFrame
 end
 
-local function ligarAntiTp()
-    if #antiTpConnections > 0 then return end
-    ultimoChar = nil
-    ultimaPosicao = nil
-    ultimaAltura = nil
-    ultimoChaoY = nil
-    ultimoPulo = 0
-    table.insert(antiTpConnections, RunService.Heartbeat:Connect(checarPuxao))
+-- =========================================================
+-- VIEW: GERAL
+-- =========================================================
+local generalView = createView("Geral")
+create("UIListLayout", {
+    Padding = UDim.new(0, 14),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, generalView)
+
+-- Bloco de apresentação (texto dinâmico com nome do jogador)
+local welcomeText = string.format(
+    'Olá! Meu nome é <font color="#%s"><b>%s</b></font> e serei o instrutor de vocês hoje. ' ..
+    'Peço que mantenham o respeito e a disciplina durante o treinamento, pois espero ' ..
+    'comprometimento e atenção de todos.',
+    ACCENT_HEX, player.Name
+)
+
+local welcomeBlock = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y,
+    BackgroundColor3 = Theme.SurfaceAlt,
+    BorderSizePixel = 0,
+    LayoutOrder = 1,
+}, generalView)
+addCorner(welcomeBlock, UDim.new(0, 10))
+addPadding(welcomeBlock, 16)
+
+create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y,
+    BackgroundTransparency = 1,
+    Text = welcomeText,
+    RichText = true,
+    TextColor3 = Theme.Text,
+    TextSize = 15,
+    Font = Enum.Font.Gotham,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+}, welcomeBlock)
+
+-- Título do dropdown
+create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 22),
+    BackgroundTransparency = 1,
+    Text = "Qual categoria você está treinando?",
+    TextColor3 = Theme.TextMuted,
+    TextSize = 14,
+    Font = Enum.Font.GothamMedium,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    LayoutOrder = 2,
+}, generalView)
+
+-- Grupo dropdown + lista (empilhados juntos)
+local dropdownGroup = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y,
+    BackgroundTransparency = 1,
+    LayoutOrder = 3,
+}, generalView)
+create("UIListLayout", {
+    Padding = UDim.new(0, 6),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, dropdownGroup)
+
+-- Botão do dropdown
+local dropdown = create("TextButton", {
+    Size = UDim2.new(1, 0, 0, 44),
+    BackgroundColor3 = Theme.SurfaceAlt,
+    Text = "",
+    AutoButtonColor = false,
+    BorderSizePixel = 0,
+    LayoutOrder = 1,
+}, dropdownGroup)
+addCorner(dropdown, UDim.new(0, 8))
+addStroke(dropdown, Theme.Border)
+
+local dropdownText = create("TextLabel", {
+    Size = UDim2.new(1, -50, 1, 0),
+    Position = UDim2.fromOffset(16, 0),
+    BackgroundTransparency = 1,
+    Text = "Selecione uma categoria...",
+    TextColor3 = Theme.TextMuted,
+    TextSize = 15,
+    Font = Enum.Font.Gotham,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, dropdown)
+
+local dropdownArrow = create("TextLabel", {
+    Size = UDim2.fromOffset(30, 30),
+    Position = UDim2.new(1, -40, 0.5, -15),
+    BackgroundTransparency = 1,
+    Text = "▼",
+    TextColor3 = Theme.TextMuted,
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+}, dropdown)
+
+-- Lista de opções
+local optionsList = create("Frame", {
+    Size = UDim2.new(1, 0, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y,
+    BackgroundColor3 = Theme.SurfaceAlt,
+    BorderSizePixel = 0,
+    Visible = false,
+    LayoutOrder = 2,
+    ZIndex = 6,
+}, dropdownGroup)
+addCorner(optionsList, UDim.new(0, 8))
+addStroke(optionsList, Theme.Border)
+addPadding(optionsList, 6)
+create("UIListLayout", {
+    Padding = UDim.new(0, 4),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, optionsList)
+
+-- Categorias (basta acrescentar aqui para expandir no futuro)
+local categories = { "Praças", "Graduados", "Oficiais" }
+
+-- =========================================================
+-- VIEWS DAS CATEGORIAS
+-- =========================================================
+local categoryDescriptions = {
+    Praças     = "Área reservada para instruções e anotações relacionadas à categoria de Praças.",
+    Graduados  = "Área reservada para instruções e anotações relacionadas à categoria de Graduados.",
+    Oficiais   = "Área reservada para instruções e anotações relacionadas à categoria de Oficiais.",
+}
+
+local function resetDropdown()
+    dropdownText.Text = "Selecione uma categoria..."
+    dropdownText.TextColor3 = Theme.TextMuted
+    optionsList.Visible = false
+    dropdownArrow.Text = "▼"
 end
 
-local function desligarAntiTp()
-    for _, c in ipairs(antiTpConnections) do c:Disconnect() end
-    antiTpConnections = {}
-    ultimoChar = nil
-    ultimaPosicao = nil
-    ultimaAltura = nil
-    ultimoChaoY = nil
+for _, catName in ipairs(categories) do
+    local view = createView(catName)
+    create("UIListLayout", {
+        Padding = UDim.new(0, 10),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, view)
+
+    -- Botão voltar
+    local backBtn = create("TextButton", {
+        Size = UDim2.fromOffset(90, 30),
+        BackgroundColor3 = Theme.SurfaceAlt,
+        Text = "← Voltar",
+        TextColor3 = Theme.Text,
+        TextSize = 13,
+        Font = Enum.Font.Gotham,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        LayoutOrder = 1,
+    }, view)
+    addCorner(backBtn, UDim.new(0, 6))
+    backBtn.MouseEnter:Connect(function()
+        backBtn.BackgroundColor3 = Theme.Accent
+    end)
+    backBtn.MouseLeave:Connect(function()
+        backBtn.BackgroundColor3 = Theme.SurfaceAlt
+    end)
+    backBtn.MouseButton1Click:Connect(function()
+        resetDropdown()
+        showView("Geral")
+    end)
+
+    -- Título da categoria
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1,
+        Text = catName,
+        TextColor3 = Theme.Text,
+        TextSize = 22,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = 2,
+    }, view)
+
+    -- Descrição
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Text = categoryDescriptions[catName],
+        TextColor3 = Theme.TextMuted,
+        TextSize = 14,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        LayoutOrder = 3,
+    }, view)
+
+    -- Área de anotações (placeholder)
+    local notesArea = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 130),
+        BackgroundColor3 = Theme.SurfaceAlt,
+        BorderSizePixel = 0,
+        LayoutOrder = 4,
+    }, view)
+    addCorner(notesArea, UDim.new(0, 8))
+    addStroke(notesArea, Theme.Border)
+    addPadding(notesArea, 12)
+
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Text = "Anotações",
+        TextColor3 = Theme.TextMuted,
+        TextSize = 13,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, notesArea)
+
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, -24),
+        Position = UDim2.fromOffset(0, 24),
+        BackgroundTransparency = 1,
+        Text = "Espaço reservado para anotações futuras...",
+        TextColor3 = Theme.TextMuted,
+        TextSize = 13,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+    }, notesArea)
 end
 
--- ============================================
--- 3) REMOVER TEXTO
--- ============================================
-local textoConnections = {}
-local textosOcultos = {}
-local textoAtivo = false
+-- =========================================================
+-- POPULAR LISTA DE OPÇÕES DO DROPDOWN
+-- =========================================================
+for i, catName in ipairs(categories) do
+    local optBtn = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 34),
+        BackgroundColor3 = Theme.Surface,
+        Text = catName,
+        TextColor3 = Theme.Text,
+        TextSize = 15,
+        Font = Enum.Font.Gotham,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        LayoutOrder = i,
+        ZIndex = 7,
+    }, optionsList)
+    addCorner(optBtn, UDim.new(0, 6))
 
-local function normalizar(s)
-    s = string.gsub(tostring(s), "<[^>]+>", "")
-    s = string.gsub(s, "ã", "a")
-    s = string.gsub(s, "Ã", "a")
-    return string.lower(s)
+    optBtn.MouseEnter:Connect(function()
+        optBtn.BackgroundColor3 = Theme.Accent
+    end)
+    optBtn.MouseLeave:Connect(function()
+        optBtn.BackgroundColor3 = Theme.Surface
+    end)
+    optBtn.MouseButton1Click:Connect(function()
+        dropdownText.Text = catName
+        dropdownText.TextColor3 = Theme.Text
+        optionsList.Visible = false
+        dropdownArrow.Text = "▼"
+        showView(catName)
+    end)
 end
 
-local function contem(texto, palavra)
-    return string.find(texto, palavra, 1, true) ~= nil
-end
-
-local function ehMensagemDePrisao(obj)
-    local t = normalizar(obj.Text)
-    local prisao = contem(t, "prisao") or contem(t, "preso") or contem(t, "prison") or contem(t, "jail")
-    local regra = contem(t, "polichinelo") or contem(t, "minut")
-    return prisao and regra
-end
-
-local function apagar(obj)
-    if textosOcultos[obj] ~= nil then return end
-    textosOcultos[obj] = obj.Visible
-    obj.Visible = false
-    table.insert(textoConnections, obj:GetPropertyChangedSignal("Visible"):Connect(function()
-        if textoAtivo and obj.Visible then obj.Visible = false end
-    end))
-end
-
-local function verificar(obj)
-    if ehMensagemDePrisao(obj) then apagar(obj) end
-end
-
-local function observar(obj)
-    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and not obj:IsDescendantOf(ScreenGui) then
-        verificar(obj)
-        table.insert(textoConnections, obj:GetPropertyChangedSignal("Text"):Connect(function()
-            verificar(obj)
-        end))
-    end
-end
-
-local function ligarRemoverTexto()
-    if textoAtivo then return end
-    textoAtivo = true
-    for _, d in ipairs(PlayerGui:GetDescendants()) do
-        observar(d)
-    end
-    table.insert(textoConnections, PlayerGui.DescendantAdded:Connect(observar))
-end
-
-local function desligarRemoverTexto()
-    textoAtivo = false
-    for _, c in ipairs(textoConnections) do
-        c:Disconnect()
-    end
-    textoConnections = {}
-    for obj, visivelOriginal in pairs(textosOcultos) do
-        if obj.Parent then obj.Visible = visivelOriginal end
-    end
-    textosOcultos = {}
-end
-
--- ============================================
--- BOTÃO ÚNICO
--- ============================================
-local noclipAtivo = false
-
-local function atualizarBotao()
-    if noclipAtivo then
-        BypassBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        BypassBtn.Text = "ATIVADO"
-    else
-        BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        BypassBtn.Text = "Desativado"
-    end
-
-    if #antiTpConnections > 0 then
-        StatusLabel.Text = "Anti-TP: ATIVO"
-        StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 200)
-    else
-        StatusLabel.Text = "Anti-TP: desligado"
-        StatusLabel.TextColor3 = Color3.fromRGB(150, 155, 170)
-    end
-end
-
-BypassBtn.MouseButton1Click:Connect(function()
-    noclipAtivo = not noclipAtivo
-    if noclipAtivo then
-        ligarAntiTp()
-        ligarRemoverTexto()
-        ligarNoclip()
-    else
-        desligarNoclip()
-    end
-    atualizarBotao()
+-- Toggle do dropdown
+dropdown.MouseButton1Click:Connect(function()
+    optionsList.Visible = not optionsList.Visible
+    dropdownArrow.Text = optionsList.Visible and "▲" or "▼"
 end)
 
--- Desliga TUDO e fecha o menu
-local function desligarTudo()
-    noclipAtivo = false
-    desligarAntiTp()
-    desligarRemoverTexto()
-    desligarNoclip()
-end
+-- =========================================================
+-- AÇÕES PRINCIPAIS
+-- =========================================================
 
-local function limpar()
-    desligarTudo()
-    if espacoConn then espacoConn:Disconnect() end
-    if ScreenGui.Parent then ScreenGui:Destroy() end
-end
+-- Logo: clique = toggle do menu | arraste = reposiciona
+makeClickableDraggable(logo, function()
+    mainFrame.Visible = not mainFrame.Visible
+end)
 
-CloseBtn.MouseButton1Click:Connect(limpar)
-_G.BypassPrisonCleanup = limpar
-ScreenGui.Destroying:Connect(desligarTudo)
-
-atualizarBotao()
+-- Estado inicial
+showView("Geral")
+mainFrame.Visible = false
