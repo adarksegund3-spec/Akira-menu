@@ -1,30 +1,39 @@
---!strict
--- Menu de Treinamento — Estrutura base
--- Local: StarterPlayer > StarterPlayerScripts (LocalScript)
+-- ============================================================
+-- MENU AKIRA — Base funcional (Roblox Luau / Delta)
+-- ============================================================
+print("[Akira] Iniciando menu...")
 
-local Players = game:GetService("Players")
+local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+if not player then
+    repeat task.wait() until Players.LocalPlayer
+    player = Players.LocalPlayer
+end
 local playerGui = player:WaitForChild("PlayerGui")
 
--- =========================================================
--- TEMA
--- =========================================================
+-- Remove execução anterior (permite uso ilimitado)
+local anterior = playerGui:FindFirstChild("TrainingMenu")
+if anterior then anterior:Destroy() end
+
+-- ============================================================
+-- EXECUÇÃO COM DIAGNÓSTICO
+-- ============================================================
+local sucesso, erro = pcall(function()
+
+-- ==================== TEMA ====================
 local Theme = {
-    Surface      = Color3.fromRGB(34, 34, 46),
-    SurfaceAlt   = Color3.fromRGB(46, 46, 60),
-    Accent       = Color3.fromRGB(120, 100, 255),
-    Text         = Color3.fromRGB(240, 240, 245),
-    TextMuted    = Color3.fromRGB(160, 160, 175),
-    Border       = Color3.fromRGB(60, 60, 78),
+    Surface    = Color3.fromRGB(34, 34, 46),
+    SurfaceAlt = Color3.fromRGB(46, 46, 60),
+    Accent     = Color3.fromRGB(120, 100, 255),
+    Text       = Color3.fromRGB(240, 240, 245),
+    TextMuted  = Color3.fromRGB(160, 160, 175),
+    Border     = Color3.fromRGB(60, 60, 78),
 }
+local ACCENT_HEX = "7864FF"
 
-local ACCENT_HEX = "7864FF" -- corresponde a Theme.Accent, usado no RichText
-
--- =========================================================
--- HELPERS
--- =========================================================
+-- ==================== HELPERS ====================
 local function create(className, props, parent)
     local inst = Instance.new(className)
     for k, v in pairs(props or {}) do
@@ -37,7 +46,6 @@ end
 local function addCorner(parent, radius)
     return create("UICorner", { CornerRadius = radius or UDim.new(0, 8) }, parent)
 end
-
 local function addStroke(parent, color, thickness)
     return create("UIStroke", {
         Color = color or Theme.Border,
@@ -45,7 +53,6 @@ local function addStroke(parent, color, thickness)
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
     }, parent)
 end
-
 local function addPadding(parent, p)
     return create("UIPadding", {
         PaddingLeft = UDim.new(0, p), PaddingRight = UDim.new(0, p),
@@ -53,9 +60,7 @@ local function addPadding(parent, p)
     }, parent)
 end
 
--- ---------------------------------------------------------
--- Drag: arrasta `target` a partir de `handle`
--- ---------------------------------------------------------
+-- Arraste simples
 local function makeDraggable(target, handle)
     handle = handle or target
     local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
@@ -68,14 +73,12 @@ local function makeDraggable(target, handle)
             startPos = target.Position
         end
     end)
-
     handle.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
@@ -85,7 +88,6 @@ local function makeDraggable(target, handle)
             )
         end
     end)
-
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
@@ -94,9 +96,7 @@ local function makeDraggable(target, handle)
     end)
 end
 
--- ---------------------------------------------------------
--- Clique + drag (usado no logo): diferencia clique de arraste
--- ---------------------------------------------------------
+-- Clique + arraste (para o logo)
 local function makeClickableDraggable(target, onClick)
     local dragging, moved, dragInput, dragStart, startPos = false, false, nil, nil, nil
 
@@ -109,14 +109,12 @@ local function makeClickableDraggable(target, onClick)
             startPos = target.Position
         end
     end)
-
     target.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
@@ -129,7 +127,6 @@ local function makeClickableDraggable(target, onClick)
             )
         end
     end)
-
     UserInputService.InputEnded:Connect(function(input)
         if (input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch) and dragging then
@@ -139,18 +136,14 @@ local function makeClickableDraggable(target, onClick)
     end)
 end
 
--- =========================================================
--- GUI RAIZ
--- =========================================================
+-- ==================== GUI RAIZ ====================
 local screenGui = create("ScreenGui", {
     Name = "TrainingMenu",
     ResetOnSpawn = false,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, playerGui)
 
--- =========================================================
--- LOGO FLUTUANTE (arrastável + toggle do menu)
--- =========================================================
+-- ==================== LOGO FLUTUANTE ====================
 local logo = create("TextButton", {
     Name = "FloatingLogo",
     Size = UDim2.fromOffset(56, 56),
@@ -167,9 +160,7 @@ local logo = create("TextButton", {
 addCorner(logo, UDim.new(0, 14))
 addStroke(logo, Theme.Accent)
 
--- =========================================================
--- MENU PRINCIPAL
--- =========================================================
+-- ==================== MENU PRINCIPAL ====================
 local mainFrame = create("Frame", {
     Name = "MainMenu",
     Size = UDim2.fromOffset(520, 480),
@@ -183,7 +174,6 @@ local mainFrame = create("Frame", {
 addCorner(mainFrame, UDim.new(0, 14))
 addStroke(mainFrame, Theme.Border, 1)
 
--- Responsividade: escala o menu para caber em telas menores
 local uiScale = create("UIScale", {}, mainFrame)
 local function updateScale()
     local cam = workspace.CurrentCamera
@@ -196,7 +186,7 @@ if workspace.CurrentCamera then
     workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
 end
 
--- Cabeçalho (também serve como alça de arraste)
+-- Cabeçalho (alça de arraste)
 local header = create("Frame", {
     Name = "Header",
     Size = UDim2.new(1, 0, 0, 56),
@@ -205,7 +195,6 @@ local header = create("Frame", {
 create("UIPadding", {
     PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
 }, header)
-
 local headerButton = create("TextButton", {
     Size = UDim2.new(1, 0, 1, 0),
     BackgroundTransparency = 1,
@@ -218,7 +207,6 @@ local headerButton = create("TextButton", {
 }, header)
 makeDraggable(mainFrame, headerButton)
 
--- Divisor
 create("Frame", {
     Size = UDim2.new(1, -40, 0, 1),
     Position = UDim2.new(0, 20, 0, 56),
@@ -226,7 +214,6 @@ create("Frame", {
     BorderSizePixel = 0,
 }, mainFrame)
 
--- Container de conteúdo
 local content = create("Frame", {
     Name = "Content",
     Size = UDim2.new(1, -40, 1, -76),
@@ -234,9 +221,7 @@ local content = create("Frame", {
     BackgroundTransparency = 1,
 }, mainFrame)
 
--- =========================================================
--- SISTEMA DE VIEWS (abas)
--- =========================================================
+-- ==================== SISTEMA DE VIEWS ====================
 local views = {}
 local function createView(name)
     local v = create("Frame", {
@@ -248,23 +233,19 @@ local function createView(name)
     views[name] = v
     return v
 end
-
 local function showView(name)
     for n, v in pairs(views) do
         v.Visible = (n == name)
     end
 end
 
--- =========================================================
--- VIEW: GERAL
--- =========================================================
+-- ==================== VIEW: GERAL ====================
 local generalView = createView("Geral")
 create("UIListLayout", {
     Padding = UDim.new(0, 14),
     SortOrder = Enum.SortOrder.LayoutOrder,
 }, generalView)
 
--- Bloco de apresentação (texto dinâmico com nome do jogador)
 local welcomeText = string.format(
     'Olá! Meu nome é <font color="#%s"><b>%s</b></font> e serei o instrutor de vocês hoje. ' ..
     'Peço que mantenham o respeito e a disciplina durante o treinamento, pois espero ' ..
@@ -281,7 +262,6 @@ local welcomeBlock = create("Frame", {
 }, generalView)
 addCorner(welcomeBlock, UDim.new(0, 10))
 addPadding(welcomeBlock, 16)
-
 create("TextLabel", {
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
@@ -296,7 +276,6 @@ create("TextLabel", {
     TextYAlignment = Enum.TextYAlignment.Top,
 }, welcomeBlock)
 
--- Título do dropdown
 create("TextLabel", {
     Size = UDim2.new(1, 0, 0, 22),
     BackgroundTransparency = 1,
@@ -308,7 +287,6 @@ create("TextLabel", {
     LayoutOrder = 2,
 }, generalView)
 
--- Grupo dropdown + lista (empilhados juntos)
 local dropdownGroup = create("Frame", {
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
@@ -320,9 +298,8 @@ create("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder,
 }, dropdownGroup)
 
--- Botão do dropdown
 local dropdown = create("TextButton", {
-    Size = UDim2.new(1, 0, 0, 44),
+    Size = UDim2.new(1, 0, 0, 48),   -- ↑ maior para toque no mobile
     BackgroundColor3 = Theme.SurfaceAlt,
     Text = "",
     AutoButtonColor = false,
@@ -353,7 +330,6 @@ local dropdownArrow = create("TextLabel", {
     Font = Enum.Font.GothamBold,
 }, dropdown)
 
--- Lista de opções
 local optionsList = create("Frame", {
     Size = UDim2.new(1, 0, 0, 0),
     AutomaticSize = Enum.AutomaticSize.Y,
@@ -371,16 +347,11 @@ create("UIListLayout", {
     SortOrder = Enum.SortOrder.LayoutOrder,
 }, optionsList)
 
--- Categorias (basta acrescentar aqui para expandir no futuro)
 local categories = { "Praças", "Graduados", "Oficiais" }
-
--- =========================================================
--- VIEWS DAS CATEGORIAS
--- =========================================================
 local categoryDescriptions = {
-    Praças     = "Área reservada para instruções e anotações relacionadas à categoria de Praças.",
-    Graduados  = "Área reservada para instruções e anotações relacionadas à categoria de Graduados.",
-    Oficiais   = "Área reservada para instruções e anotações relacionadas à categoria de Oficiais.",
+    Praças    = "Área reservada para instruções e anotações relacionadas à categoria de Praças.",
+    Graduados = "Área reservada para instruções e anotações relacionadas à categoria de Graduados.",
+    Oficiais  = "Área reservada para instruções e anotações relacionadas à categoria de Oficiais.",
 }
 
 local function resetDropdown()
@@ -390,6 +361,7 @@ local function resetDropdown()
     dropdownArrow.Text = "▼"
 end
 
+-- ==================== VIEWS DAS CATEGORIAS ====================
 for _, catName in ipairs(categories) do
     local view = createView(catName)
     create("UIListLayout", {
@@ -397,7 +369,6 @@ for _, catName in ipairs(categories) do
         SortOrder = Enum.SortOrder.LayoutOrder,
     }, view)
 
-    -- Botão voltar
     local backBtn = create("TextButton", {
         Size = UDim2.fromOffset(90, 30),
         BackgroundColor3 = Theme.SurfaceAlt,
@@ -421,7 +392,6 @@ for _, catName in ipairs(categories) do
         showView("Geral")
     end)
 
-    -- Título da categoria
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 30),
         BackgroundTransparency = 1,
@@ -433,7 +403,6 @@ for _, catName in ipairs(categories) do
         LayoutOrder = 2,
     }, view)
 
-    -- Descrição
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -448,7 +417,6 @@ for _, catName in ipairs(categories) do
         LayoutOrder = 3,
     }, view)
 
-    -- Área de anotações (placeholder)
     local notesArea = create("Frame", {
         Size = UDim2.new(1, 0, 0, 130),
         BackgroundColor3 = Theme.SurfaceAlt,
@@ -458,7 +426,6 @@ for _, catName in ipairs(categories) do
     addCorner(notesArea, UDim.new(0, 8))
     addStroke(notesArea, Theme.Border)
     addPadding(notesArea, 12)
-
     create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 20),
         BackgroundTransparency = 1,
@@ -468,7 +435,6 @@ for _, catName in ipairs(categories) do
         Font = Enum.Font.GothamMedium,
         TextXAlignment = Enum.TextXAlignment.Left,
     }, notesArea)
-
     create("TextLabel", {
         Size = UDim2.new(1, 0, 1, -24),
         Position = UDim2.fromOffset(0, 24),
@@ -483,12 +449,10 @@ for _, catName in ipairs(categories) do
     }, notesArea)
 end
 
--- =========================================================
--- POPULAR LISTA DE OPÇÕES DO DROPDOWN
--- =========================================================
+-- ==================== POPULAR DROPDOWN ====================
 for i, catName in ipairs(categories) do
     local optBtn = create("TextButton", {
-        Size = UDim2.new(1, 0, 0, 34),
+        Size = UDim2.new(1, 0, 0, 40),   -- ↑ maior para toque
         BackgroundColor3 = Theme.Surface,
         Text = catName,
         TextColor3 = Theme.Text,
@@ -516,21 +480,22 @@ for i, catName in ipairs(categories) do
     end)
 end
 
--- Toggle do dropdown
 dropdown.MouseButton1Click:Connect(function()
     optionsList.Visible = not optionsList.Visible
     dropdownArrow.Text = optionsList.Visible and "▲" or "▼"
 end)
 
--- =========================================================
--- AÇÕES PRINCIPAIS
--- =========================================================
-
--- Logo: clique = toggle do menu | arraste = reposiciona
+-- ==================== AÇÕES ====================
 makeClickableDraggable(logo, function()
     mainFrame.Visible = not mainFrame.Visible
 end)
 
--- Estado inicial
 showView("Geral")
-mainFrame.Visible = false
+
+end) -- fim do pcall
+
+if not sucesso then
+    warn("[Akira] ERRO: " .. tostring(erro))
+else
+    print("[Akira] Menu carregado com sucesso!")
+end
