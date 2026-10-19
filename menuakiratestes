@@ -1,4 +1,4 @@
---[[ Drip treinos | WindUI | Dark Purple | v1.6 ]]
+--[[ Drip treinos | WindUI | Dark Purple | v1.7 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
@@ -103,25 +103,31 @@ end
 -- Parkours (versão A): dois por linha; nota opcional
 local function parkours(a, b, c, d, nota)
     local lines = {
-        "Parkour 1 — " .. a .. " s  ·  Parkour 2 — " .. b .. " s",
-        "Parkour 3 — " .. c .. " s  ·  Parkour 4 — " .. d .. " s",
+        "Parkour 1 — " .. a .. " s",
+        "Parkour 2 — " .. b .. " s",
+        "Parkour 3 — " .. c .. " s",
+        "Parkour 4 — " .. d .. " s",
     }
     if nota then table.insert(lines, nota) end
     return P("Parkours — 1,0 ponto cada", lines)
 end
 
 local function torre(pc, cel)
-    return P("Torre", { "PC e Console — " .. pc .. " s  ·  Celular — " .. cel .. " s" })
+    return P("Torre", { "PC e Console — " .. pc .. " s", "Celular — " .. cel .. " s" })
 end
 
 -- Texto gramatical padrão (0 / 1 / 2 pontos por faixa de erros)
 local function texto(tempo, linhas, tema, limite)
     local faixa = (limite == 1) and "1 erro" or ("1 a " .. limite .. " erros")
     return P("Texto gramatical — 2,0 pontos", {
-        "Tempo: " .. tempo .. "  ·  mínimo de " .. linhas .. " linhas.",
+        "Tempo: " .. tempo .. ".",
+        "Mínimo de " .. linhas .. " linhas.",
         "Tema: " .. tema .. ".",
-        "Mais de " .. limite .. " erros: sem pontos  ·  " .. faixa .. ": 1 ponto  ·  nenhum erro: 2 pontos.",
-        "Fugiu do tema: sem pontos. Sempre apontar o erro gramatical.",
+        "Mais de " .. limite .. " erros: sem pontos.",
+        faixa .. ": 1 ponto.",
+        "Nenhum erro: 2 pontos.",
+        "Fugiu do tema: sem pontos.",
+        "Sempre apontar o erro gramatical.",
     })
 end
 
@@ -135,19 +141,23 @@ local function comandos(n, exato)
     return P("Comandos — 1,0 ponto", {
         abertura,
         "Direita / Esquerda / Retaguarda / Vanguarda volver!",
-        "Pode haver comandos falsos, em call ou chat (o instrutor informa qual). "
-            .. "Virar um pouco no falso, ou para o lado errado, é erro.",
+        "Pode haver comandos falsos para testar.",
+        "Em call ou chat; o instrutor informa qual usará.",
+        "Virar um pouco no falso, ou para o lado errado, é erro.",
     })
 end
 
 -- extras = true → inclui as regras de resposta múltipla / pergunta mal formulada
 local function perguntas(qtd, timer, regra, extras)
     local lines = {
-        qtd .. " sobre o EB do Delta ou o Exército Brasileiro. " .. regra,
-        "Timer: " .. timer .. " s  ·  respostas na placa ao fim; ninguém responde antes.",
+        qtd .. " sobre o EB do Delta ou o Exército Brasileiro.",
+        regra,
+        "Timer: " .. timer .. " segundos.",
+        "Ao fim do timer, colocar as respostas na placa. Ninguém responde antes.",
     }
     if extras then
-        table.insert(lines, "Mais de 1 resposta correta: todas aceitas. Pergunta mal formulada: refazer.")
+        table.insert(lines, "Mais de 1 resposta correta: todas são aceitas.")
+        table.insert(lines, "Pergunta mal formulada deve ser refeita.")
     end
     return P("Perguntas — 1,0 ponto", lines)
 end
@@ -203,7 +213,7 @@ CONTENT["AMAN"] = {
     heading = "AMAN — ACADEMIA MILITAR DAS AGULHAS NEGRAS",
     items = {
         minimo("7 pontos  ·  máx. 4 aprovados"),
-        P("Polichinelos — 1,0 ponto", { "PC e Console: 75 JJs  ·  Celular: 100 JJs  ·  tempo: 100 s." }),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 75 JJs.", "Celular: 100 JJs.", "Tempo: 100 segundos." }),
         texto("400 segundos", 5, "Exército Brasileiro do Delta ou função de um Aspirante no EB", 3),
         parkours(19, 22, 19, 17),
         torre(12, 11),
@@ -221,7 +231,7 @@ CONTENT["EPC"] = {
     heading = "EPC — ESCOLA PREPARATÓRIA DE CORONÉIS",
     items = {
         minimo("7 pontos  ·  máx. 3 aprovados"),
-        P("Polichinelos — 1,0 ponto", { "PC e Console: 80 JJs  ·  Mobile: 115 JJs  ·  tempo: 100 s." }),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 80 JJs.", "Mobile: 115 JJs.", "Tempo: 100 segundos." }),
         parkours(9, 13, 9, 10),
         torre(8, 9),
         texto("300 segundos", 5, TEMA_EB, 2),
@@ -235,26 +245,30 @@ CONTENT["APG"] = {
     heading = "APG — ACADEMIA PREPARATÓRIA DE GENERAIS",
     items = {
         minimo("8 pontos  ·  máx. 2 aprovados"),
-        P("Polichinelos — 1,0 ponto", { "PC e Console: 82 JJs  ·  Mobile: 120 JJs  ·  tempo: 100 s." }),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 82 JJs.", "Mobile: 120 JJs.", "Tempo: 100 segundos." }),
         parkours(11, 13, 10, 6, "Parkour 4 é com burla; os demais, sem burla."),
         torre(7, 8),
         P("PvP — 2,0 pontos", {
-            "Somente de FAL  ·  lutas 2v2 (se não der, 1v1). Auxiliares anotam nomes e pontos do round.",
-            "Vence 2 rodadas = 2 pontos (1 rodada não pontua). Quem perde não pontua.",
+            "Somente de FAL; lutas 2v2 (se não der, 1v1).",
+            "Auxiliares anotam nomes e pontos do round.",
+            "Vence 2 rodadas = 2 pontos (1 rodada não pontua).",
             "Round é absoluto: não reinicia por travamento ou queda.",
-            "Quem sair da arena desclassifica o time; o adversário ganha os 2 pontos.",
+            "Quem sair da arena desclassifica o time; adversário ganha os 2 pontos.",
             "Demora: timer de 10 s e rush sem proteção das paredes.",
-            "Priorizar plataformas iguais (PC x PC, Mobile x Mobile, Console x Console). "
-                .. "Sem plataforma igual: instrutor, auxiliar ou observador participa. "
-                .. "No 2v2 pode misturar (1 Mobile + 1 PC x 1 Mobile + 1 PC), mantendo a igualdade.",
-            "Instrutor escolhe as duplas (balanceadas) ou deixa a critério dos militares. "
-                .. "Quem recusar a dupla pode ser dispensado.",
+            "Priorizar plataformas iguais (PC x PC, Mobile x Mobile, Console x Console).",
+            "Sem plataforma igual: instrutor, auxiliar ou observador participa.",
+            "No 2v2 pode misturar (1 Mobile + 1 PC x 1 Mobile + 1 PC), mantendo a igualdade.",
+            "Instrutor escolhe as duplas (balanceadas) ou deixa a critério dos militares.",
+            "Quem recusar a dupla pode ser dispensado.",
         }),
         perguntas("2 perguntas", 25, "Só pontua quem acertar todas (não vale 0,5).", false),
         P("Texto gramatical — 1,0 ponto", {
-            "Tempo: 250 s (PC e Mobile)  ·  380 s (Console)  ·  mínimo de 7 linhas.",
+            "Mínimo de 7 linhas.",
+            "Tempo: 250 s (PC e Mobile) / 380 s (Console).",
             "Tema: " .. TEMA_EB .. ".",
-            "Mais de 1 erro ou fugiu do tema: sem ponto. Sempre apontar o erro gramatical.",
+            "Mais de 1 erro: sem ponto.",
+            "Fugiu do tema: sem ponto.",
+            "Sempre apontar o erro gramatical.",
         }),
         comandos(15),
         desempate(2, 8),
@@ -265,14 +279,17 @@ CONTENT["CPE"] = {
     heading = "CPE — CURSO PREPARATÓRIO DA ELITANIA",
     items = {
         minimo("7 pontos  ·  máx. 1 aprovado"),
-        P("Polichinelos — 1,0 ponto", { "PC e Console: 85 JJs  ·  Mobile: 125 JJs  ·  tempo: 100 s." }),
+        P("Polichinelos — 1,0 ponto", { "PC e Console: 85 JJs.", "Mobile: 125 JJs.", "Tempo: 100 segundos." }),
         parkours(6, 9, 7, 6),
         torre(7, 8),
         perguntas("3 perguntas", 25, "Só pontua quem acertar todas (não vale 0,33).", false),
         P("Texto gramatical — 1,0 ponto", {
-            "Tempo: 240 s (PC e Mobile)  ·  360 s (Console)  ·  mínimo de 8 linhas.",
+            "Mínimo de 8 linhas.",
+            "Tempo: 240 s (PC e Mobile) / 360 s (Console).",
             "Tema: " .. TEMA_EB .. ".",
-            "Qualquer erro ou fugiu do tema: sem ponto. Sempre apontar o erro gramatical.",
+            "Qualquer erro: sem ponto.",
+            "Fugiu do tema: sem ponto.",
+            "Sempre apontar o erro gramatical.",
         }),
         comandos(20, true),
         P("PvP", {
@@ -363,7 +380,7 @@ ENV.__TreinamentoHub = { Window = Window }
 if themeOk then pcall(function() WindUI:SetTheme(THEME_NAME) end) end
 
 pcall(function()
-    Window:Tag({ Title = "v1.6", Icon = "sparkles", Color = Color3.fromHex("#1A1426"), Border = true })
+    Window:Tag({ Title = "v1.7", Icon = "sparkles", Color = Color3.fromHex("#1A1426"), Border = true })
 end)
 
 -- =========================================================
@@ -402,7 +419,10 @@ local TITLE_SIZE = 13
 local LINE_SIZE = 11
 local LINE_TRANSPARENCY = 0.25
 local BLOCK_GAP = false  -- true = espaço extra entre blocos
-local TIGHTEN = true     -- tenta reduzir o espaçamento interno dos blocos (seguro: usa pcall)
+local TIGHTEN = true     -- reduz o vão entre o título e a informação (seguro: usa pcall)
+local INNER_GAP = 2      -- espaço vertical interno (px) entre título e texto; 0 = colado
+local ROOT_GAP = 4       -- espaço (px) entre a linha do título e o conteúdo do bloco
+local DEBUG_UI = false   -- true = imprime no console a hierarquia encontrada
 
 -- Cria a Section; se o Icon não for aceito pela versão da lib, tenta sem ele
 local function newSection(parent, cfg)
@@ -412,15 +432,74 @@ local function newSection(parent, cfg)
     return parent:Section(cfg)
 end
 
-local function tighten(section)
-    if not TIGHTEN then return end
+-- Localiza o texto do bloco na interface já criada e reduz os espaçamentos
+-- verticais SOMENTE dos containers entre o texto e o bloco (título preservado).
+local UI_ROOT
+local function scanRoots()
+    if UI_ROOT and UI_ROOT.Parent then return { UI_ROOT } end
+    local roots = {}
+    pcall(function() if gethui then table.insert(roots, gethui()) end end)
+    pcall(function() table.insert(roots, game:GetService("CoreGui")) end)
     pcall(function()
-        local ui = section.UIElements
-        local content = ui and (ui.Content or ui.Container)
-        if not content then return end
-        for _, d in ipairs(content:GetDescendants()) do
-            if d:IsA("UIListLayout") then d.Padding = UDim.new(0, 2) end
+        local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        if pg then table.insert(roots, pg) end
+    end)
+    return roots
+end
+
+local function findLabel(text)
+    for _, root in ipairs(scanRoots()) do
+        for _, d in ipairs(root:GetDescendants()) do
+            if d:IsA("TextLabel") and d.Text == text and not d:GetAttribute("DripTight") then
+                if not UI_ROOT then UI_ROOT = d:FindFirstAncestorOfClass("ScreenGui") end
+                return d
+            end
         end
+    end
+end
+
+local function hasText(frame, text)
+    for _, d in ipairs(frame:GetDescendants()) do
+        if d:IsA("TextLabel") and d.Text == text then return true end
+    end
+    return false
+end
+
+local function tighten(title, text)
+    if not TIGHTEN then return end
+    task.spawn(function()
+        task.wait(0.05)
+        pcall(function()
+            local label = findLabel(text)
+            if not label then return end
+            label:SetAttribute("DripTight", true)
+
+            -- 1) mapeia a cadeia texto -> raiz do bloco (sem alterar nada ainda)
+            local chain, node = {}, label.Parent
+            while node and #chain < 8 and not hasText(node, title) do
+                table.insert(chain, node)
+                node = node.Parent
+            end
+            if not node or #chain >= 8 then
+                if DEBUG_UI then warn("[Hub] raiz do bloco não encontrada: " .. title) end
+                return
+            end
+
+            -- 2) só então aplica o ajuste
+            for _, frame in ipairs(chain) do
+                for _, c in ipairs(frame:GetChildren()) do
+                    if c:IsA("UIPadding") then
+                        c.PaddingTop = UDim.new(0, INNER_GAP)
+                        c.PaddingBottom = UDim.new(0, INNER_GAP)
+                    elseif c:IsA("UIListLayout") then
+                        c.Padding = UDim.new(0, INNER_GAP)
+                    end
+                end
+                if DEBUG_UI then print("[Hub]", title, frame.ClassName, frame.Name) end
+            end
+            local list = node:FindFirstChildOfClass("UIListLayout")
+            if list then list.Padding = UDim.new(0, ROOT_GAP) end
+        end)
     end)
 end
 
@@ -434,19 +513,20 @@ local function renderBlock(parent, block)
         BoxBorder = true,
         Opened = block.opened ~= false,
     })
-    -- Todas as linhas num único texto: abre bem mais compacto
+    -- Todas as linhas num único texto, uma por linha
     if block.lines and #block.lines > 0 then
         local bullets = {}
         for _, line in ipairs(block.lines) do
             table.insert(bullets, "• " .. line)
         end
+        local joined = table.concat(bullets, "\n")
         box:Section({
-            Title = table.concat(bullets, "\n"),
+            Title = joined,
             TextSize = LINE_SIZE,
             TextTransparency = LINE_TRANSPARENCY,
         })
+        tighten(block.title, joined)
     end
-    tighten(box)
 end
 
 local function buildCategory(name)
