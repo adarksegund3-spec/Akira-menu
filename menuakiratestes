@@ -1,32 +1,34 @@
 -- ======================================================================== --
--- BYPASS PRISON BY WILLZ & JP
+-- BYPASS PRISON BY WILLZ & JP  —  1 botão: Noclip + Anti-TP + Remover texto
 -- ======================================================================== --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
-
-local noclipAtivo = false
-local bypassAtivo = false
-local noclipConnection = nil
-local antiTpConnection = nil
-local ultimaPosicao = nil
-local textoConnections = {} 
-local textosOcultos = {}    
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ============================================
--- UI (TAMANHO E ESTILO DA FOTO)
+-- LIMPEZA DE EXECUÇÃO ANTERIOR
+-- (executar o script de novo não deixa noclip/anti-tp antigos rodando)
+-- ============================================
+if _G.BypassPrisonCleanup then
+    pcall(_G.BypassPrisonCleanup)
+end
+local antiga = PlayerGui:FindFirstChild("BypassPrisonGui")
+if antiga then antiga:Destroy() end
+
+-- ============================================
+-- UI
 -- ============================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "BypassPrisonGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = PlayerGui
 
--- Frame Principal
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 190) -- Aumentei um pouco pra caber os dois botões
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -95)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 20, 25) 
+MainFrame.Size = UDim2.new(0, 220, 0, 150)
+MainFrame.Position = UDim2.new(0.5, -110, 0.5, -75)
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 20, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
@@ -36,13 +38,11 @@ local UICorner = Instance.new("UICorner")
 UICorner.CornerRadius = UDim.new(0, 8)
 UICorner.Parent = MainFrame
 
--- Borda ciano neon
 local UIStroke = Instance.new("UIStroke")
 UIStroke.Color = Color3.fromRGB(0, 255, 200)
 UIStroke.Thickness = 1.5
 UIStroke.Parent = MainFrame
 
--- Título no topo
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 30)
 Title.BackgroundTransparency = 1
@@ -52,40 +52,22 @@ Title.TextColor3 = Color3.fromRGB(0, 255, 200)
 Title.TextSize = 12
 Title.Parent = MainFrame
 
--- Botão 1: Noclip
-local NoclipBtn = Instance.new("TextButton")
-NoclipBtn.Size = UDim2.new(1, -20, 0, 40)
-NoclipBtn.Position = UDim2.new(0, 10, 0, 40)
-NoclipBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0) 
-NoclipBtn.Font = Enum.Font.GothamBold
-NoclipBtn.Text = "Noclip: OFF"
-NoclipBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-NoclipBtn.TextSize = 12
-NoclipBtn.Parent = MainFrame
-
-local NoclipCorner = Instance.new("UICorner")
-NoclipCorner.CornerRadius = UDim.new(0, 6)
-NoclipCorner.Parent = NoclipBtn
-
--- Botão 2: Bypass / Anti-TP
+-- Botão único (vermelho = desativado, verde = ativado)
 local BypassBtn = Instance.new("TextButton")
-BypassBtn.Size = UDim2.new(1, -20, 0, 40)
-BypassBtn.Position = UDim2.new(0, 10, 0, 85)
-BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0) 
+BypassBtn.Size = UDim2.new(1, -20, 0, 50)
+BypassBtn.Position = UDim2.new(0, 10, 0, 40)
 BypassBtn.Font = Enum.Font.GothamBold
-BypassBtn.Text = "Anti-TP: OFF"
 BypassBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-BypassBtn.TextSize = 12
+BypassBtn.TextSize = 14
 BypassBtn.Parent = MainFrame
 
 local BtnCorner = Instance.new("UICorner")
 BtnCorner.CornerRadius = UDim.new(0, 6)
 BtnCorner.Parent = BypassBtn
 
--- Área de Créditos embaixo
 local Credits = Instance.new("TextLabel")
 Credits.Size = UDim2.new(1, -20, 0, 40)
-Credits.Position = UDim2.new(0, 10, 0, 135)
+Credits.Position = UDim2.new(0, 10, 0, 100)
 Credits.BackgroundColor3 = Color3.fromRGB(25, 30, 35)
 Credits.Font = Enum.Font.GothamMedium
 Credits.Text = "Créditos\nby willz & jp"
@@ -98,129 +80,217 @@ CreditsCorner.CornerRadius = UDim.new(0, 6)
 CreditsCorner.Parent = Credits
 
 -- ============================================
--- BOTÃO NOCLIP
+-- 1) NOCLIP
+-- Desliga de verdade: devolve a colisão original de cada parte.
 -- ============================================
-NoclipBtn.MouseButton1Click:Connect(function()
-    noclipAtivo = not noclipAtivo
+local noclipConnection = nil
+local colisaoOriginal = {} -- [parte] = CanCollide original
 
-    if noclipAtivo then
-        NoclipBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        NoclipBtn.Text = "Noclip: ON"
-        
-        noclipConnection = RunService.Stepped:Connect(function()
-            if not noclipAtivo then return end
-            local char = LocalPlayer.Character
-            if not char then return end
-            for _, p in ipairs(char:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = false end
+local function ligarNoclip()
+    if noclipConnection then return end -- já ligado
+    noclipConnection = RunService.Stepped:Connect(function()
+        local char = LocalPlayer.Character
+        if not char then return end
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then
+                if colisaoOriginal[p] == nil then
+                    colisaoOriginal[p] = p.CanCollide -- guarda antes de alterar
+                end
+                p.CanCollide = false
             end
-        end)
-    else
-        NoclipBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        NoclipBtn.Text = "Noclip: OFF"
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
         end
+    end)
+end
+
+local function desligarNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    -- Restaura a colisão de todas as partes alteradas
+    for p, valor in pairs(colisaoOriginal) do
+        if p.Parent then p.CanCollide = valor end
+    end
+    colisaoOriginal = {}
+end
+
+-- ============================================
+-- 2) ANTI-TP
+-- Compara a posição a cada frame; se o boneco "pular" mais do que a
+-- velocidade permite (teleporte do servidor), volta para a última posição válida.
+-- ============================================
+local antiTpConnections = {}
+local ultimaPosicao = nil
+local ultimoChar = nil
+local LIMITE_BASE = 8 -- margem (studs) além do que a velocidade explica
+
+local function checarTeleporte(dt)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Personagem novo (respawn): aceita a posição atual como referência
+    if char ~= ultimoChar or not ultimaPosicao then
+        ultimoChar = char
+        ultimaPosicao = hrp.CFrame
+        return
+    end
+
+    dt = math.min(dt, 0.1) -- evita falso positivo em lag
+    local dist = (hrp.Position - ultimaPosicao.Position).Magnitude
+    local permitido = hrp.AssemblyLinearVelocity.Magnitude * dt + LIMITE_BASE
+
+    if dist > permitido then
+        -- Teleporte detectado: volta e zera o movimento
+        hrp.CFrame = ultimaPosicao
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    else
+        ultimaPosicao = hrp.CFrame
+    end
+end
+
+local function ligarAntiTp()
+    if #antiTpConnections > 0 then return end -- já ligado
+    ultimaPosicao = nil
+    ultimoChar = nil
+    -- Antes da física (Stepped), depois (Heartbeat) e antes de desenhar (RenderStepped)
+    table.insert(antiTpConnections, RunService.Stepped:Connect(function(_, dt)
+        checarTeleporte(dt)
+    end))
+    table.insert(antiTpConnections, RunService.Heartbeat:Connect(function(dt)
+        checarTeleporte(dt)
+    end))
+    table.insert(antiTpConnections, RunService.RenderStepped:Connect(function(dt)
+        checarTeleporte(dt)
+    end))
+end
+
+local function desligarAntiTp()
+    for _, c in ipairs(antiTpConnections) do
+        c:Disconnect()
+    end
+    antiTpConnections = {}
+    ultimaPosicao = nil
+    ultimoChar = nil
+end
+
+-- ============================================
+-- 3) REMOVER TEXTO (detecta e apaga o texto da prisão)
+-- ============================================
+local textoConnections = {}
+local textosOcultos = {} -- [label] = Visible original
+local textoAtivo = false
+
+local function normalizar(s)
+    s = string.gsub(tostring(s), "<[^>]+>", "")
+    s = string.gsub(s, "ã", "a")
+    s = string.gsub(s, "Ã", "a")
+    return string.lower(s)
+end
+
+local function contem(texto, palavra)
+    return string.find(texto, palavra, 1, true) ~= nil
+end
+
+-- DETECTAR: cita prisão E fala de polichinelos/minutos
+local function ehMensagemDePrisao(obj)
+    local t = normalizar(obj.Text)
+    local prisao = contem(t, "prisao") or contem(t, "preso") or contem(t, "prison") or contem(t, "jail")
+    local regra = contem(t, "polichinelo") or contem(t, "minut")
+    return prisao and regra
+end
+
+-- APAGAR: oculta e mantém oculto se o jogo tentar mostrar de novo
+local function apagar(obj)
+    if textosOcultos[obj] ~= nil then return end
+    textosOcultos[obj] = obj.Visible
+    obj.Visible = false
+    table.insert(textoConnections, obj:GetPropertyChangedSignal("Visible"):Connect(function()
+        if textoAtivo and obj.Visible then obj.Visible = false end
+    end))
+end
+
+local function verificar(obj)
+    if ehMensagemDePrisao(obj) then apagar(obj) end
+end
+
+local function observar(obj)
+    if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and not obj:IsDescendantOf(ScreenGui) then
+        verificar(obj)
+        table.insert(textoConnections, obj:GetPropertyChangedSignal("Text"):Connect(function()
+            verificar(obj)
+        end))
+    end
+end
+
+local function ligarRemoverTexto()
+    if textoAtivo then return end -- já ligado
+    textoAtivo = true
+    for _, d in ipairs(PlayerGui:GetDescendants()) do
+        observar(d)
+    end
+    table.insert(textoConnections, PlayerGui.DescendantAdded:Connect(observar))
+end
+
+local function desligarRemoverTexto()
+    textoAtivo = false
+    for _, c in ipairs(textoConnections) do
+        c:Disconnect()
+    end
+    textoConnections = {}
+    for obj, visivelOriginal in pairs(textosOcultos) do
+        if obj.Parent then obj.Visible = visivelOriginal end
+    end
+    textosOcultos = {}
+end
+
+-- ============================================
+-- BOTÃO ÚNICO: liga/desliga tudo junto
+-- ============================================
+local ativo = false
+
+local function ligarTudo()
+    ligarNoclip()
+    ligarAntiTp()
+    ligarRemoverTexto()
+end
+
+local function desligarTudo()
+    desligarAntiTp()
+    desligarRemoverTexto()
+    desligarNoclip()
+end
+
+local function atualizarBotao()
+    if ativo then
+        BypassBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+        BypassBtn.Text = "ATIVADO"
+    else
+        BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+        BypassBtn.Text = "Desativado"
+    end
+end
+atualizarBotao()
+
+BypassBtn.MouseButton1Click:Connect(function()
+    ativo = not ativo
+    atualizarBotao()
+    if ativo then
+        ligarTudo()
+    else
+        desligarTudo()
     end
 end)
 
--- ============================================
--- BOTÃO ANTI-TP (BYPASS + DETECTOR DE TEXTO)
--- ============================================
-BypassBtn.MouseButton1Click:Connect(function()
-    bypassAtivo = not bypassAtivo
-
-    if bypassAtivo then
-        BypassBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
-        BypassBtn.Text = "Anti-TP: ON"
-        
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            ultimaPosicao = hrp.CFrame
-        end
-
-        -- Anti-Teleporte (Heartbeat, como era antes e funcionava)
-        antiTpConnection = RunService.Heartbeat:Connect(function()
-            if not bypassAtivo then return end
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if not hrp or not ultimaPosicao then return end
-
-            local dist = (hrp.Position - ultimaPosicao.Position).Magnitude
-            
-            if dist > 30 then
-                hrp.CFrame = ultimaPosicao
-            else
-                ultimaPosicao = hrp.CFrame
-            end
-        end)
-
-        -- Detector de Texto da Prisão
-        local function normalizar(s)
-            s = string.gsub(tostring(s), "<[^>]+>", "")
-            s = string.gsub(s, "ã", "a")
-            s = string.gsub(s, "Ã", "a")
-            return string.lower(s)
-        end
-
-        local function contem(texto, palavra)
-            return string.find(texto, palavra, 1, true) ~= nil
-        end
-
-        local function ehMensagemDePrisao(obj)
-            local t = normalizar(obj.Text)
-            local prisao = contem(t, "prisao") or contem(t, "preso") or contem(t, "prison") or contem(t, "jail")
-            local regra = contem(t, "polichinelo") or contem(t, "minut")
-            return prisao and regra
-        end
-
-        local function apagar(obj)
-            if textosOcultos[obj] ~= nil then return end
-            textosOcultos[obj] = obj.Visible
-            obj.Visible = false
-            table.insert(textoConnections, obj:GetPropertyChangedSignal("Visible"):Connect(function()
-                if bypassAtivo and obj.Visible then obj.Visible = false end
-            end))
-        end
-
-        local function verificar(obj)
-            if ehMensagemDePrisao(obj) then apagar(obj) end
-        end
-
-        local function observar(obj)
-            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and not obj:IsDescendantOf(ScreenGui) then
-                verificar(obj)
-                table.insert(textoConnections, obj:GetPropertyChangedSignal("Text"):Connect(function()
-                    verificar(obj)
-                end))
-            end
-        end
-
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-        for _, d in ipairs(playerGui:GetDescendants()) do
-            observar(d)
-        end
-        table.insert(textoConnections, playerGui.DescendantAdded:Connect(observar))
-
-    else
-        BypassBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        BypassBtn.Text = "Anti-TP: OFF"
-        
-        if antiTpConnection then
-            antiTpConnection:Disconnect()
-            antiTpConnection = nil
-        end
-        ultimaPosicao = nil
-
-        for _, c in ipairs(textoConnections) do
-            c:Disconnect()
-        end
-        textoConnections = {}
-        for obj, visivelOriginal in pairs(textosOcultos) do
-            if obj.Parent then obj.Visible = visivelOriginal end
-        end
-        textosOcultos = {}
-    end
+-- Se a UI for destruída (ou o script executado de novo), desliga tudo
+local function limpar()
+    ativo = false
+    desligarTudo()
+    if ScreenGui.Parent then ScreenGui:Destroy() end
+end
+_G.BypassPrisonCleanup = limpar
+ScreenGui.Destroying:Connect(function()
+    ativo = false
+    desligarTudo()
 end)
