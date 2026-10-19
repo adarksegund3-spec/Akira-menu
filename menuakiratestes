@@ -1,7 +1,7 @@
 --!nocheck
 -- ==============================================================================
--- PROJETO: HUB PROFISSIONAL DE TREINAMENTO (DARK PURPLE)
--- Execução: Delta Executor / Roblox
+-- HUB DE TREINAMENTO — DESIGN PREMIUM (REFERÊNCIA DESKTOP)
+-- Compatível com Delta Executor / Roblox
 -- ==============================================================================
 
 local Players = game:GetService("Players")
@@ -11,40 +11,38 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Prevenção contra duplicação (executar múltiplas vezes)
-local oldGui = PlayerGui:FindFirstChild("ProfessionalTrainingHub")
+-- Prevenção contra interfaces duplicadas
+local oldGui = PlayerGui:FindFirstChild("PremiumTrainingHub")
 if oldGui then oldGui:Destroy() end
 
 -- ==============================================================================
--- TEMA E CONFIGURAÇÕES
+-- PALETA DE CORES E CONFIGURAÇÕES
 -- ==============================================================================
 local Theme = {
-    BgMain     = Color3.fromRGB(15, 15, 18),      -- Preto acinzentado
-    BgSidebar  = Color3.fromRGB(22, 22, 28),      -- Roxo escuro/preto
-    BgSurface  = Color3.fromRGB(30, 30, 40),      -- Superfície de cartões
-    Accent     = Color3.fromRGB(138, 43, 226),    -- Roxo vibrante
-    AccentHover= Color3.fromRGB(153, 50, 204),    -- Roxo hover
-    TextMain   = Color3.fromRGB(255, 255, 255),   -- Branco
-    TextMuted  = Color3.fromRGB(160, 160, 175),   -- Cinza claro
-    Border     = Color3.fromRGB(45, 45, 60),      -- Borda sutil
-    Success    = Color3.fromRGB(0, 200, 100),     -- Verde para feedback
-    Error      = Color3.fromRGB(220, 50, 50)      -- Vermelho para erro
+    BgWindow    = Color3.fromRGB(24, 24, 28),     -- Fundo geral da janela
+    BgHeader    = Color3.fromRGB(20, 20, 24),     -- Fundo do cabeçalho
+    BgSidebar   = Color3.fromRGB(18, 18, 22),     -- Fundo da barra lateral
+    BgPanel     = Color3.fromRGB(32, 32, 38),     -- Fundo de blocos e componentes
+    BgHover     = Color3.fromRGB(45, 45, 52),     -- Hover de botões
+    Accent      = Color3.fromRGB(138, 43, 226),   -- Roxo principal
+    AccentDark  = Color3.fromRGB(90, 30, 150),    -- Roxo escuro
+    TextMain    = Color3.fromRGB(255, 255, 255),  -- Texto branco
+    TextMuted   = Color3.fromRGB(150, 150, 160),  -- Texto cinza
+    Border      = Color3.fromRGB(50, 50, 60),     -- Bordas sutis
+    Success     = Color3.fromRGB(50, 205, 50),    -- Verde de confirmação
+    Error       = Color3.fromRGB(220, 50, 50)     -- Vermelho de erro
 }
 
-local Config = {
-    MenuWidth = 500,
-    MenuHeight = 300,
-    SidebarWidth = 120
-}
+local WindowWidth = 520
+local WindowHeight = 340
+local SidebarWidth = 130
 
 -- ==============================================================================
--- HELPERS (Funções auxiliares)
+-- FUNÇÕES AUXILIARES
 -- ==============================================================================
 local function Create(className, props, parent)
     local inst = Instance.new(className)
-    for k, v in pairs(props or {}) do
-        inst[k] = v
-    end
+    for k, v in pairs(props or {}) do inst[k] = v end
     if parent then inst.Parent = parent end
     return inst
 end
@@ -61,72 +59,61 @@ local function AddStroke(parent, color, thickness)
     }, parent)
 end
 
--- Arrastar universal (Mouse e Touch)
-local function MakeDraggable(frame, dragHandle)
+-- Arrastar Janela
+local function MakeDraggable(frame, handle)
     local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
-
-    dragHandle.InputBegan:Connect(function(input)
+    handle.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = frame.Position
-            
-            -- Animação sutil ao segurar
-            TweenService:Create(frame, TweenInfo.new(0.1), {Size = UDim2.new(0, Config.MenuWidth + 4, 0, Config.MenuHeight + 4)}):Play()
         end
     end)
-
-    dragHandle.InputChanged:Connect(function(input)
+    handle.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
-
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
-
     UserInputService.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
-            -- Retorna ao tamanho original
-            TweenService:Create(frame, TweenInfo.new(0.1), {Size = UDim2.new(0, Config.MenuWidth, 0, Config.MenuHeight)}):Play()
         end
     end)
 end
 
 -- ==============================================================================
--- INTERFACE PRINCIPAL (GUI)
+-- INTERFACE RAIZ
 -- ==============================================================================
 local ScreenGui = Create("ScreenGui", {
-    Name = "ProfessionalTrainingHub",
+    Name = "PremiumTrainingHub",
     ResetOnSpawn = false,
     ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 }, PlayerGui)
 
--- Escala para telas menores (Mobile)
+-- Escala para se adaptar a telas menores
 local UIScale = Create("UIScale", { Scale = 1 }, ScreenGui)
-local function updateScale()
+local function UpdateScale()
     local vp = workspace.CurrentCamera.ViewportSize
-    UIScale.Scale = math.clamp(math.min(vp.X / 800, vp.Y / 600), 0.65, 1)
+    UIScale.Scale = math.clamp(math.min(vp.X / 800, vp.Y / 600), 0.7, 1)
 end
-updateScale()
-workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale)
+UpdateScale()
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(UpdateScale)
 
 -- ==============================================================================
 -- LOGO FLUTUANTE
 -- ==============================================================================
 local FloatingLogo = Create("TextButton", {
     Name = "FloatingLogo",
-    Size = UDim2.fromOffset(46, 46),
+    Size = UDim2.fromOffset(48, 48),
     Position = UDim2.new(0, 20, 0.4, 0),
-    BackgroundColor3 = Theme.BgMain,
-    Text = "A", -- Letra inicial do Hub
-    TextColor3 = Theme.Accent,
-    Font = Enum.Font.GothamBlack,
+    BackgroundColor3 = Theme.BgWindow,
+    Text = "💜",
     TextSize = 24,
     AutoButtonColor = false,
     ZIndex = 50
@@ -135,217 +122,184 @@ AddCorner(FloatingLogo, 12)
 AddStroke(FloatingLogo, Theme.Accent, 1.5)
 
 -- ==============================================================================
--- MENU PRINCIPAL (FORMATO HORIZONTAL)
+-- JANELA PRINCIPAL
 -- ==============================================================================
 local MainFrame = Create("Frame", {
     Name = "MainFrame",
-    Size = UDim2.fromOffset(Config.MenuWidth, Config.MenuHeight),
+    Size = UDim2.fromOffset(WindowWidth, WindowHeight),
     Position = UDim2.new(0.5, 0, 0.5, 0),
     AnchorPoint = Vector2.new(0.5, 0.5),
-    BackgroundColor3 = Theme.BgMain,
+    BackgroundColor3 = Theme.BgWindow,
     BorderSizePixel = 0,
     Visible = false,
-    ClipsDescendants = true,
+    ClipsDescendants = true, -- Impede que o dropdown saia da janela
     ZIndex = 10
 }, ScreenGui)
-AddCorner(MainFrame, 12)
+AddCorner(MainFrame, 10)
 AddStroke(MainFrame, Theme.Border, 1.5)
 
--- Cabeçalho (Arrastável)
+-- Cabeçalho (Drag Handle)
 local Header = Create("Frame", {
-    Size = UDim2.new(1, 0, 0, 40),
-    BackgroundTransparency = 1,
-    ZIndex = 11
-}, MainFrame)
-
-Create("TextLabel", {
-    Size = UDim2.new(1, -40, 1, 0),
-    Position = UDim2.fromOffset(16, 0),
-    BackgroundTransparency = 1,
-    Text = "TRAINING HUB",
-    TextColor3 = Theme.TextMain,
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 11
-}, Header)
-
--- Detalhe roxo no cabeçalho
-Create("Frame", {
-    Size = UDim2.fromOffset(30, 3),
-    Position = UDim2.new(0, 16, 0, 32),
-    BackgroundColor3 = Theme.Accent,
+    Size = UDim2.new(1, 0, 0, 36),
+    BackgroundColor3 = Theme.BgHeader,
     BorderSizePixel = 0,
     ZIndex = 11
+}, MainFrame)
+Create("Frame", { -- Linha inferior do header
+    Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1),
+    BackgroundColor3 = Theme.Border, BorderSizePixel = 0
+}, Header)
+
+-- Ícone e Título
+Create("TextLabel", {
+    Size = UDim2.fromOffset(20, 20), Position = UDim2.fromOffset(12, 8),
+    BackgroundTransparency = 1, Text = "⬛", TextColor3 = Theme.Accent, TextSize = 14
+}, Header)
+Create("TextLabel", {
+    Size = UDim2.new(1, -60, 1, 0), Position = UDim2.fromOffset(36, 0),
+    BackgroundTransparency = 1, Text = "Hub de Treinamento", 
+    TextColor3 = Theme.TextMain, Font = Enum.Font.GothamBold, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, Header)
+Create("TextLabel", { -- Subtítulo discreto
+    Size = UDim2.new(1, -60, 1, 0), Position = UDim2.fromOffset(36, 1),
+    BackgroundTransparency = 1, Text = "by Instrutor", 
+    TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 9,
+    TextXAlignment = Enum.TextXAlignment.Left
 }, Header)
 
 -- Botão Fechar
 local CloseBtn = Create("TextButton", {
-    Size = UDim2.fromOffset(30, 30),
-    Position = UDim2.new(1, -38, 0, 5),
-    BackgroundTransparency = 1,
-    Text = "✕",
-    TextColor3 = Theme.TextMuted,
-    Font = Enum.Font.GothamBold,
-    TextSize = 14,
-    ZIndex = 12
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -34, 0.5, -14),
+    BackgroundTransparency = 1, Text = "✕", TextColor3 = Theme.TextMuted,
+    Font = Enum.Font.GothamBold, TextSize = 14, ZIndex = 12
 }, Header)
 CloseBtn.MouseEnter:Connect(function() CloseBtn.TextColor3 = Theme.Error end)
 CloseBtn.MouseLeave:Connect(function() CloseBtn.TextColor3 = Theme.TextMuted end)
 
 MakeDraggable(MainFrame, Header)
 
--- Linha divisória do cabeçalho
-Create("Frame", {
-    Size = UDim2.new(1, 0, 0, 1),
-    Position = UDim2.new(0, 0, 0, 39),
-    BackgroundColor3 = Theme.Border,
-    BorderSizePixel = 0,
-    ZIndex = 11
-}, MainFrame)
-
 -- ==============================================================================
--- SIDEBAR (NAVEGAÇÃO LATERAL)
+-- BARRA LATERAL (SIDEBAR)
 -- ==============================================================================
 local Sidebar = Create("Frame", {
-    Size = UDim2.new(0, Config.SidebarWidth, 1, -40),
-    Position = UDim2.new(0, 0, 0, 40),
+    Size = UDim2.new(0, SidebarWidth, 1, -36),
+    Position = UDim2.new(0, 0, 0, 36),
     BackgroundColor3 = Theme.BgSidebar,
-    BorderSizePixel = 0,
-    ZIndex = 10
+    BorderSizePixel = 0, ZIndex = 10
 }, MainFrame)
-
-Create("Frame", { -- Linha divisória vertical
-    Size = UDim2.new(0, 1, 1, 0),
-    Position = UDim2.new(1, -1, 0, 0),
-    BackgroundColor3 = Theme.Border,
-    BorderSizePixel = 0,
+Create("Frame", { -- Linha divisória direita
+    Size = UDim2.new(0, 1, 1, 0), Position = UDim2.new(1, -1, 0, 0),
+    BackgroundColor3 = Theme.Border, BorderSizePixel = 0
 }, Sidebar)
 
 local SidebarLayout = Create("UIListLayout", {
-    Padding = UDim.new(0, 4),
-    SortOrder = Enum.SortOrder.LayoutOrder
+    Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder
 }, Sidebar)
-Create("UIPadding", { PaddingTop = UDim.new(0, 8) }, Sidebar)
+Create("UIPadding", { PaddingTop = UDim.new(0, 12), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, Sidebar)
 
 -- ==============================================================================
--- CONTENT AREA (VISUALIZAÇÕES)
+-- ÁREA DE CONTEÚDO PRINCIPAL
 -- ==============================================================================
 local ContentArea = Create("Frame", {
-    Size = UDim2.new(1, -Config.SidebarWidth, 1, -40),
-    Position = UDim2.new(0, Config.SidebarWidth, 0, 40),
-    BackgroundTransparency = 1,
-    ZIndex = 10
+    Size = UDim2.new(1, -SidebarWidth, 1, -36),
+    Position = UDim2.new(0, SidebarWidth, 0, 36),
+    BackgroundTransparency = 1, ZIndex = 10
 }, MainFrame)
 
 local views = {}
-local currentView = nil
 local sidebarButtons = {}
+local currentView = nil
 
--- Sistema de Troca de Abas
+-- Função de Troca de Aba
 local function SwitchView(viewName)
     if currentView == viewName then return end
-    
-    -- Esconde todas com fade out
+    currentView = viewName
+
+    -- Animação de Fade
     for name, view in pairs(views) do
-        if view.Visible then
+        if view.Visible and name ~= viewName then
             TweenService:Create(view, TweenInfo.new(0.15), {BackgroundTransparency = 1}):Play()
             task.wait(0.15)
             view.Visible = false
         end
     end
 
-    -- Mostra a selecionada com fade in
     if views[viewName] then
         views[viewName].Visible = true
         views[viewName].BackgroundTransparency = 1
         TweenService:Create(views[viewName], TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
-        currentView = viewName
     end
 
-    -- Atualiza visual dos botões da sidebar
+    -- Atualizar visual da Sidebar
     for name, btn in pairs(sidebarButtons) do
         if name == viewName then
-            btn.BackgroundTransparency = 0.8
-            btn.TextColor3 = Theme.Accent
-            btn.Text = "▶ " .. name
+            btn.BackgroundTransparency = 0
+            btn.BackgroundColor3 = Theme.BgPanel
+            btn.TextColor3 = Theme.TextMain
+            btn.Indicator.Visible = true
         else
             btn.BackgroundTransparency = 1
             btn.TextColor3 = Theme.TextMuted
-            btn.Text = name
+            btn.Indicator.Visible = false
         end
     end
 end
 
 -- ==============================================================================
--- ABA: GERAL
+-- CONSTRUINDO AS ABAS (VIEWS)
 -- ==============================================================================
-local GeralView = Create("Frame", {
-    Name = "Geral",
-    Size = UDim2.new(1, 0, 1, 0),
-    BackgroundTransparency = 1,
-    Visible = false
-}, ContentArea)
+
+-- 1. View: Geral
+local GeralView = Create("Frame", { Name = "Geral", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, ContentArea)
+Create("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16) }, GeralView)
 views["Geral"] = GeralView
-Create("UIPadding", { PaddingLeft = UDim.new(0, 15), PaddingRight = UDim.new(0, 15), PaddingTop = UDim.new(0, 15), PaddingBottom = UDim.new(0, 15) }, GeralView)
 
 -- Bloco de Apresentação
-local IntroBlock = Create("Frame", {
-    Size = UDim2.new(1, 0, 0, 120),
-    BackgroundColor3 = Theme.BgSurface,
-    BorderSizePixel = 0,
+Create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 20), Text = "APRESENTAÇÃO",
+    BackgroundTransparency = 1, TextColor3 = Theme.TextMain, Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left
 }, GeralView)
-AddCorner(IntroBlock, 8)
-AddStroke(IntroBlock, Theme.Border, 1)
-Create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12) }, IntroBlock)
 
-local IntroTextString = string.format(
+local IntroFrame = Create("Frame", {
+    Size = UDim2.new(1, 0, 0, 110), Position = UDim2.fromOffset(0, 24),
+    BackgroundColor3 = Theme.BgPanel, BorderSizePixel = 0
+}, GeralView)
+AddCorner(IntroFrame, 8)
+AddStroke(IntroFrame, Theme.Border, 1)
+Create("UIPadding", { PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12) }, IntroFrame)
+
+local IntroText = string.format(
     "Olá! Meu nome é <font color=\"#8A2BE2\"><b>%s</b></font> e serei o instrutor de vocês hoje. Peço que mantenham o respeito e a disciplina durante o treinamento, pois espero comprometimento e atenção de todos.",
     LocalPlayer.Name
 )
 
-local IntroLabel = Create("TextLabel", {
-    Size = UDim2.new(1, -40, 1, 0),
-    BackgroundTransparency = 1,
-    Text = IntroTextString,
-    RichText = true,
-    TextColor3 = Theme.TextMain,
-    Font = Enum.Font.Gotham,
-    TextSize = 13,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
-}, IntroBlock)
+Create("TextLabel", {
+    Size = UDim2.new(1, -30, 1, 0), BackgroundTransparency = 1, Text = IntroText,
+    RichText = true, TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 11,
+    TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top
+}, IntroFrame)
 
--- Botão de Copiar
+-- Botão Copiar (Compacto e elegante)
 local CopyBtn = Create("TextButton", {
-    Size = UDim2.fromOffset(30, 30),
-    Position = UDim2.new(1, -30, 0, 0),
-    BackgroundColor3 = Theme.BgMain,
-    Text = "📋",
-    TextColor3 = Theme.TextMuted,
-    Font = Enum.Font.Gotham,
-    TextSize = 14,
-    AutoButtonColor = false,
-}, IntroBlock)
-AddCorner(CopyBtn, 6)
+    Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -24, 0, 0),
+    BackgroundColor3 = Theme.BgWindow, Text = "📋", TextSize = 12,
+    TextColor3 = Theme.TextMuted, AutoButtonColor = false
+}, IntroFrame)
+AddCorner(CopyBtn, 4)
 AddStroke(CopyBtn, Theme.Border, 1)
 
 CopyBtn.MouseEnter:Connect(function() CopyBtn.TextColor3 = Theme.Accent end)
 CopyBtn.MouseLeave:Connect(function() CopyBtn.TextColor3 = Theme.TextMuted end)
-
 CopyBtn.MouseButton1Click:Connect(function()
-    local textoPuro = string.format("Olá! Meu nome é %s e serei o instrutor de vocês hoje. Peço que mantenham o respeito e a disciplina durante o treinamento, pois espero comprometimento e atenção de todos.", LocalPlayer.Name)
+    local plainText = string.format("Olá! Meu nome é %s e serei o instrutor de vocês hoje. Peço que mantenham o respeito e a disciplina durante o treinamento, pois espero comprometimento e atenção de todos.", LocalPlayer.Name)
     
-    local sucesso = false
+    local success = false
     if setclipboard then
-        local ok, err = pcall(function()
-            setclipboard(textoPuro)
-        end)
-        sucesso = ok
+        success = pcall(function() setclipboard(plainText) end)
     end
-
-    if sucesso then
+    
+    if success then
         CopyBtn.Text = "✅"
         CopyBtn.TextColor3 = Theme.Success
         task.wait(1.5)
@@ -360,49 +314,35 @@ CopyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Dropdown de Categoria
+-- Dropdown Title
 Create("TextLabel", {
-    Size = UDim2.new(1, 0, 0, 20),
-    Position = UDim2.new(0, 0, 0, 135),
-    BackgroundTransparency = 1,
-    Text = "Qual categoria você está treinando?",
-    TextColor3 = Theme.TextMuted,
-    Font = Enum.Font.GothamMedium,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left,
+    Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 146),
+    BackgroundTransparency = 1, Text = "Qual categoria você está treinando?",
+    TextColor3 = Theme.TextMuted, Font = Enum.Font.GothamMedium, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left
 }, GeralView)
 
+-- Dropdown Selector
 local DropdownBtn = Create("TextButton", {
-    Size = UDim2.new(1, 0, 0, 34),
-    Position = UDim2.new(0, 0, 0, 160),
-    BackgroundColor3 = Theme.BgSurface,
-    Text = "Selecione uma categoria...",
-    TextColor3 = Theme.TextMuted,
-    Font = Enum.Font.Gotham,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    AutoButtonColor = false,
+    Size = UDim2.new(1, 0, 0, 32), Position = UDim2.fromOffset(0, 170),
+    BackgroundColor3 = Theme.BgPanel, Text = "Selecione uma categoria...",
+    TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 11,
+    TextXAlignment = Enum.TextXAlignment.Left, AutoButtonColor = false
 }, GeralView)
 AddCorner(DropdownBtn, 6)
 AddStroke(DropdownBtn, Theme.Border, 1)
 Create("UIPadding", { PaddingLeft = UDim.new(0, 10) }, DropdownBtn)
 
-local Arrow = Create("TextLabel", {
-    Size = UDim2.fromOffset(30, 30),
-    Position = UDim2.new(1, -30, 0.5, -15),
-    BackgroundTransparency = 1,
-    Text = "▼",
-    TextColor3 = Theme.TextMuted,
-    Font = Enum.Font.GothamBold,
-    TextSize = 10,
+local DropdownArrow = Create("TextLabel", {
+    Size = UDim2.fromOffset(20, 20), Position = UDim2.new(1, -28, 0.5, -10),
+    BackgroundTransparency = 1, Text = "▼", TextColor3 = Theme.TextMuted, TextSize = 10, Font = Enum.Font.GothamBold
 }, DropdownBtn)
 
-local DropdownList = Create("Frame", {
-    Size = UDim2.new(1, 0, 0, 0), -- Animado
-    Position = UDim2.new(0, 0, 0, 196),
-    BackgroundColor3 = Theme.BgSurface,
-    Visible = false,
-    ClipsDescendants = true,
+-- Dropdown List (ScrollingFrame para futuras categorias)
+local DropdownList = Create("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 0), Position = UDim2.fromOffset(0, 206),
+    BackgroundColor3 = Theme.BgPanel, BorderSizePixel = 0, Visible = false,
+    ScrollBarThickness = 3, ScrollBarImageColor3 = Theme.Accent,
+    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
     ZIndex = 20
 }, GeralView)
 AddCorner(DropdownList, 6)
@@ -410,205 +350,153 @@ AddStroke(DropdownList, Theme.Border, 1)
 Create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, DropdownList)
 Create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, DropdownList)
 
-local dropdownOpen = false
-DropdownBtn.MouseButton1Click:Connect(function()
-    dropdownOpen = not dropdownOpen
-    if dropdownOpen then
+local isDropdownOpen = false
+local function ToggleDropdown(open)
+    isDropdownOpen = open
+    if open then
         DropdownList.Visible = true
-        Arrow.Text = "▲"
-        TweenService:Create(DropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 110)}):Play()
+        DropdownArrow.Text = "▲"
+        TweenService:Create(DropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 0, 100)}):Play()
     else
-        Arrow.Text = "▼"
+        DropdownArrow.Text = "▼"
         local tween = TweenService:Create(DropdownList, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Size = UDim2.new(1, 0, 0, 0)})
-        tween.Completed:Connect(function() if not dropdownOpen then DropdownList.Visible = false end end)
+        tween.Completed:Connect(function() if not isDropdownOpen then DropdownList.Visible = false end end)
         tween:Play()
     end
-end)
-
--- ==============================================================================
--- ABA: CATEGORIAS (PRAÇAS, GRADUADOS, OFICIAIS)
--- ==============================================================================
-local categorias = {"Praças", "Graduados", "Oficiais"}
-
-local function CreateCategoryView(catName)
-    local view = Create("Frame", {
-        Name = catName,
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        Visible = false
-    }, ContentArea)
-    Create("UIPadding", { PaddingLeft = UDim.new(0, 15), PaddingRight = UDim.new(0, 15), PaddingTop = UDim.new(0, 15), PaddingBottom = UDim.new(0, 15) }, view)
-    
-    -- Botão Voltar
-    local backBtn = Create("TextButton", {
-        Size = UDim2.fromOffset(70, 24),
-        BackgroundColor3 = Theme.BgSurface,
-        Text = "← Voltar",
-        TextColor3 = Theme.TextMuted,
-        Font = Enum.Font.Gotham,
-        TextSize = 11,
-        AutoButtonColor = false,
-    }, view)
-    AddCorner(backBtn, 6)
-    AddStroke(backBtn, Theme.Border, 1)
-    backBtn.MouseButton1Click:Connect(function()
-        SwitchView("Geral")
-        DropdownBtn.Text = "Selecione uma categoria..."
-        DropdownBtn.TextColor3 = Theme.TextMuted
-    end)
-
-    -- Título
-    Create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 30),
-        Position = UDim2.new(0, 0, 0, 35),
-        BackgroundTransparency = 1,
-        Text = catName,
-        TextColor3 = Theme.Accent,
-        Font = Enum.Font.GothamBold,
-        TextSize = 20,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, view)
-
-    -- Área de Anotações
-    local notesBg = Create("Frame", {
-        Size = UDim2.new(1, 0, 0, 140),
-        Position = UDim2.new(0, 0, 0, 75),
-        BackgroundColor3 = Theme.BgSurface,
-        BorderSizePixel = 0
-    }, view)
-    AddCorner(notesBg, 8)
-    AddStroke(notesBg, Theme.Border, 1)
-    
-    Create("TextLabel", {
-        Size = UDim2.new(1, -20, 1, -20),
-        Position = UDim2.fromOffset(10, 10),
-        BackgroundTransparency = 1,
-        Text = "Espaço reservado para anotações e instruções futuras da categoria " .. catName .. "...",
-        TextColor3 = Theme.TextMuted,
-        Font = Enum.Font.Gotham,
-        TextSize = 12,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-    }, notesBg)
-
-    views[catName] = view
 end
 
+DropdownBtn.MouseButton1Click:Connect(function() ToggleDropdown(not isDropdownOpen) end)
+
+-- 2. Views: Praças, Graduados, Oficiais
+local categorias = {"Praças", "Graduados", "Oficiais"}
 for _, cat in ipairs(categorias) do
-    CreateCategoryView(cat)
+    local view = Create("Frame", { Name = cat, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false }, ContentArea)
+    Create("UIPadding", { PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16), PaddingTop = UDim.new(0, 16), PaddingBottom = UDim.new(0, 16) }, view)
+    
+    -- Botão Voltar (Atalho para Geral)
+    local backBtn = Create("TextButton", {
+        Size = UDim2.fromOffset(60, 22), BackgroundColor3 = Theme.BgPanel,
+        Text = "← Voltar", TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 10, AutoButtonColor = false
+    }, view)
+    AddCorner(backBtn, 4)
+    AddStroke(backBtn, Theme.Border, 1)
+    backBtn.MouseButton1Click:Connect(function() SwitchView("Geral") end)
+
+    Create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 20), Position = UDim2.fromOffset(0, 30),
+        BackgroundTransparency = 1, Text = "Categoria: " .. cat,
+        TextColor3 = Theme.Accent, Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left
+    }, view)
+
+    local notesArea = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 120), Position = UDim2.fromOffset(0, 60),
+        BackgroundColor3 = Theme.BgPanel, BorderSizePixel = 0
+    }, view)
+    AddCorner(notesArea, 8)
+    AddStroke(notesArea, Theme.Border, 1)
+    
+    Create("TextLabel", {
+        Size = UDim2.new(1, -24, 1, -24), Position = UDim2.fromOffset(12, 12),
+        BackgroundTransparency = 1, Text = "Espaço reservado para instruções e anotações da categoria " .. cat .. "...",
+        TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 11, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top
+    }, notesArea)
+
+    views[cat] = view
 end
 
 -- Popular Dropdown
 for i, cat in ipairs(categorias) do
-    local optBtn = Create("TextButton", {
-        Size = UDim2.new(1, 0, 0, 32),
-        BackgroundTransparency = 1,
-        Text = cat,
-        TextColor3 = Theme.TextMuted,
-        Font = Enum.Font.Gotham,
-        TextSize = 12,
-        LayoutOrder = i,
-        ZIndex = 21
+    local opt = Create("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1,
+        Text = cat, TextColor3 = Theme.TextMuted, Font = Enum.Font.Gotham, TextSize = 11,
+        LayoutOrder = i, ZIndex = 21
     }, DropdownList)
     
-    optBtn.MouseEnter:Connect(function() 
-        optBtn.BackgroundTransparency = 0.9 
-        optBtn.BackgroundColor3 = Theme.Accent
-        optBtn.TextColor3 = Theme.TextMain
-    end)
-    optBtn.MouseLeave:Connect(function() 
-        optBtn.BackgroundTransparency = 1 
-        optBtn.TextColor3 = Theme.TextMuted
-    end)
-    
-    optBtn.MouseButton1Click:Connect(function()
+    opt.MouseEnter:Connect(function() opt.BackgroundTransparency = 0.9; opt.BackgroundColor3 = Theme.Accent; opt.TextColor3 = Theme.TextMain end)
+    opt.MouseLeave:Connect(function() opt.BackgroundTransparency = 1; opt.TextColor3 = Theme.TextMuted end)
+    opt.MouseButton1Click:Connect(function()
         DropdownBtn.Text = "Categoria: " .. cat
         DropdownBtn.TextColor3 = Theme.TextMain
-        dropdownOpen = false
-        Arrow.Text = "▼"
-        local tween = TweenService:Create(DropdownList, TweenInfo.new(0.2), {Size = UDim2.new(1, 0, 0, 0)})
-        tween.Completed:Connect(function() DropdownList.Visible = false end)
-        tween:Play()
-        
+        ToggleDropdown(false)
         SwitchView(cat)
     end)
 end
 
 -- ==============================================================================
--- POPULAR SIDEBAR
+-- POPULAR SIDEBAR (COM ÍCONES)
 -- ==============================================================================
-local allViews = {"Geral", "Praças", "Graduados", "Oficiais"}
-for i, name in ipairs(allViews) do
+local tabsData = {
+    {Name = "Geral", Icon = "⌂"},
+    {Name = "Praças", Icon = "★"},
+    {Name = "Graduados", Icon = "◆"},
+    {Name = "Oficiais", Icon = "♛"}
+}
+
+for i, data in ipairs(tabsData) do
     local btn = Create("TextButton", {
-        Size = UDim2.new(1, 0, 0, 34),
-        BackgroundColor3 = Theme.Accent,
-        BackgroundTransparency = 1,
-        Text = name,
-        TextColor3 = Theme.TextMuted,
-        Font = Enum.Font.GothamMedium,
-        TextSize = 12,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        AutoButtonColor = false,
-        LayoutOrder = i
+        Size = UDim2.new(1, 0, 0, 32), BackgroundColor3 = Theme.BgPanel, BackgroundTransparency = 1,
+        Text = "", AutoButtonColor = false, LayoutOrder = i
     }, Sidebar)
-    Create("UIPadding", { PaddingLeft = UDim.new(0, 15) }, btn)
+    AddCorner(btn, 6)
     
+    -- Indicador roxo (barra lateral esquerda)
+    local indicator = Create("Frame", {
+        Size = UDim2.new(0, 3, 0.6, 0), Position = UDim2.new(0, 0, 0.2, 0),
+        BackgroundColor3 = Theme.Accent, Visible = false
+    }, btn)
+    AddCorner(indicator, 2)
+    btn.Indicator = indicator
+
+    -- Ícone
+    Create("TextLabel", {
+        Size = UDim2.fromOffset(20, 20), Position = UDim2.fromOffset(8, 6),
+        BackgroundTransparency = 1, Text = data.Icon, TextColor3 = Theme.Accent, TextSize = 12
+    }, btn)
+
+    -- Texto
+    Create("TextLabel", {
+        Size = UDim2.new(1, -34, 1, 0), Position = UDim2.fromOffset(30, 0),
+        BackgroundTransparency = 1, Text = data.Name, TextColor3 = Theme.TextMuted,
+        Font = Enum.Font.GothamMedium, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left
+    }, btn)
+
     btn.MouseEnter:Connect(function()
-        if currentView ~= name then
-            btn.BackgroundTransparency = 0.95
-            btn.TextColor3 = Theme.TextMain
-        end
+        if currentView ~= data.Name then btn.BackgroundTransparency = 0.9 end
     end)
     btn.MouseLeave:Connect(function()
-        if currentView ~= name then
-            btn.BackgroundTransparency = 1
-            btn.TextColor3 = Theme.TextMuted
-        end
+        if currentView ~= data.Name then btn.BackgroundTransparency = 1 end
     end)
     
-    btn.MouseButton1Click:Connect(function()
-        SwitchView(name)
-    end)
-    
-    sidebarButtons[name] = btn
+    btn.MouseButton1Click:Connect(function() SwitchView(data.Name) end)
+    sidebarButtons[data.Name] = btn
 end
 
 -- ==============================================================================
--- LÓGICA DE ABRIR/FECHAR (LOGO)
+-- LÓGICA DE ABRIR/FECHAR E LOGO FLUTUANTE
 -- ==============================================================================
 local menuOpen = false
-
 local function ToggleMenu()
     menuOpen = not menuOpen
     if menuOpen then
         MainFrame.Visible = true
-        MainFrame.Size = UDim2.fromOffset(Config.MenuWidth, Config.MenuHeight - 20)
+        MainFrame.Size = UDim2.fromOffset(WindowWidth, WindowHeight - 20)
         MainFrame.BackgroundTransparency = 1
-        
         TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-            Size = UDim2.fromOffset(Config.MenuWidth, Config.MenuHeight),
-            BackgroundTransparency = 0
+            Size = UDim2.fromOffset(WindowWidth, WindowHeight), BackgroundTransparency = 0
         }):Play()
         
-        if not currentView then
-            SwitchView("Geral")
-        end
+        if not currentView then SwitchView("Geral") end
     else
         local tween = TweenService:Create(MainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Size = UDim2.fromOffset(Config.MenuWidth, Config.MenuHeight - 20),
-            BackgroundTransparency = 1
+            Size = UDim2.fromOffset(WindowWidth, WindowHeight - 20), BackgroundTransparency = 1
         })
-        tween.Completed:Connect(function()
-            MainFrame.Visible = false
-        end)
+        tween.Completed:Connect(function() MainFrame.Visible = false end)
         tween:Play()
     end
 end
 
--- Interação do Logo (Arrastar vs Clicar)
+-- Arrastar vs Clicar no Logo
 local logoDragging, logoMoved, logoDragStart, logoStartPos = false, false, nil, nil
-
 FloatingLogo.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         logoDragging = true
@@ -617,25 +505,19 @@ FloatingLogo.InputBegan:Connect(function(input)
         logoStartPos = FloatingLogo.Position
     end
 end)
-
 FloatingLogo.InputChanged:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         if logoDragging then
             local delta = input.Position - logoDragStart
-            if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then
-                logoMoved = true
-            end
+            if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then logoMoved = true end
             FloatingLogo.Position = UDim2.new(logoStartPos.X.Scale, logoStartPos.X.Offset + delta.X, logoStartPos.Y.Scale, logoStartPos.Y.Offset + delta.Y)
         end
     end
 end)
-
 UserInputService.InputEnded:Connect(function(input)
     if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and logoDragging then
         logoDragging = false
-        if not logoMoved then
-            ToggleMenu()
-        end
+        if not logoMoved then ToggleMenu() end
     end
 end)
 
