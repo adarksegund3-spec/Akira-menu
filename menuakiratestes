@@ -1,305 +1,1337 @@
+-- gravar rota drip Admin
+-- criador: angel
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local ContentProvider = game:GetService("ContentProvider")
 local LocalPlayer = Players.LocalPlayer
-local ARQUIVO = "rotas_jp.json"
-local rotas = {}
-local gravando, gravConn, playConn, data, startTime, timeConn, SalvarList = false, nil, nil, {}, 0, nil, nil
-local visFolder, clone, touchConn, placa, autoStart = nil, nil, nil, nil, false
-local animAndar = Instance.new("Animation")
-animAndar.AnimationId = "rbxassetid://180426354"
-local trackAndar = nil
 
-pcall(function()
-    if isfile and isfile(ARQUIVO) then
-        local d = HttpService:JSONDecode(readfile(ARQUIVO))
-        if d then rotas = d end
-    end
-end)
+local env = (getgenv and getgenv()) or _G
+if env.DripAdminCleanup then
+    pcall(env.DripAdminCleanup)
+end
 
-local function salvarDisco()
+local connections = {}
+local function track(conn)
+    table.insert(connections, conn)
+    return conn
+end
+
+local C = {
+    Accent     = Color3.fromRGB(96, 142, 255),
+    AccentHi   = Color3.fromRGB(150, 185, 255),
+    AccentDark = Color3.fromRGB(52, 84, 178),
+    Bg         = Color3.fromRGB(14, 15, 22),
+    Bg2        = Color3.fromRGB(23, 25, 36),
+    Bg3        = Color3.fromRGB(36, 39, 56),
+    Text       = Color3.fromRGB(248, 250, 255),
+    TextDim    = Color3.fromRGB(176, 184, 208),
+    Red        = Color3.fromRGB(232, 72, 92),
+    Green      = Color3.fromRGB(70, 220, 140),
+    Amber      = Color3.fromRGB(250, 192, 84),
+    Violet     = Color3.fromRGB(128, 92, 226),
+}
+
+-- arquivos ---------------------------------------------------------------
+
+local FOLDER = "DripAdmin"
+local canFS = (writefile and readfile and isfile and makefolder and isfolder and listfiles) and true or false
+
+local function ensureFolder()
+    if not canFS then return end
     pcall(function()
-        if writefile then writefile(ARQUIVO, HttpService:JSONEncode(rotas)) end
+        if not isfolder(FOLDER) then makefolder(FOLDER) end
     end)
 end
 
-local function TocarAnim()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local animator = hum and hum:FindFirstChildOfClass("Animator")
-    if not animator or trackAndar then return end
-    local an = char:FindFirstChild("Animate")
-    if an then an.Enabled = false end
-    for _, t in ipairs(animator:GetPlayingAnimationTracks()) do t:Stop(0) end
-    trackAndar = animator:LoadAnimation(animAndar)
-    trackAndar.Looped = true
-    trackAndar.Priority = Enum.AnimationPriority.Action
-    trackAndar:Play(0.1)
+local function safeName(name)
+    local s = tostring(name):gsub("[^%w_%-]", "_")
+    if s == "" then s = "rota" end
+    return s
 end
 
-local function PararAnim()
-    if trackAndar then trackAndar:Stop(0.1) trackAndar = nil end
-    local char = LocalPlayer.Character
-    local an = char and char:FindFirstChild("Animate")
-    if an then an.Enabled = true end
+local function rnd(n, d)
+    local m = 10 ^ d
+    return math.floor(n * m + 0.5) / m
 end
 
-local function limparVis()
-    if visFolder then visFolder:Destroy() visFolder = nil end
-    if clone then clone:Destroy() clone = nil end
-    if placa then placa:Destroy() placa = nil end
-    if touchConn then touchConn:Disconnect() touchConn = nil end
-    autoStart = false
-end
-
-local function desenhar(dados, nomeRota)
-    limparVis()
-    if not dados or #dados < 2 then return end
-    visFolder = Instance.new("Folder", workspace)
-    visFolder.Name = "JpRota"
-    local pts = {}
-    for _, n in ipairs(dados) do table.insert(pts, CFrame.new(table.unpack(n.CF)).Position) end
-    for i = 2, #pts do
-        local a, b = pts[i - 1], pts[i]
-        local dist = (b - a).Magnitude
-        if dist > 0.05 then
-            local l = Instance.new("Part", visFolder)
-            l.Anchored, l.CanCollide, l.CanQuery, l.CanTouch = true, false, false, false
-            l.Material, l.Color, l.Transparency = Enum.Material.Neon, Color3.fromRGB(0, 255, 0), 0.4
-            l.Size, l.CFrame = Vector3.new(0.2, 0.2, dist), CFrame.lookAt((a + b) / 2, b)
+-- conta quantas animações diferentes existem numa rota
+local function countAnims(data)
+    local set, n = {}, 0
+    for _, p in ipairs(data) do
+        if p.Animations then
+            for _, a in ipairs(p.Animations) do
+                if a.Id and not set[a.Id] then
+                    set[a.Id] = true
+                    n = n + 1
+                end
+            end
         end
     end
-    local cfI = CFrame.new(table.unpack(dados[1].CF))
-    if LocalPlayer.Character then
-        clone = LocalPlayer.Character:Clone()
-        clone.Name = "Clone"
-        for _, p in ipairs(clone:GetDescendants()) do
-            if p:IsA("BasePart") then p.Anchored, p.CanCollide = true, false
-            elseif p:IsA("Script") or p:IsA("LocalScript") then p:Destroy() end
+    return n
+end
+
+local function compress(data)
+    local out = table.create(#data)
+    for i, p in ipairs(data) do
+        local cf = table.create(12)
+        for k, v in ipairs(p.CF) do cf[k] = rnd(v, 5) end
+        local vel = p.Velocity or { 0, 0, 0 }
+        local anims = {}
+        for _, a in ipairs(p.Animations or {}) do
+            table.insert(anims, {
+                Id = a.Id,
+                Speed = rnd(a.Speed or 1, 3),
+                Weight = rnd(a.Weight or 1, 3),
+                Priority = a.Priority,
+                Pos = a.Pos and rnd(a.Pos, 3) or nil,
+                Looped = a.Looped,
+            })
         end
-        clone:PivotTo(cfI)
-        clone.Parent = visFolder
+        out[i] = {
+            Time = rnd(p.Time, 4),
+            CF = cf,
+            Velocity = { rnd(vel[1], 3), rnd(vel[2], 3), rnd(vel[3], 3) },
+            State = p.State,
+            Animations = anims,
+        }
     end
-    placa = Instance.new("BillboardGui", clone:FindFirstChild("Head") or visFolder)
-    placa.Size, placa.StudsOffset, placa.AlwaysOnTop = UDim2.new(0, 200, 0, 60), Vector3.new(0, 3, 0), true
-    local f = Instance.new("Frame", placa)
-    f.Size, f.BackgroundColor3, f.BackgroundTransparency = UDim2.new(1, 0, 1, 0), Color3.fromRGB(15, 20, 25), 0.1
-    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
-    Instance.new("UIStroke", f).Color = Color3.fromRGB(0, 255, 200)
-    local t1 = Instance.new("TextLabel", f)
-    t1.Size, t1.Position, t1.BackgroundTransparency = UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 5), 1
-    t1.Text, t1.TextColor3, t1.Font, t1.TextSize = "⛳ PERCURSO", Color3.fromRGB(0, 255, 200), Enum.Font.GothamBold, 12
-    local t2 = Instance.new("TextLabel", f)
-    t2.Size, t2.Position, t2.BackgroundTransparency = UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 25), 1
-    t2.Text, t2.TextColor3, t2.Font, t2.TextSize = nomeRota or "Rota", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 14
-    
-    autoStart = true
-    touchConn = RunService.Heartbeat:Connect(function()
-        if not autoStart or not clone or not LocalPlayer.Character then return end
-        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        if (hrp.Position - cfI.Position).Magnitude < 3 then
-            autoStart = false
-            touchConn:Disconnect()
-            limparVis()
-            _G.PlayRota(dados)
-        end
+    return out
+end
+
+local savedRoutes = {}
+
+local function saveToDisk(name, entry)
+    if not canFS then return false end
+    ensureFolder()
+    local ok = pcall(function()
+        local json = HttpService:JSONEncode({
+            Version = 2,
+            Name = name,
+            Duracao = entry.Duracao,
+            Pontos = entry.Pontos,
+            Data = compress(entry.Data),
+        })
+        writefile(entry.File, json)
+    end)
+    return ok
+end
+
+local function deleteFromDisk(entry)
+    if not canFS or not entry.File then return end
+    pcall(function()
+        if delfile and isfile(entry.File) then delfile(entry.File) end
     end)
 end
 
-function _G.PlayRota(dados)
-    if not dados or #dados < 2 or playConn then return end
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then return end
+local function loadAllFromDisk()
+    if not canFS then return 0 end
+    ensureFolder()
+    local count = 0
+    local ok, files = pcall(function() return listfiles(FOLDER) end)
+    if not ok or type(files) ~= "table" then return 0 end
+    for _, path in ipairs(files) do
+        if tostring(path):sub(-5) == ".json" then
+            pcall(function()
+                local decoded = HttpService:JSONDecode(readfile(path))
+                if type(decoded) == "table" and type(decoded.Data) == "table" and #decoded.Data > 0 then
+                    local name = decoded.Name or tostring(path):match("([^/\\]+)%.json$") or "rota"
+                    local base, n = name, 2
+                    while savedRoutes[name] do
+                        name = base .. "_" .. n
+                        n = n + 1
+                    end
+                    savedRoutes[name] = {
+                        Duracao = decoded.Duracao or 0,
+                        Pontos = decoded.Pontos or #decoded.Data,
+                        Data = decoded.Data,
+                        Anims = countAnims(decoded.Data),
+                        File = path,
+                    }
+                    count = count + 1
+                end
+            end)
+        end
+    end
+    return count
+end
 
-    local cfs = {}
-    for i, n in ipairs(dados) do cfs[i] = CFrame.new(table.unpack(n.CF)) end
+-- interface --------------------------------------------------------------
 
-    hum.WalkSpeed, hum.AutoRotate = 0, false
-    TocarAnim()
-    hrp.CFrame = cfs[1]
+local function new(class, props, parent)
+    local inst = Instance.new(class)
+    for k, v in pairs(props or {}) do inst[k] = v end
+    if parent then inst.Parent = parent end
+    return inst
+end
 
-    local pStart, idx, total = os.clock(), 1, #dados
-    local animSpeed = 1
+local function corner(inst, r)
+    return new("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
+end
 
-    local function fim()
-        if playConn then playConn:Disconnect() playConn = nil end
-        if hum.Parent then hum.AutoRotate, hum.WalkSpeed = true, 16 end
-        PararAnim()
+local function stroke(inst, color, thick, transp)
+    return new("UIStroke", {
+        Color = color, Thickness = thick or 1, Transparency = transp or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, inst)
+end
+
+local function gradient(inst, c1, c2, rot)
+    return new("UIGradient", {
+        Color = ColorSequence.new(c1, c2),
+        Rotation = rot or 90,
+    }, inst)
+end
+
+local function lighten(c, amt)
+    return Color3.new(math.min(c.R + amt, 1), math.min(c.G + amt, 1), math.min(c.B + amt, 1))
+end
+
+local function makeButton(parent, text, color, textColor, size, pos, textSize)
+    local b = new("TextButton", {
+        Size = size, Position = pos,
+        BackgroundColor3 = color,
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = textColor or C.Text,
+        TextSize = textSize or 12,
+        BorderSizePixel = 0,
+        AutoButtonColor = true,
+    }, parent)
+    corner(b, 7)
+    gradient(b, lighten(color, 0.1), color, 90)
+    return b
+end
+
+local guiParent
+do
+    local ok, h = pcall(function() return gethui and gethui() end)
+    if ok and h then
+        guiParent = h
+    else
+        guiParent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+end
+
+local ScreenGui = new("ScreenGui", {
+    Name = "DripAdmin",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, guiParent)
+
+-- botao flutuante
+local FloatButton = new("TextButton", {
+    Size = UDim2.new(0, 42, 0, 42),
+    Position = UDim2.new(0, 12, 0.5, -21),
+    BackgroundColor3 = C.Bg2,
+    Text = "⚡",
+    TextColor3 = Color3.fromRGB(255, 222, 90),
+    TextSize = 22,
+    Font = Enum.Font.GothamBold,
+    BorderSizePixel = 0,
+    AutoButtonColor = false,
+    Active = true,
+}, ScreenGui)
+corner(FloatButton, 21)
+stroke(FloatButton, Color3.fromRGB(255, 214, 80), 2)
+gradient(FloatButton, C.Bg3, C.Bg, 90)
+
+-- janela
+local MainFrame = new("Frame", {
+    Size = UDim2.new(0, 214, 0, 262),
+    Position = UDim2.new(0.5, -107, 0.5, -131),
+    BackgroundColor3 = C.Bg,
+    BorderSizePixel = 0,
+    Active = true,
+    Visible = false,
+}, ScreenGui)
+corner(MainFrame, 12)
+stroke(MainFrame, C.Accent, 1.5, 0.15)
+
+local TitleBar = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 30),
+    BackgroundColor3 = C.Bg3,
+    BorderSizePixel = 0,
+    Active = true,
+}, MainFrame)
+corner(TitleBar, 12)
+gradient(TitleBar, C.Bg3, C.Bg2, 0)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -44, 1, 0),
+    Position = UDim2.new(0, 11, 0, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = "gravar rota drip Admin",
+    TextColor3 = C.Text,
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+}, TitleBar)
+
+local CloseBtn = new("TextButton", {
+    Size = UDim2.new(0, 20, 0, 20),
+    Position = UDim2.new(1, -26, 0, 5),
+    BackgroundColor3 = C.Red,
+    Text = "",
+    BorderSizePixel = 0,
+    AutoButtonColor = true,
+}, TitleBar)
+corner(CloseBtn, 6)
+for _, rot in ipairs({ 45, -45 }) do
+    new("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 10, 0, 2),
+        Rotation = rot,
+        BackgroundColor3 = Color3.fromRGB(255, 240, 242),
+        BorderSizePixel = 0,
+    }, CloseBtn)
+end
+
+-- abas
+local TabBar = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 26),
+    Position = UDim2.new(0, 8, 0, 36),
+    BackgroundColor3 = C.Bg2,
+    BorderSizePixel = 0,
+}, MainFrame)
+corner(TabBar, 8)
+
+local function makeTab(text, index, active)
+    local t = new("TextButton", {
+        Size = UDim2.new(1 / 3, -4, 1, -6),
+        Position = UDim2.new((index - 1) / 3, 2, 0, 3),
+        BackgroundColor3 = active and C.AccentDark or C.Bg2,
+        Font = Enum.Font.GothamBold,
+        Text = text,
+        TextColor3 = active and C.Text or C.TextDim,
+        TextSize = 10,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+    }, TabBar)
+    corner(t, 6)
+    return t
+end
+
+local TabRota = makeTab("Gravar", 1, true)
+local TabDados = makeTab("Rotas", 2, false)
+local TabCred = makeTab("Créditos", 3, false)
+
+-- pagina gravar
+local RotaPage = new("Frame", {
+    Size = UDim2.new(1, 0, 1, -74),
+    Position = UDim2.new(0, 0, 0, 68),
+    BackgroundTransparency = 1,
+    Visible = true,
+}, MainFrame)
+
+local TimerFrame = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 46),
+    Position = UDim2.new(0, 8, 0, 0),
+    BackgroundColor3 = C.Bg2,
+    BorderSizePixel = 0,
+}, RotaPage)
+corner(TimerFrame, 9)
+local TimerStroke = stroke(TimerFrame, C.AccentDark, 1.5)
+
+local TimerLabel = new("TextLabel", {
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.Code,
+    Text = "00:00.000",
+    TextColor3 = C.Text,
+    TextSize = 24,
+}, TimerFrame)
+
+local StatusRow = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 16),
+    Position = UDim2.new(0, 8, 0, 51),
+    BackgroundTransparency = 1,
+}, RotaPage)
+
+local StatusDot = new("Frame", {
+    Size = UDim2.new(0, 7, 0, 7),
+    Position = UDim2.new(0, 2, 0.5, -3),
+    BackgroundColor3 = C.TextDim,
+    BorderSizePixel = 0,
+}, StatusRow)
+corner(StatusDot, 4)
+
+local StatusLabel = new("TextLabel", {
+    Size = UDim2.new(1, -16, 1, 0),
+    Position = UDim2.new(0, 15, 0, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamMedium,
+    Text = "Parado",
+    TextColor3 = C.TextDim,
+    TextSize = 11,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+}, StatusRow)
+
+local function setStatus(text, kind)
+    local color = C.TextDim
+    if kind == "rec" then color = C.Red
+    elseif kind == "play" then color = C.Accent
+    elseif kind == "ok" then color = C.Green
+    elseif kind == "warn" then color = C.Amber end
+    StatusLabel.Text = text
+    StatusLabel.TextColor3 = C.Text
+    StatusDot.BackgroundColor3 = color
+end
+
+local RecordBtn = makeButton(RotaPage, "Gravar", C.Accent, C.Text,
+    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 74), 13)
+local TestBtn = makeButton(RotaPage, "Testar", C.Bg3, C.Text,
+    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 110), 13)
+local SaveRenameBtn = makeButton(RotaPage, "Salvar rota", C.Violet, C.Text,
+    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 146), 13)
+
+-- pagina rotas
+local DadosPage = new("Frame", {
+    Size = UDim2.new(1, 0, 1, -74),
+    Position = UDim2.new(0, 0, 0, 68),
+    BackgroundTransparency = 1,
+    Visible = false,
+}, MainFrame)
+
+local CountLabel = new("TextLabel", {
+    Size = UDim2.new(1, -16, 0, 14),
+    Position = UDim2.new(0, 8, 0, 0),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamMedium,
+    Text = "",
+    TextColor3 = C.TextDim,
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, DadosPage)
+
+local DataScroll = new("ScrollingFrame", {
+    Size = UDim2.new(1, -16, 1, -20),
+    Position = UDim2.new(0, 8, 0, 18),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = C.Accent,
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
+    Active = true,
+}, DadosPage)
+
+local DataLayout = new("UIListLayout", {
+    Padding = UDim.new(0, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, DataScroll)
+
+track(DataLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    DataScroll.CanvasSize = UDim2.new(0, 0, 0, DataLayout.AbsoluteContentSize.Y + 6)
+end))
+
+-- pagina creditos
+local CredPage = new("Frame", {
+    Size = UDim2.new(1, 0, 1, -74),
+    Position = UDim2.new(0, 0, 0, 68),
+    BackgroundTransparency = 1,
+    Visible = false,
+}, MainFrame)
+
+local CredCard = new("Frame", {
+    Size = UDim2.new(1, -16, 0, 150),
+    Position = UDim2.new(0, 8, 0, 0),
+    BackgroundColor3 = C.Bg2,
+    BorderSizePixel = 0,
+}, CredPage)
+corner(CredCard, 9)
+stroke(CredCard, C.Bg3, 1)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 14),
+    Position = UDim2.new(0, 10, 0, 10),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = "Criador",
+    TextColor3 = C.TextDim,
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, CredCard)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 20),
+    Position = UDim2.new(0, 10, 0, 26),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = "Angel",
+    TextColor3 = C.AccentHi,
+    TextSize = 16,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, CredCard)
+
+new("Frame", {
+    Size = UDim2.new(1, -20, 0, 1),
+    Position = UDim2.new(0, 10, 0, 56),
+    BackgroundColor3 = C.Bg3,
+    BorderSizePixel = 0,
+}, CredCard)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 14),
+    Position = UDim2.new(0, 10, 0, 64),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = "Aviso",
+    TextColor3 = C.Amber,
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, CredCard)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 74),
+    Position = UDim2.new(0, 10, 0, 80),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamMedium,
+    Text = "Este script é totalmente destinado à equipe administrativa do drip menu. Proibido qualquer vazamento do script!",
+    TextColor3 = C.Text,
+    TextSize = 11,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+}, CredCard)
+
+-- cronometro -------------------------------------------------------------
+
+local timerStartTime, timerFrozen, timerRunning, timerConnection = 0, 0, false, nil
+
+local function formatTime(t)
+    if t < 0 then t = 0 end
+    local mins = math.floor(t / 60)
+    local secs = t - mins * 60
+    return string.format("%02d:%06.3f", mins, secs)
+end
+
+local function updateTimerDisplay()
+    local elapsed = timerRunning and (os.clock() - timerStartTime) or timerFrozen
+    TimerLabel.Text = formatTime(elapsed)
+end
+
+local function startTimer()
+    timerStartTime = os.clock()
+    timerRunning = true
+    timerFrozen = 0
+    if timerConnection then timerConnection:Disconnect() end
+    timerConnection = RunService.RenderStepped:Connect(updateTimerDisplay)
+    TimerStroke.Color = C.Accent
+    TimerLabel.TextColor3 = C.Text
+end
+
+local function stopTimer()
+    if timerRunning then timerFrozen = os.clock() - timerStartTime end
+    timerRunning = false
+    if timerConnection then timerConnection:Disconnect() timerConnection = nil end
+    updateTimerDisplay()
+    TimerStroke.Color = C.Amber
+    TimerLabel.TextColor3 = Color3.fromRGB(255, 226, 170)
+end
+
+-- arrastar ---------------------------------------------------------------
+
+local function makeDraggable(handle, target, onTap)
+    local dragging, startInput, dragStart, startPos, moved, t0 = false, nil, nil, nil, false, 0
+
+    track(handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            moved = false
+            startInput = input
+            dragStart = input.Position
+            startPos = target.Position
+            t0 = os.clock()
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if onTap and not moved and (os.clock() - t0) < 0.4 then onTap() end
+                end
+            end)
+        end
+    end))
+
+    track(UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input == startInput or input.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = input.Position - dragStart
+            if d.Magnitude > 6 then moved = true end
+            if moved then
+                target.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y
+                )
+            end
+        end
+    end))
+end
+
+makeDraggable(FloatButton, FloatButton, function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+makeDraggable(TitleBar, MainFrame, nil)
+
+track(CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+end))
+
+-- abas -------------------------------------------------------------------
+
+local refreshDataList
+
+local function switchTab(tab)
+    RotaPage.Visible = tab == "rota"
+    DadosPage.Visible = tab == "dados"
+    CredPage.Visible = tab == "cred"
+    local list = { { TabRota, "rota" }, { TabDados, "dados" }, { TabCred, "cred" } }
+    for _, t in ipairs(list) do
+        local on = t[2] == tab
+        t[1].BackgroundColor3 = on and C.AccentDark or C.Bg2
+        t[1].TextColor3 = on and C.Text or C.TextDim
+    end
+    if tab == "dados" then refreshDataList() end
+end
+
+track(TabRota.MouseButton1Click:Connect(function() switchTab("rota") end))
+track(TabDados.MouseButton1Click:Connect(function() switchTab("dados") end))
+track(TabCred.MouseButton1Click:Connect(function() switchTab("cred") end))
+
+-- gravar e reproduzir ----------------------------------------------------
+
+local recordedData = {}
+local isRecording = false
+local recordingConnection = nil
+local playbackConnection = nil
+local noclipConnection = nil
+local playingBusy = false
+local playToken = 0
+local startTime = 0
+local antigravidade = nil
+local originalCollides = {}
+local activeTracks = {}
+
+local trackCache = {}
+local trackCacheOwner = nil
+local ownedSet = {}
+
+local playHum, playHrp = nil, nil
+local disabledAnimate = nil
+local savedWalkSpeed = nil
+local savedPlatformStand = nil
+
+local DEFAULT_WALKSPEED = 16
+local APPROACH_MAX = 80      -- acima disso teleporta pro início em vez de andar
+local SWEEP_INTERVAL = 0.08  -- intervalo pra parar animações do próprio jogo durante o replay
+local RESYNC_THRESHOLD = 0.2 -- diferença (s) pra ressincronizar o tempo da animação
+
+local prioCache = {}
+local function prio(name)
+    local key = name or "Movement"
+    local p = prioCache[key]
+    if p then return p end
+    local ok, e = pcall(function() return Enum.AnimationPriority[key] end)
+    p = (ok and e) or Enum.AnimationPriority.Movement
+    prioCache[key] = p
+    return p
+end
+
+local function getAnimator(hum)
+    local a = hum:FindFirstChildOfClass("Animator")
+    if not a and hum.Parent then
+        a = hum.Parent:FindFirstChildWhichIsA("Animator", true)
+    end
+    if not a then
+        a = Instance.new("Animator")
+        a.Parent = hum
+    end
+    return a
+end
+
+-- carrega a track uma vez só e reaproveita (evita criar track nova toda hora)
+local function getTrack(animator, id)
+    if trackCacheOwner ~= animator then
+        trackCache = {}
+        ownedSet = {}
+        trackCacheOwner = animator
+    end
+    local t = trackCache[id]
+    if t ~= nil then return t or nil end
+    local anim = Instance.new("Animation")
+    anim.AnimationId = id
+    local ok, tr = pcall(function() return animator:LoadAnimation(anim) end)
+    if ok and tr then
+        trackCache[id] = tr
+        ownedSet[tr] = true
+        return tr
+    end
+    trackCache[id] = false
+    return nil
+end
+
+-- pré-carrega todas as animações da rota ANTES de começar (evita travadas)
+local function preloadRoute(animator, data, token)
+    local needed, list, n = {}, {}, 0
+    for _, p in ipairs(data) do
+        if p.Animations then
+            for _, a in ipairs(p.Animations) do
+                local id = a.Id
+                if id and id ~= "" and not needed[id] then
+                    needed[id] = true
+                    n = n + 1
+                    local anim = Instance.new("Animation")
+                    anim.AnimationId = id
+                    table.insert(list, anim)
+                end
+            end
+        end
+    end
+    if n == 0 then return true end
+
+    setStatus("Carregando " .. n .. " animações...", "play")
+
+    local done = false
+    task.spawn(function()
+        pcall(function() ContentProvider:PreloadAsync(list) end)
+        done = true
+    end)
+    local t0 = os.clock()
+    while not done and os.clock() - t0 < 6 do
+        task.wait(0.05)
+        if token ~= playToken then return false end
     end
 
-    playConn = RunService.RenderStepped:Connect(function()
-        if not hrp.Parent or hum.Health <= 0 then return fim() end
-        local elap = os.clock() - pStart
-        while idx < total and elap >= dados[idx + 1].Time do idx += 1 end
-        if idx >= total then return fim() end
+    local loaded = {}
+    for id in pairs(needed) do
+        local tr = getTrack(animator, id)
+        if tr then table.insert(loaded, tr) end
+    end
 
-        local t0, t1 = dados[idx].Time, dados[idx + 1].Time
-        local alpha = (t1 > t0) and math.clamp((elap - t0) / (t1 - t0), 0, 1) or 1
-        hrp.CFrame = cfs[idx]:Lerp(cfs[idx + 1], alpha)
+    t0 = os.clock()
+    for _, tr in ipairs(loaded) do
+        while tr.Length == 0 and os.clock() - t0 < 4 do
+            task.wait(0.05)
+            if token ~= playToken then return false end
+        end
+    end
+
+    for _, a in ipairs(list) do a:Destroy() end
+    return true
+end
+
+local function stopPlayback()
+    playToken = playToken + 1
+    if playbackConnection then
+        playbackConnection:Disconnect()
+        playbackConnection = nil
+    end
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    playingBusy = false
+
+    for _, tr in pairs(activeTracks) do
+        pcall(function() tr:Stop(0.1) end)
+    end
+    table.clear(activeTracks)
+
+    if antigravidade then antigravidade:Destroy() antigravidade = nil end
+
+    for parte, status in pairs(originalCollides) do
+        if parte and parte.Parent then parte.CanCollide = status end
+    end
+    table.clear(originalCollides)
+
+    if playHum and playHum.Parent then
+        if savedWalkSpeed then playHum.WalkSpeed = savedWalkSpeed end
+        playHum.AutoRotate = true
+        if savedPlatformStand ~= nil then playHum.PlatformStand = savedPlatformStand end
+    end
+    savedWalkSpeed = nil
+    savedPlatformStand = nil
+
+    if playHrp and playHrp.Parent then
+        playHrp.AssemblyLinearVelocity = Vector3.zero
+        playHrp.AssemblyAngularVelocity = Vector3.zero
+    end
+
+    if disabledAnimate and disabledAnimate.Parent then
+        pcall(function() disabledAnimate.Disabled = false end)
+    end
+    disabledAnimate = nil
+    playHum, playHrp = nil, nil
+end
+
+local function playRoute(data)
+    if #data == 0 then setStatus("Nada gravado", "warn") return end
+    if playingBusy or playbackConnection then
+        stopPlayback()
+        stopTimer()
+        setStatus("Cancelado", "warn")
+        return
+    end
+    playingBusy = true
+    playToken = playToken + 1
+    local token = playToken
+
+    task.spawn(function()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then
+            playingBusy = false
+            setStatus("Sem personagem", "warn")
+            return
+        end
+        playHum, playHrp = hum, hrp
+
+        local animator = getAnimator(hum)
+
+        if not preloadRoute(animator, data, token) then return end
+        if token ~= playToken then return end
+        local cache = trackCache
+
+        local total = #data
+        local cfs = table.create(total)
+        for i = 1, total do cfs[i] = CFrame.new(table.unpack(data[i].CF)) end
+
+        -- anda até o início (com a animação normal do jogo); se estiver longe, teleporta
+        local startPos = cfs[1].Position
+        local flat = Vector3.new(hrp.Position.X - startPos.X, 0, hrp.Position.Z - startPos.Z).Magnitude
+        if flat > 3 and flat <= APPROACH_MAX then
+            setStatus("Indo para o início...", "play")
+            savedWalkSpeed = hum.WalkSpeed
+            if hum.WalkSpeed < 8 then hum.WalkSpeed = DEFAULT_WALKSPEED end
+            hum:MoveTo(startPos)
+            local t0 = os.clock()
+            while os.clock() - t0 < 6 do
+                task.wait(0.05)
+                if token ~= playToken then return end
+                local cur = hrp.Position
+                if Vector3.new(cur.X - startPos.X, 0, cur.Z - startPos.Z).Magnitude < 2.5 then break end
+            end
+            if token ~= playToken then return end
+            hum.WalkSpeed = savedWalkSpeed
+            savedWalkSpeed = nil
+        end
+
+        -- assume o controle do personagem
+        local animateScript = char:FindFirstChild("Animate")
+        if animateScript and animateScript:IsA("BaseScript") then
+            animateScript.Disabled = true
+            disabledAnimate = animateScript
+        end
+        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+            if not ownedSet[t] then pcall(function() t:Stop(0.05) end) end
+        end
+
+        savedPlatformStand = hum.PlatformStand
+        hum.AutoRotate = false
+        hum.PlatformStand = true
+
+        local parts = {}
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BasePart") then
+                originalCollides[d] = d.CanCollide
+                d.CanCollide = false
+                table.insert(parts, d)
+            end
+        end
+        noclipConnection = RunService.Stepped:Connect(function()
+            for i = 1, #parts do
+                local p = parts[i]
+                if p.CanCollide then p.CanCollide = false end
+            end
+        end)
+
+        antigravidade = Instance.new("BodyForce")
+        antigravidade.Force = Vector3.new(0, hrp.AssemblyMass * workspace.Gravity, 0)
+        antigravidade.Parent = hrp
+
+        hrp.CFrame = cfs[1]
         hrp.AssemblyLinearVelocity = Vector3.zero
         hrp.AssemblyAngularVelocity = Vector3.zero
 
-        -- velocidade horizontal numa janela de ~0.15s
-        local j = idx
-        while j < total and dados[j].Time - t0 < 0.15 do j += 1 end
-        local dt = dados[j].Time - t0
-        local v = 0
-        if dt > 0 then
-            local d = cfs[j].Position - cfs[idx].Position
-            v = Vector3.new(d.X, 0, d.Z).Magnitude / dt
+        local pstartTime = os.clock()
+        local currentIndex = 1
+        local lastSweep = 0
+        local wantedNow = {}
+        table.clear(activeTracks)
+
+        setStatus("Reproduzindo...", "play")
+        startTimer()
+
+        playbackConnection = RunService.RenderStepped:Connect(function()
+            if not hrp.Parent or hum.Health <= 0 then
+                stopPlayback()
+                stopTimer()
+                setStatus("Interrompido", "warn")
+                return
+            end
+
+            local now = os.clock()
+            local elapsedTime = now - pstartTime
+
+            local idx = currentIndex
+            while idx < total and elapsedTime >= data[idx + 1].Time do
+                idx = idx + 1
+            end
+            currentIndex = idx
+
+            if idx >= total then
+                hrp.CFrame = cfs[total]
+                stopPlayback()
+                stopTimer()
+                setStatus(string.format("Concluído em %.2fs", timerFrozen), "ok")
+                return
+            end
+
+            local p0 = data[idx]
+            local p1 = data[idx + 1]
+            local span = p1.Time - p0.Time
+            local alpha = (span > 0) and math.clamp((elapsedTime - p0.Time) / span, 0, 1) or 1
+
+            -- posição: sem velocidade (senão a física move o personagem de novo e treme)
+            hrp.CFrame = cfs[idx]:Lerp(cfs[idx + 1], alpha)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+
+            -- animações
+            local anims = p0.Animations
+            if anims then
+                table.clear(wantedNow)
+                for _, a in ipairs(anims) do
+                    local id = a.Id
+                    local tr = id and cache[id]
+                    if tr then
+                        wantedNow[id] = true
+                        local w = a.Weight or 1
+                        local sp = a.Speed or 1
+                        if not activeTracks[id] then
+                            tr.Priority = prio(a.Priority)
+                            tr.Looped = (a.Looped ~= false)
+                            tr:Play(0, math.max(w, 0.001), sp)
+                            if a.Pos then tr.TimePosition = a.Pos end
+                            activeTracks[id] = tr
+                        elseif tr.IsPlaying then
+                            if math.abs(tr.WeightTarget - w) > 0.02 then tr:AdjustWeight(w, 0) end
+                            if math.abs(tr.Speed - sp) > 0.01 then tr:AdjustSpeed(sp) end
+                            if a.Pos and tr.Length > 0 then
+                                local d = math.abs(tr.TimePosition - a.Pos)
+                                if tr.Looped then d = math.min(d, tr.Length - d) end
+                                if d > RESYNC_THRESHOLD then tr.TimePosition = a.Pos end
+                            end
+                        end
+                    end
+                end
+                for id, tr in pairs(activeTracks) do
+                    if not wantedNow[id] then
+                        tr:Stop(0.05)
+                        activeTracks[id] = nil
+                    end
+                end
+            end
+
+            -- impede que as animações do próprio jogo (correr/agachar/idle) briguem com o replay
+            if now - lastSweep >= SWEEP_INTERVAL then
+                lastSweep = now
+                for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
+                    if not ownedSet[t] then t:Stop(0) end
+                end
+            end
+        end)
+    end)
+end
+
+local function resetRecordButton()
+    RecordBtn.Text = "Gravar"
+    RecordBtn.BackgroundColor3 = C.Accent
+end
+
+local function finishRecording()
+    isRecording = false
+    if recordingConnection then
+        recordingConnection:Disconnect()
+        recordingConnection = nil
+    end
+    stopTimer()
+    resetRecordButton()
+    setStatus(string.format("%.2fs  |  %d pts  |  %d anims", timerFrozen, #recordedData, countAnims(recordedData)), "ok")
+end
+
+track(RecordBtn.MouseButton1Click:Connect(function()
+    if isRecording then
+        finishRecording()
+        return
+    end
+
+    if playbackConnection or playingBusy then stopPlayback() end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then
+        setStatus("Sem personagem", "warn")
+        return
+    end
+    local animator = getAnimator(hum)
+
+    isRecording = true
+    recordedData = {}
+    startTime = os.clock()
+    startTimer()
+    RecordBtn.Text = "Parar"
+    RecordBtn.BackgroundColor3 = C.Red
+    setStatus("Gravando...", "rec")
+
+    local lastNameTick = 0
+    local frameSeen = {}
+
+    recordingConnection = RunService.Heartbeat:Connect(function()
+        if not hrp.Parent or not hum.Parent then
+            finishRecording()
+            return
         end
 
-        if trackAndar then
-            if v < 1 then
-                if trackAndar.IsPlaying then trackAndar:Stop(0.15) end
-            else
-                if not trackAndar.IsPlaying then trackAndar:Play(0.15) end
-                local alvo = math.clamp(v / 14.5, 0.3, 3) -- 14.5 = base do walk R6
-                animSpeed += (alvo - animSpeed) * 0.2
-                trackAndar:AdjustSpeed(animSpeed)
+        local currentTime = os.clock() - startTime
+        local cf = hrp.CFrame
+        local vel = hrp.AssemblyLinearVelocity
+
+        local wantNames = (currentTime - lastNameTick) >= 0.25
+        local names = nil
+        if wantNames then
+            lastNameTick = currentTime
+            names = {}
+        end
+
+        -- detecta TODAS as animações tocando agora (andar, correr, agachar, pular, ferramentas...)
+        local anims = {}
+        table.clear(frameSeen)
+        for _, trackObj in ipairs(animator:GetPlayingAnimationTracks()) do
+            local a = trackObj.Animation
+            local weight = trackObj.WeightCurrent
+            if a and weight > 0.001 then
+                local id = a.AnimationId
+                if id ~= "" and not frameSeen[id] then
+                    frameSeen[id] = true
+                    table.insert(anims, {
+                        Id = id,
+                        Speed = trackObj.Speed,
+                        Weight = weight,
+                        Priority = trackObj.Priority.Name,
+                        Pos = trackObj.TimePosition,
+                        Looped = trackObj.Looped,
+                    })
+                    if names then
+                        local nm = a.Name
+                        if nm == "" then nm = id:match("%d+") or "?" end
+                        table.insert(names, nm)
+                    end
+                end
             end
         end
+
+        table.insert(recordedData, {
+            Time = currentTime,
+            CF = { cf:GetComponents() },
+            Velocity = { vel.X, vel.Y, vel.Z },
+            State = hum:GetState().Name,
+            Animations = anims,
+        })
+
+        if names then
+            local txt = string.format("Gravando | %d anim", #names)
+            if #names > 0 then txt = txt .. ": " .. table.concat(names, ", ") end
+            setStatus(txt, "rec")
+        end
     end)
-end
+end))
 
-local function atualizarLista()
-    if not SalvarList then return end
-    for _, c in ipairs(SalvarList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
-    for i, r in ipairs(rotas) do
-        local item = Instance.new("Frame", SalvarList)
-        item.Size, item.BackgroundColor3, item.BorderSizePixel = UDim2.new(1, -10, 0, 65), Color3.fromRGB(20, 25, 30), 0
-        Instance.new("UICorner", item).CornerRadius = UDim.new(0, 6)
-        local st = Instance.new("UIStroke", item); st.Color = Color3.fromRGB(0, 255, 200)
-        local n = Instance.new("TextLabel", item)
-        n.Size, n.Position, n.BackgroundTransparency = UDim2.new(1, -10, 0, 20), UDim2.new(0, 5, 0, 5), 1
-        n.Text, n.TextColor3, n.Font, n.TextSize, n.TextXAlignment = r.Nome, Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 12, Enum.TextXAlignment.Left
-        local del = Instance.new("TextButton", item)
-        del.Size, del.Position, del.BackgroundColor3 = UDim2.new(0, 60, 0, 20), UDim2.new(1, -65, 0, 5), Color3.fromRGB(200, 0, 0)
-        del.Text, del.TextColor3, del.Font, del.TextSize = "Excluir", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 10
-        Instance.new("UICorner", del).CornerRadius = UDim.new(0, 4)
-        local exec = Instance.new("TextButton", item)
-        exec.Size, exec.Position, exec.BackgroundColor3 = UDim2.new(0.5, -5, 0, 25), UDim2.new(0, 5, 0, 30), Color3.fromRGB(0, 150, 130)
-        exec.Text, exec.TextColor3, exec.Font, exec.TextSize = "Executar", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 10
-        Instance.new("UICorner", exec).CornerRadius = UDim.new(0, 4)
-        local show = Instance.new("TextButton", item)
-        show.Size, show.Position, show.BackgroundColor3 = UDim2.new(0.5, -5, 0, 25), UDim2.new(0.5, 0, 0, 30), Color3.fromRGB(100, 30, 200)
-        show.Text, show.TextColor3, show.Font, show.TextSize = "Mostrar", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 10
-        Instance.new("UICorner", show).CornerRadius = UDim.new(0, 4)
-        exec.MouseButton1Click:Connect(function() _G.PlayRota(r.Dados) end)
-        show.MouseButton1Click:Connect(function() desenhar(r.Dados, r.Nome) end)
-        del.MouseButton1Click:Connect(function() table.remove(rotas, i) salvarDisco() atualizarLista() end)
+track(TestBtn.MouseButton1Click:Connect(function()
+    if isRecording then setStatus("Pare a gravação antes", "warn") return end
+    if #recordedData == 0 then setStatus("Nada gravado", "warn") return end
+    playRoute(recordedData)
+end))
+
+-- popup de salvar --------------------------------------------------------
+
+local RenamePopup = new("Frame", {
+    Size = UDim2.new(0, 200, 0, 98),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    BackgroundColor3 = C.Bg,
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 10,
+    Active = true,
+}, ScreenGui)
+corner(RenamePopup, 12)
+stroke(RenamePopup, C.Violet, 1.5)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -20, 0, 20),
+    Position = UDim2.new(0, 10, 0, 7),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamBold,
+    Text = "Nome da rota",
+    TextColor3 = C.Text,
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 11,
+}, RenamePopup)
+
+local RenameBox = new("TextBox", {
+    Size = UDim2.new(1, -20, 0, 26),
+    Position = UDim2.new(0, 10, 0, 30),
+    BackgroundColor3 = C.Bg2,
+    BorderSizePixel = 0,
+    Font = Enum.Font.Gotham,
+    Text = "",
+    PlaceholderText = "rota_1",
+    PlaceholderColor3 = C.TextDim,
+    TextColor3 = C.Text,
+    TextSize = 12,
+    ClearTextOnFocus = false,
+    ZIndex = 11,
+}, RenamePopup)
+corner(RenameBox, 7)
+
+local RenameOK = makeButton(RenamePopup, "Salvar", C.Violet, C.Text,
+    UDim2.new(0.5, -14, 0, 26), UDim2.new(0, 10, 0, 63), 12)
+RenameOK.ZIndex = 11
+local RenameCancel = makeButton(RenamePopup, "Cancelar", C.Bg3, C.Text,
+    UDim2.new(0.5, -14, 0, 26), UDim2.new(0.5, 4, 0, 63), 12)
+RenameCancel.ZIndex = 11
+
+track(SaveRenameBtn.MouseButton1Click:Connect(function()
+    if isRecording then setStatus("Pare a gravação antes", "warn") return end
+    if #recordedData == 0 then setStatus("Nada gravado", "warn") return end
+    RenameBox.Text = "rota_" .. os.date("%H%M%S")
+    RenamePopup.Visible = true
+    RenameBox:CaptureFocus()
+end))
+
+track(RenameCancel.MouseButton1Click:Connect(function()
+    RenamePopup.Visible = false
+end))
+
+track(RenameOK.MouseButton1Click:Connect(function()
+    local name = RenameBox.Text
+    if name == "" then name = "rota_" .. os.date("%H%M%S") end
+
+    local baseName, counter = name, 2
+    local function fileFor(n) return FOLDER .. "/" .. safeName(n) .. ".json" end
+    local function taken(n)
+        if savedRoutes[n] then return true end
+        if canFS then
+            local ok, exists = pcall(function() return isfile(fileFor(n)) end)
+            if ok and exists then return true end
+        end
+        return false
     end
-end
+    while taken(name) do
+        name = baseName .. "_" .. counter
+        counter = counter + 1
+    end
 
-local sg = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-sg.Name, sg.ResetOnSpawn = "JpRec", false
-local openB = Instance.new("TextButton", sg)
-openB.Size, openB.Position, openB.BackgroundColor3 = UDim2.new(0, 40, 0, 40), UDim2.new(0, 20, 0.5, -20), Color3.fromRGB(15, 20, 25)
-openB.Text, openB.TextColor3, openB.Font, openB.TextSize = "⚡", Color3.fromRGB(0, 255, 200), Enum.Font.GothamBold, 20
-openB.Visible = false
-Instance.new("UICorner", openB).CornerRadius = UDim.new(0, 20)
-local osb = Instance.new("UIStroke", openB); osb.Color = Color3.fromRGB(0, 255, 200)
+    local entry = {
+        Duracao = timerFrozen,
+        Pontos = #recordedData,
+        Data = recordedData,
+        Anims = countAnims(recordedData),
+        File = fileFor(name),
+    }
+    savedRoutes[name] = entry
+    RenamePopup.Visible = false
 
-local mf = Instance.new("Frame", sg)
-mf.Size, mf.Position, mf.BackgroundColor3, mf.BorderSizePixel, mf.Active, mf.Draggable = UDim2.new(0, 250, 0, 300), UDim2.new(0.5, -125, 0.5, -150), Color3.fromRGB(15, 20, 25), 0, true, true
-Instance.new("UICorner", mf).CornerRadius = UDim.new(0, 10)
-local msb = Instance.new("UIStroke", mf); msb.Color, msb.Thickness = Color3.fromRGB(0, 255, 200), 1.5
-
-local tb = Instance.new("Frame", mf)
-tb.Size, tb.BackgroundColor3, tb.BorderSizePixel = UDim2.new(1, 0, 0, 35), Color3.fromRGB(20, 25, 30), 0
-Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 10)
-local title = Instance.new("TextLabel", tb)
-title.Size, title.Position, title.BackgroundTransparency, title.Font = UDim2.new(1, -80, 1, 0), UDim2.new(0, 10, 0, 0), 1, Enum.Font.GothamBold
-title.Text, title.TextColor3, title.TextSize, title.TextXAlignment = "JPLOFY RECORDER", Color3.fromRGB(255, 255, 255), 12, Enum.TextXAlignment.Left
-local minB = Instance.new("TextButton", tb)
-minB.Size, minB.Position, minB.BackgroundColor3 = UDim2.new(0, 25, 0, 25), UDim2.new(1, -60, 0, 5), Color3.fromRGB(250, 192, 84)
-minB.Text, minB.TextColor3, minB.Font, minB.TextSize = "-", Color3.fromRGB(0, 0, 0), Enum.Font.GothamBold, 16
-Instance.new("UICorner", minB).CornerRadius = UDim.new(0, 6)
-local clsB = Instance.new("TextButton", tb)
-clsB.Size, clsB.Position, clsB.BackgroundColor3 = UDim2.new(0, 25, 0, 25), UDim2.new(1, -30, 0, 5), Color3.fromRGB(232, 72, 92)
-clsB.Text, clsB.TextColor3, clsB.Font, clsB.TextSize = "X", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 10
-Instance.new("UICorner", clsB).CornerRadius = UDim.new(0, 6)
-
-local tabF = Instance.new("Frame", mf)
-tabF.Size, tabF.Position, tabF.BackgroundTransparency = UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 45), 1
-local tGB = Instance.new("TextButton", tabF)
-tGB.Size, tGB.BackgroundColor3, tGB.Text, tGB.TextColor3, tGB.Font, tGB.TextSize = UDim2.new(0.5, -5, 1, 0), Color3.fromRGB(0, 150, 130), "Gravar Rota", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 11
-Instance.new("UICorner", tGB).CornerRadius = UDim.new(0, 6)
-local tSB = Instance.new("TextButton", tabF)
-tSB.Size, tSB.Position, tSB.BackgroundColor3 = UDim2.new(0.5, -5, 1, 0), UDim2.new(0.5, 5, 0, 0), Color3.fromRGB(30, 40, 50)
-tSB.Text, tSB.TextColor3, tSB.Font, tSB.TextSize = "Salvamentos", Color3.fromRGB(200, 200, 200), Enum.Font.GothamBold, 11
-Instance.new("UICorner", tSB).CornerRadius = UDim.new(0, 6)
-
-local gC = Instance.new("Frame", mf)
-gC.Size, gC.Position, gC.BackgroundTransparency = UDim2.new(1, -20, 1, -85), UDim2.new(0, 10, 0, 85), 1
-local tF = Instance.new("Frame", gC)
-tF.Size, tF.BackgroundColor3, tF.BorderSizePixel = UDim2.new(1, 0, 0, 50), Color3.fromRGB(10, 15, 20), 0
-Instance.new("UICorner", tF).CornerRadius = UDim.new(0, 6)
-local tFS = Instance.new("UIStroke", tF); tFS.Color = Color3.fromRGB(0, 255, 200)
-local tL = Instance.new("TextLabel", tF)
-tL.Size, tL.BackgroundTransparency, tL.Font, tL.Text, tL.TextColor3, tL.TextSize = UDim2.new(1, 0, 1, 0), 1, Enum.Font.Code, "00:00.000", Color3.fromRGB(0, 255, 200), 22
-local gB = Instance.new("TextButton", gC)
-gB.Size, gB.Position, gB.BackgroundColor3 = UDim2.new(1, 0, 0, 35), UDim2.new(0, 0, 0, 60), Color3.fromRGB(0, 130, 110)
-gB.Text, gB.TextColor3, gB.Font, gB.TextSize = "Iniciar Gravação", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 11
-Instance.new("UICorner", gB).CornerRadius = UDim.new(0, 6)
-local sB = Instance.new("TextButton", gC)
-sB.Size, sB.Position, sB.BackgroundColor3 = UDim2.new(1, 0, 0, 35), UDim2.new(0, 0, 0, 105), Color3.fromRGB(100, 30, 200)
-sB.Text, sB.TextColor3, sB.Font, sB.TextSize = "Salvar Rota", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 11
-Instance.new("UICorner", sB).CornerRadius = UDim.new(0, 6)
-
-SalvarList = Instance.new("ScrollingFrame", mf)
-SalvarList.Size, SalvarList.Position, SalvarList.BackgroundTransparency = UDim2.new(1, -20, 1, -85), UDim2.new(0, 10, 0, 85), 1
-SalvarList.Visible, SalvarList.CanvasSize, SalvarList.AutomaticCanvasSize, SalvarList.ScrollBarThickness = false, UDim2.new(0, 0, 0, 0), Enum.AutomaticSize.Y, 4
-
-tGB.MouseButton1Click:Connect(function() gC.Visible = true SalvarList.Visible = false tGB.BackgroundColor3 = Color3.fromRGB(0, 150, 130) tSB.BackgroundColor3 = Color3.fromRGB(30, 40, 50) end)
-tSB.MouseButton1Click:Connect(function() gC.Visible = false SalvarList.Visible = true tGB.BackgroundColor3 = Color3.fromRGB(30, 40, 50) tSB.BackgroundColor3 = Color3.fromRGB(0, 150, 130) end)
-minB.MouseButton1Click:Connect(function() mf.Visible = false openB.Visible = true end)
-clsB.MouseButton1Click:Connect(function() sg:Destroy() end)
-openB.MouseButton1Click:Connect(function() mf.Visible = true openB.Visible = false end)
-
-gB.MouseButton1Click:Connect(function()
-    if playConn then playConn:Disconnect() playConn = nil local h = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") if h then h.AutoRotate = true h.WalkSpeed = 16 end PararAnim() end
-    gravando = not gravando
-    if gravando then
-        data = {} startTime = os.clock() gB.Text = "Parar Gravação" gB.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        gravConn = RunService.Heartbeat:Connect(function() table.insert(data, {Time = os.clock() - startTime, CF = {hrp.CFrame:GetComponents()}}) end)
-        timeConn = RunService.Heartbeat:Connect(function() local t = os.clock() - startTime tL.Text = string.format("%02d:%02d.%03d", math.floor(t / 60), math.floor(t % 60), math.floor((t % 1) * 1000)) end)
+    if canFS then
+        if saveToDisk(name, entry) then
+            setStatus("Salva: " .. name, "ok")
+        else
+            setStatus("Falha ao gravar arquivo", "warn")
+        end
     else
-        if gravConn then gravConn:Disconnect() end
-        if timeConn then timeConn:Disconnect() end
-        gB.Text = "Iniciar Gravação" gB.BackgroundColor3 = Color3.fromRGB(0, 130, 110)
+        setStatus("Salva só nesta sessão", "warn")
     end
-end)
+    switchTab("dados")
+end))
 
-sB.MouseButton1Click:Connect(function()
-    if #data < 2 then return end
-    local pg = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
-    local pf = Instance.new("Frame", pg)
-    pf.Size, pf.Position, pf.BackgroundColor3 = UDim2.new(0, 200, 0, 100), UDim2.new(0.5, -100, 0.5, -50), Color3.fromRGB(20, 25, 30)
-    pf.Parent = pg
-    Instance.new("UICorner", pf).CornerRadius = UDim.new(0, 8)
-    local ps = Instance.new("UIStroke", pf); ps.Color = Color3.fromRGB(0, 255, 200)
-    local l = Instance.new("TextLabel", pf)
-    l.Size, l.BackgroundTransparency, l.Text, l.TextColor3, l.Font, l.TextSize = UDim2.new(1, 0, 0, 25), 1, "Nome da Rota:", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 11
-    local txt = Instance.new("TextBox", pf)
-    txt.Size, txt.Position, txt.BackgroundColor3 = UDim2.new(1, -20, 0, 30), UDim2.new(0, 10, 0, 30), Color3.fromRGB(35, 45, 55)
-    txt.TextColor3, txt.PlaceholderText, txt.Font, txt.TextSize = Color3.fromRGB(255, 255, 255), "Ex: Parkour 1", Enum.Font.Gotham, 12
-    Instance.new("UICorner", txt).CornerRadius = UDim.new(0, 4)
-    local cb = Instance.new("TextButton", pf)
-    cb.Size, cb.Position, cb.BackgroundColor3 = UDim2.new(1, -20, 0, 25), UDim2.new(0, 10, 0, 65), Color3.fromRGB(0, 150, 130)
-    cb.Text, cb.TextColor3, cb.Font, cb.TextSize = "Confirmar", Color3.fromRGB(255, 255, 255), Enum.Font.GothamBold, 11
-    Instance.new("UICorner", cb).CornerRadius = UDim.new(0, 4)
-    cb.MouseButton1Click:Connect(function()
-        local n = txt.Text
-        if n == "" then n = "Rota" end
-        table.insert(rotas, {Nome = n, Dados = data})
-        salvarDisco() atualizarLista() pg:Destroy()
-    end)
-end)
+-- lista de rotas ---------------------------------------------------------
 
-atualizarLista()
+local function buildCopyText(name, entry)
+    local lines = { string.format("-- drip admin | %s | %.3fs\nreturn {", name, entry.Duracao) }
+    for _, node in ipairs(entry.Data) do
+        local cfStr = table.concat(node.CF, ", ")
+        local vel = node.Velocity or { 0, 0, 0 }
+        local velStr = table.concat(vel, ", ")
+        local stateName = "Running"
+        if typeof(node.State) == "EnumItem" then stateName = node.State.Name
+        elseif type(node.State) == "string" then stateName = node.State end
+        local parts = {}
+        for _, a in ipairs(node.Animations or {}) do
+            table.insert(parts, string.format(
+                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\",Pos=%.3f,Looped=%s}",
+                a.Id, a.Speed or 1, a.Weight or 1, a.Priority or "Movement", a.Pos or 0,
+                tostring(a.Looped ~= false)))
+        end
+        table.insert(lines, string.format(
+            "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s,Animations={%s}},",
+            node.Time, cfStr, velStr, stateName, table.concat(parts, ",")))
+    end
+    table.insert(lines, "}")
+    return table.concat(lines, "\n")
+end
+
+refreshDataList = function()
+    for _, child in ipairs(DataScroll:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
+    end
+    local names = {}
+    for n in pairs(savedRoutes) do table.insert(names, n) end
+    table.sort(names)
+
+    CountLabel.Text = string.format("%d rota(s)%s", #names, canFS and "  |  salvas no aparelho" or "  |  só nesta sessão")
+
+    if #names == 0 then
+        new("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 60),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamMedium,
+            Text = "Nenhuma rota salva\nGrave uma rota e toque em Salvar rota",
+            TextColor3 = C.TextDim,
+            TextSize = 11,
+            TextWrapped = true,
+        }, DataScroll)
+        return
+    end
+
+    for i, name in ipairs(names) do
+        local entry = savedRoutes[name]
+
+        local item = new("Frame", {
+            Size = UDim2.new(1, -4, 0, 64),
+            BackgroundColor3 = C.Bg2,
+            BorderSizePixel = 0,
+            LayoutOrder = i,
+        }, DataScroll)
+        corner(item, 8)
+        stroke(item, C.Bg3, 1)
+
+        new("TextLabel", {
+            Size = UDim2.new(1, -14, 0, 15),
+            Position = UDim2.new(0, 7, 0, 5),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            Text = name,
+            TextColor3 = C.Text,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+        }, item)
+
+        new("TextLabel", {
+            Size = UDim2.new(1, -14, 0, 12),
+            Position = UDim2.new(0, 7, 0, 20),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.Code,
+            Text = string.format("%.2fs | %d pts | %d anims", entry.Duracao, entry.Pontos, entry.Anims or 0),
+            TextColor3 = C.AccentHi,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+        }, item)
+
+        local row = new("Frame", {
+            Size = UDim2.new(1, -14, 0, 22),
+            Position = UDim2.new(0, 7, 0, 36),
+            BackgroundTransparency = 1,
+        }, item)
+
+        local function rowBtn(text, color, index, onClick)
+            local b = new("TextButton", {
+                Size = UDim2.new(1 / 3, -4, 1, 0),
+                Position = UDim2.new((index - 1) / 3, (index - 1) * 2, 0, 0),
+                BackgroundColor3 = color,
+                Font = Enum.Font.GothamBold,
+                Text = text,
+                TextColor3 = C.Text,
+                TextSize = 10,
+                BorderSizePixel = 0,
+                AutoButtonColor = true,
+            }, row)
+            corner(b, 6)
+            track(b.MouseButton1Click:Connect(function() onClick(b) end))
+            return b
+        end
+
+        rowBtn("Testar", C.AccentDark, 1, function()
+            if isRecording then setStatus("Pare a gravação antes", "warn") return end
+            MainFrame.Visible = true
+            playRoute(entry.Data)
+        end)
+
+        rowBtn("Copiar", C.Bg3, 2, function()
+            if setclipboard then
+                local ok = pcall(function() setclipboard(buildCopyText(name, entry)) end)
+                setStatus(ok and ("Copiado: " .. name) or "Falha ao copiar", ok and "ok" or "warn")
+            else
+                setStatus("Sem clipboard neste executor", "warn")
+            end
+        end)
+
+        local confirmAt = 0
+        rowBtn("Apagar", Color3.fromRGB(150, 44, 60), 3, function(btn)
+            if os.clock() - confirmAt < 2.5 then
+                deleteFromDisk(entry)
+                savedRoutes[name] = nil
+                setStatus("Apagada: " .. name, "warn")
+                refreshDataList()
+            else
+                confirmAt = os.clock()
+                btn.Text = "Certeza?"
+                task.delay(2.5, function()
+                    if btn and btn.Parent then btn.Text = "Apagar" end
+                end)
+            end
+        end)
+    end
+end
+
+-- respawn e limpeza ------------------------------------------------------
+
+track(LocalPlayer.CharacterAdded:Connect(function()
+    stopPlayback()
+    trackCache = {}
+    ownedSet = {}
+    trackCacheOwner = nil
+end))
+
+env.DripAdminCleanup = function()
+    stopPlayback()
+    if recordingConnection then recordingConnection:Disconnect() end
+    if timerConnection then timerConnection:Disconnect() end
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
+    end
+    if ScreenGui then ScreenGui:Destroy() end
+end
+
+-- inicio -----------------------------------------------------------------
+
+local loaded = loadAllFromDisk()
+if loaded > 0 then
+    setStatus(loaded .. " rota(s) carregada(s)", "ok")
+elseif not canFS then
+    setStatus("Sem armazenamento no executor", "warn")
+else
+    setStatus("Pronto", "idle")
+end
