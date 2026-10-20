@@ -5,7 +5,6 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-local ContentProvider = game:GetService("ContentProvider")
 local LocalPlayer = Players.LocalPlayer
 
 local env = (getgenv and getgenv()) or _G
@@ -78,7 +77,6 @@ local function compress(data)
     for i, p in ipairs(data) do
         local cf = table.create(12)
         for k, v in ipairs(p.CF) do cf[k] = rnd(v, 5) end
-        local vel = p.Velocity or { 0, 0, 0 }
         local anims = {}
         for _, a in ipairs(p.Animations or {}) do
             table.insert(anims, {
@@ -86,14 +84,13 @@ local function compress(data)
                 Speed = rnd(a.Speed or 1, 3),
                 Weight = rnd(a.Weight or 1, 3),
                 Priority = a.Priority,
-                Pos = a.Pos and rnd(a.Pos, 3) or nil,
                 Looped = a.Looped,
             })
         end
         out[i] = {
             Time = rnd(p.Time, 4),
             CF = cf,
-            Velocity = { rnd(vel[1], 3), rnd(vel[2], 3), rnd(vel[3], 3) },
+            Velocity = { rnd(p.Velocity[1], 3), rnd(p.Velocity[2], 3), rnd(p.Velocity[3], 3) },
             State = p.State,
             Animations = anims,
         }
@@ -108,7 +105,6 @@ local function saveToDisk(name, entry)
     ensureFolder()
     local ok = pcall(function()
         local json = HttpService:JSONEncode({
-            Version = 2,
             Name = name,
             Duracao = entry.Duracao,
             Pontos = entry.Pontos,
@@ -242,8 +238,8 @@ gradient(FloatButton, C.Bg3, C.Bg, 90)
 
 -- janela
 local MainFrame = new("Frame", {
-    Size = UDim2.new(0, 214, 0, 296),
-    Position = UDim2.new(0.5, -107, 0.5, -148),
+    Size = UDim2.new(0, 214, 0, 262),
+    Position = UDim2.new(0.5, -107, 0.5, -131),
     BackgroundColor3 = C.Bg,
     BorderSizePixel = 0,
     Active = true,
@@ -391,8 +387,6 @@ local TestBtn = makeButton(RotaPage, "Testar", C.Bg3, C.Text,
     UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 110), 13)
 local SaveRenameBtn = makeButton(RotaPage, "Salvar rota", C.Violet, C.Text,
     UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 146), 13)
-local ModeBtn = makeButton(RotaPage, "Modo: Leve", C.Bg3, C.Text,
-    UDim2.new(1, -16, 0, 28), UDim2.new(0, 8, 0, 184), 11)
 
 -- pagina rotas
 local DadosPage = new("Frame", {
@@ -614,43 +608,99 @@ local recordedData = {}
 local isRecording = false
 local recordingConnection = nil
 local playbackConnection = nil
-local noclipConnection = nil
 local playingBusy = false
-local playToken = 0
 local startTime = 0
 local antigravidade = nil
 local originalCollides = {}
+local animationCache = {}
+local animationCacheOwner = nil
 local activeTracks = {}
-
--- Modo Leve (padrão): mexe o mínimo possível no personagem, como um jogador normal
---   (velocidade e estado do humanoid seguem a gravação, sem PlatformStand, sem noclip em loop,
---    sem parar as animações do jogo durante o replay)
--- Modo Completo: controle total (PlatformStand, noclip em loop, bloqueia animações do jogo)
-local fullMode = false
-
-local trackCache = {}
-local trackCacheOwner = nil
-local ownedSet = {}
-
-local playHum, playHrp = nil, nil
-local disabledAnimate = nil
-local savedWalkSpeed = nil
-local savedPlatformStand = nil
+local preWalkTracks = {}
 
 local DEFAULT_WALKSPEED = 16
-local APPROACH_MAX = 80      -- acima disso teleporta pro início em vez de andar
-local SWEEP_INTERVAL = 0.08  -- (modo completo) intervalo pra parar animações do próprio jogo
-local RESYNC_THRESHOLD = 0.2 -- diferença (s) pra ressincronizar o tempo da animação
+local savedWalkSpeed = nil
 
-local prioCache = {}
-local function prio(name)
-    local key = name or "Movement"
-    local p = prioCache[key]
-    if p then return p end
-    local ok, e = pcall(function() return Enum.AnimationPriority[key] end)
-    p = (ok and e) or Enum.AnimationPriority.Movement
-    prioCache[key] = p
-    return p
+-- carrega a track uma vez só e reaproveita (antes criava uma nova a cada uso)
+local function getOrLoadTrack(animator, animationId)
+    if animationCacheOwner ~= animator then
+        animationCache = {}
+        animationCacheOwner = animator
+    end
+    local cached = animationCache[animationId]
+    if cached ~= nil then return cached or nil end
+    local anim = Instance.new("Animation")
+    anim.AnimationId = animationId
+    local ok, trackObj = pcall(function() return animator:LoadAnimation(anim) end)
+    if ok and trackObj then
+        animationCache[animationId] = trackObj
+        return trackObj
+    end
+    animationCache[animationId] = false
+    return nil
+end
+
+local function getStartAnimations(data)
+    if #data == 0 then return {} end
+    local counts = {}
+    local sampleCount = math.min(30, #data)
+    for i = 1, sampleCount do
+        local anims = data[i].Animations
+        if anims then
+            for _, a in ipairs(anims) do
+                if not counts[a.Id] then counts[a.Id] = { anim = a, count = 0 } end
+                counts[a.Id].count = counts[a.Id].count + 1
+            end
+        end
+    end
+    local result = {}
+    local threshold = math.max(2, sampleCount * 0.3)
+    for _, info in pairs(counts) do
+        if info.count >= threshold then table.insert(result, info.anim) end
+    end
+    local prioOrder = { Action = 4, Action2 = 4, Action3 = 4, Action4 = 4, Movement = 3, Idle = 2, Core = 1 }
+    table.sort(result, function(a, b)
+        return (prioOrder[a.Priority] or 0) > (prioOrder[b.Priority] or 0)
+    end)
+    return result
+end
+
+local function stopPreWalkAnimations()
+    for _, t in ipairs(preWalkTracks) do
+        pcall(function() t:Stop(0.1) end)
+    end
+    preWalkTracks = {}
+end
+
+local function restoreWalkSpeed()
+    if savedWalkSpeed then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChild("Humanoid")
+        if hum then hum.WalkSpeed = savedWalkSpeed end
+        savedWalkSpeed = nil
+    end
+end
+
+local function stopPlayback()
+    if playbackConnection then
+        playbackConnection:Disconnect()
+        playbackConnection = nil
+    end
+    playingBusy = false
+    stopPreWalkAnimations()
+    restoreWalkSpeed()
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChild("Humanoid")
+    if antigravidade then antigravidade:Destroy() antigravidade = nil end
+    if hum then hum.AutoRotate = true end
+    for _, t in pairs(activeTracks) do
+        pcall(function() t:Stop(0.1) end)
+    end
+    activeTracks = {}
+    for parte, status in pairs(originalCollides) do
+        if parte and parte.Parent then parte.CanCollide = status end
+    end
+    table.clear(originalCollides)
 end
 
 local function toStateEnum(s)
@@ -662,324 +712,167 @@ local function toStateEnum(s)
     return nil
 end
 
-local function getAnimator(hum)
-    local a = hum:FindFirstChildOfClass("Animator")
-    if not a and hum.Parent then
-        a = hum.Parent:FindFirstChildWhichIsA("Animator", true)
-    end
-    if not a then
-        a = Instance.new("Animator")
-        a.Parent = hum
-    end
-    return a
-end
-
--- carrega a track uma vez só e reaproveita (evita criar track nova toda hora)
-local function getTrack(animator, id)
-    if trackCacheOwner ~= animator then
-        trackCache = {}
-        ownedSet = {}
-        trackCacheOwner = animator
-    end
-    local t = trackCache[id]
-    if t ~= nil then return t or nil end
-    local anim = Instance.new("Animation")
-    anim.AnimationId = id
-    local ok, tr = pcall(function() return animator:LoadAnimation(anim) end)
-    if ok and tr then
-        trackCache[id] = tr
-        ownedSet[tr] = true
-        return tr
-    end
-    trackCache[id] = false
-    return nil
-end
-
--- pré-carrega todas as animações da rota ANTES de começar (evita travadas)
-local function preloadRoute(animator, data, token)
-    local needed, list, n = {}, {}, 0
-    for _, p in ipairs(data) do
-        if p.Animations then
-            for _, a in ipairs(p.Animations) do
-                local id = a.Id
-                if id and id ~= "" and not needed[id] then
-                    needed[id] = true
-                    n = n + 1
-                    local anim = Instance.new("Animation")
-                    anim.AnimationId = id
-                    table.insert(list, anim)
-                end
-            end
-        end
-    end
-    if n == 0 then return true end
-
-    setStatus("Carregando " .. n .. " animações...", "play")
-
-    local done = false
-    task.spawn(function()
-        pcall(function() ContentProvider:PreloadAsync(list) end)
-        done = true
-    end)
-    local t0 = os.clock()
-    while not done and os.clock() - t0 < 6 do
-        task.wait(0.05)
-        if token ~= playToken then return false end
-    end
-
-    local loaded = {}
-    for id in pairs(needed) do
-        local tr = getTrack(animator, id)
-        if tr then table.insert(loaded, tr) end
-    end
-
-    t0 = os.clock()
-    for _, tr in ipairs(loaded) do
-        while tr.Length == 0 and os.clock() - t0 < 4 do
-            task.wait(0.05)
-            if token ~= playToken then return false end
-        end
-    end
-
-    for _, a in ipairs(list) do a:Destroy() end
-    return true
-end
-
-local function stopPlayback()
-    playToken = playToken + 1
-    if playbackConnection then
-        playbackConnection:Disconnect()
-        playbackConnection = nil
-    end
-    if noclipConnection then
-        noclipConnection:Disconnect()
-        noclipConnection = nil
-    end
-    playingBusy = false
-
-    for _, tr in pairs(activeTracks) do
-        pcall(function() tr:Stop(0.1) end)
-    end
-    table.clear(activeTracks)
-
-    if antigravidade then antigravidade:Destroy() antigravidade = nil end
-
-    for parte, status in pairs(originalCollides) do
-        if parte and parte.Parent then parte.CanCollide = status end
-    end
-    table.clear(originalCollides)
-
-    if playHum and playHum.Parent then
-        if savedWalkSpeed then playHum.WalkSpeed = savedWalkSpeed end
-        playHum.AutoRotate = true
-        if savedPlatformStand ~= nil then playHum.PlatformStand = savedPlatformStand end
-    end
-    savedWalkSpeed = nil
-    savedPlatformStand = nil
-
-    if disabledAnimate and disabledAnimate.Parent then
-        pcall(function() disabledAnimate.Disabled = false end)
-    end
-    disabledAnimate = nil
-    playHum, playHrp = nil, nil
-end
-
 local function playRoute(data)
     if #data == 0 then setStatus("Nada gravado", "warn") return end
-    if playingBusy or playbackConnection then
+    if playbackConnection then
         stopPlayback()
         stopTimer()
         setStatus("Cancelado", "warn")
         return
     end
+    if playingBusy then return end
     playingBusy = true
-    playToken = playToken + 1
-    local token = playToken
-    local full = fullMode
 
     task.spawn(function()
+        setStatus("Indo para o início...", "play")
         local char = LocalPlayer.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local hum = char and char:FindFirstChild("Humanoid")
         if not hrp or not hum then
             playingBusy = false
             setStatus("Sem personagem", "warn")
             return
         end
-        playHum, playHrp = hum, hrp
 
-        local animator = getAnimator(hum)
+        savedWalkSpeed = hum.WalkSpeed
 
-        if not preloadRoute(animator, data, token) then return end
-        if token ~= playToken then return end
-        local cache = trackCache
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if not animator then animator = Instance.new("Animator", hum) end
 
-        local total = #data
-        local cfs = table.create(total)
-        local vels = table.create(total)
-        for i = 1, total do
-            cfs[i] = CFrame.new(table.unpack(data[i].CF))
-            local v = data[i].Velocity
-            vels[i] = v and Vector3.new(v[1], v[2], v[3]) or Vector3.zero
-        end
-
-        -- anda até o início (com a animação normal do jogo); se estiver longe, teleporta
-        local startPos = cfs[1].Position
-        local flat = Vector3.new(hrp.Position.X - startPos.X, 0, hrp.Position.Z - startPos.Z).Magnitude
-        if flat > 3 and flat <= APPROACH_MAX then
-            setStatus("Indo para o início...", "play")
-            savedWalkSpeed = hum.WalkSpeed
-            if hum.WalkSpeed < 8 then hum.WalkSpeed = DEFAULT_WALKSPEED end
-            hum:MoveTo(startPos)
-            local t0 = os.clock()
-            while os.clock() - t0 < 6 do
-                task.wait(0.05)
-                if token ~= playToken then return end
-                local cur = hrp.Position
-                if Vector3.new(cur.X - startPos.X, 0, cur.Z - startPos.Z).Magnitude < 2.5 then break end
+        -- pré-carrega (sem esperar) as animações da rota enquanto o boneco anda até o início
+        local warmed = {}
+        for _, p in ipairs(data) do
+            if p.Animations then
+                for _, a in ipairs(p.Animations) do
+                    if a.Id and a.Id ~= "" and not warmed[a.Id] then
+                        warmed[a.Id] = true
+                        getOrLoadTrack(animator, a.Id)
+                    end
+                end
             end
-            if token ~= playToken then return end
-            hum.WalkSpeed = savedWalkSpeed
-            savedWalkSpeed = nil
         end
 
-        -- assume o controle do personagem
         local animateScript = char:FindFirstChild("Animate")
+        local animateWasDisabled = false
         if animateScript and animateScript:IsA("BaseScript") then
             animateScript.Disabled = true
-            disabledAnimate = animateScript
+            animateWasDisabled = true
         end
-        for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-            if not ownedSet[t] then pcall(function() t:Stop(0.05) end) end
+
+        local detectedAnims = getStartAnimations(data)
+        preWalkTracks = {}
+        for _, animData in ipairs(detectedAnims) do
+            local trackObj = getOrLoadTrack(animator, animData.Id)
+            if trackObj then
+                pcall(function()
+                    trackObj.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
+                    trackObj.Looped = true
+                    trackObj:Play(0.1)
+                    trackObj:AdjustSpeed(animData.Speed or 1)
+                end)
+                table.insert(preWalkTracks, trackObj)
+            end
+        end
+
+        hum.WalkSpeed = DEFAULT_WALKSPEED
+
+        local startCF = CFrame.new(unpack(data[1].CF))
+        hum:MoveTo(startCF.Position)
+
+        local reached = false
+        local conn
+        conn = hum.MoveToFinished:Connect(function()
+            reached = true
+            if conn then conn:Disconnect() end
+        end)
+        local timeout = tick() + 5
+        while not reached and tick() < timeout do task.wait(0.1) end
+        if conn then conn:Disconnect() end
+
+        stopPreWalkAnimations()
+        restoreWalkSpeed()
+
+        if animateWasDisabled and animateScript then
+            pcall(function() animateScript.Disabled = false end)
         end
 
         hum.AutoRotate = false
+        antigravidade = Instance.new("BodyForce", hrp)
 
-        local parts = {}
-        for _, d in ipairs(char:GetDescendants()) do
-            if d:IsA("BasePart") then
-                originalCollides[d] = d.CanCollide
-                d.CanCollide = false
-                table.insert(parts, d)
+        local totalMass = 0
+        for _, parte in ipairs(char:GetChildren()) do
+            if parte:IsA("BasePart") then
+                originalCollides[parte] = parte.CanCollide
+                parte.CanCollide = false
+                totalMass = totalMass + parte:GetMass()
             end
         end
-
-        if full then
-            savedPlatformStand = hum.PlatformStand
-            hum.PlatformStand = true
-            noclipConnection = RunService.Stepped:Connect(function()
-                for i = 1, #parts do
-                    local p = parts[i]
-                    if p.CanCollide then p.CanCollide = false end
-                end
-            end)
-        end
-
-        antigravidade = Instance.new("BodyForce")
-        antigravidade.Force = Vector3.new(0, hrp.AssemblyMass * workspace.Gravity, 0)
-        antigravidade.Parent = hrp
-
-        hrp.CFrame = cfs[1]
-        hrp.AssemblyLinearVelocity = full and Vector3.zero or vels[1]
+        antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
 
         local pstartTime = os.clock()
+        local totalPoints = #data
         local currentIndex = 1
-        local lastSweep = 0
         local lastState = nil
-        local wantedNow = {}
-        table.clear(activeTracks)
+        activeTracks = {}
 
-        setStatus(full and "Reproduzindo (completo)..." or "Reproduzindo (leve)...", "play")
+        setStatus("Reproduzindo...", "play")
         startTimer()
 
-        playbackConnection = RunService.RenderStepped:Connect(function()
-            if not hrp.Parent or hum.Health <= 0 then
-                stopPlayback()
-                stopTimer()
-                setStatus("Interrompido", "warn")
-                return
+        playbackConnection = RunService.Heartbeat:Connect(function()
+            local elapsedTime = os.clock() - pstartTime
+            while currentIndex < totalPoints and elapsedTime >= data[currentIndex + 1].Time do
+                currentIndex = currentIndex + 1
             end
-
-            local now = os.clock()
-            local elapsedTime = now - pstartTime
-
-            local idx = currentIndex
-            while idx < total and elapsedTime >= data[idx + 1].Time do
-                idx = idx + 1
-            end
-            currentIndex = idx
-
-            if idx >= total then
-                hrp.CFrame = cfs[total]
+            if currentIndex >= totalPoints then
                 stopPlayback()
                 stopTimer()
                 setStatus(string.format("Concluído em %.2fs", timerFrozen), "ok")
                 return
             end
 
-            local p0 = data[idx]
-            local p1 = data[idx + 1]
-            local span = p1.Time - p0.Time
-            local alpha = (span > 0) and math.clamp((elapsedTime - p0.Time) / span, 0, 1) or 1
+            local p0 = data[currentIndex]
+            local p1 = data[currentIndex + 1]
+            local alpha = (p1.Time - p0.Time > 0)
+                and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
 
-            hrp.CFrame = cfs[idx]:Lerp(cfs[idx + 1], alpha)
+            local cf0 = CFrame.new(unpack(p0.CF))
+            local cf1 = CFrame.new(unpack(p1.CF))
+            hrp.CFrame = cf0:Lerp(cf1, alpha)
 
-            if full then
-                hrp.AssemblyLinearVelocity = Vector3.zero
-                hrp.AssemblyAngularVelocity = Vector3.zero
-            else
-                -- velocidade interpolada da gravação (consistente com o movimento)
-                hrp.AssemblyLinearVelocity = vels[idx]:Lerp(vels[idx + 1], alpha)
-
-                local st = p0.State
-                if st and st ~= lastState then
-                    lastState = st
-                    local e = toStateEnum(st)
-                    if e then pcall(function() hum:ChangeState(e) end) end
-                end
+            if p1.Velocity then
+                hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
             end
 
-            -- animações
-            local anims = p0.Animations
-            if anims then
-                table.clear(wantedNow)
-                for _, a in ipairs(anims) do
-                    local id = a.Id
-                    local tr = id and cache[id]
-                    if tr then
-                        wantedNow[id] = true
-                        local w = a.Weight or 1
-                        local sp = a.Speed or 1
-                        if not activeTracks[id] then
-                            tr.Priority = prio(a.Priority)
-                            tr.Looped = (a.Looped ~= false)
-                            tr:Play(0, math.max(w, 0.001), sp)
-                            if a.Pos then tr.TimePosition = a.Pos end
-                            activeTracks[id] = tr
-                        elseif tr.IsPlaying then
-                            if math.abs(tr.WeightTarget - w) > 0.02 then tr:AdjustWeight(w, 0) end
-                            if math.abs(tr.Speed - sp) > 0.01 then tr:AdjustSpeed(sp) end
-                            if a.Pos and tr.Length > 0 then
-                                local d = math.abs(tr.TimePosition - a.Pos)
-                                if tr.Looped then d = math.min(d, tr.Length - d) end
-                                if d > RESYNC_THRESHOLD then tr.TimePosition = a.Pos end
-                            end
+            if p0.State and p0.State ~= lastState then
+                lastState = p0.State
+                local st = toStateEnum(p0.State)
+                if st then pcall(function() hum:ChangeState(st) end) end
+            end
+
+            if p1.Animations then
+                local wanted = {}
+                for _, animData in ipairs(p1.Animations) do
+                    wanted[animData.Id] = animData
+                    local trackObj = activeTracks[animData.Id]
+                    if not trackObj then
+                        trackObj = getOrLoadTrack(animator, animData.Id)
+                        if trackObj then
+                            pcall(function()
+                                trackObj.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
+                                trackObj.Looped = (animData.Looped ~= false)
+                                trackObj:Play(0.05)
+                            end)
+                            activeTracks[animData.Id] = trackObj
                         end
                     end
+                    local t = activeTracks[animData.Id]
+                    if t then pcall(function() t:AdjustSpeed(animData.Speed) end) end
                 end
-                for id, tr in pairs(activeTracks) do
-                    if not wantedNow[id] then
-                        tr:Stop(0.05)
+                for id, trackObj in pairs(activeTracks) do
+                    if not wanted[id] then
+                        pcall(function() trackObj:Stop(0.1) end)
                         activeTracks[id] = nil
                     end
-                end
-            end
-
-            -- (modo completo) impede que as animações do próprio jogo briguem com o replay
-            if full and now - lastSweep >= SWEEP_INTERVAL then
-                lastSweep = now
-                for _, t in ipairs(animator:GetPlayingAnimationTracks()) do
-                    if not ownedSet[t] then t:Stop(0) end
                 end
             end
         end)
@@ -991,120 +884,103 @@ local function resetRecordButton()
     RecordBtn.BackgroundColor3 = C.Accent
 end
 
-local function finishRecording()
-    isRecording = false
-    if recordingConnection then
-        recordingConnection:Disconnect()
-        recordingConnection = nil
-    end
-    stopTimer()
-    resetRecordButton()
-    setStatus(string.format("%.2fs  |  %d pts  |  %d anims", timerFrozen, #recordedData, countAnims(recordedData)), "ok")
-end
-
 track(RecordBtn.MouseButton1Click:Connect(function()
+    if playbackConnection then stopPlayback() end
+    isRecording = not isRecording
+
     if isRecording then
-        finishRecording()
-        return
-    end
-
-    if playbackConnection or playingBusy then stopPlayback() end
-
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then
-        setStatus("Sem personagem", "warn")
-        return
-    end
-    local animator = getAnimator(hum)
-
-    isRecording = true
-    recordedData = {}
-    startTime = os.clock()
-    startTimer()
-    RecordBtn.Text = "Parar"
-    RecordBtn.BackgroundColor3 = C.Red
-    setStatus("Gravando...", "rec")
-
-    local lastNameTick = 0
-    local frameSeen = {}
-
-    recordingConnection = RunService.Heartbeat:Connect(function()
-        if not hrp.Parent or not hum.Parent then
-            finishRecording()
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChild("Humanoid")
+        if not hrp or not hum then
+            isRecording = false
+            setStatus("Sem personagem", "warn")
             return
         end
 
-        local currentTime = os.clock() - startTime
-        local cf = hrp.CFrame
-        local vel = hrp.AssemblyLinearVelocity
+        recordedData = {}
+        startTime = os.clock()
+        startTimer()
+        RecordBtn.Text = "Parar"
+        RecordBtn.BackgroundColor3 = C.Red
+        setStatus("Gravando...", "rec")
 
-        local wantNames = (currentTime - lastNameTick) >= 0.25
-        local names = nil
-        if wantNames then
-            lastNameTick = currentTime
-            names = {}
-        end
+        local animator = hum:FindFirstChildOfClass("Animator") or char:FindFirstChildWhichIsA("Animator", true)
+        local frameSeen = {}
+        local lastNameTick = 0
 
-        -- detecta TODAS as animações tocando agora (andar, correr, agachar, pular, ferramentas...)
-        local anims = {}
-        table.clear(frameSeen)
-        for _, trackObj in ipairs(animator:GetPlayingAnimationTracks()) do
-            local a = trackObj.Animation
-            local weight = trackObj.WeightCurrent
-            if a and weight > 0.001 then
-                local id = a.AnimationId
-                if id ~= "" and not frameSeen[id] then
-                    frameSeen[id] = true
-                    table.insert(anims, {
-                        Id = id,
-                        Speed = trackObj.Speed,
-                        Weight = weight,
-                        Priority = trackObj.Priority.Name,
-                        Pos = trackObj.TimePosition,
-                        Looped = trackObj.Looped,
-                    })
-                    if names then
-                        local nm = a.Name
-                        if nm == "" then nm = id:match("%d+") or "?" end
-                        table.insert(names, nm)
+        recordingConnection = RunService.Heartbeat:Connect(function()
+            local currentTime = os.clock() - startTime
+            local cf = hrp.CFrame
+            local vel = hrp.AssemblyLinearVelocity
+            local state = hum:GetState()
+            local anims = {}
+
+            if not animator or not animator.Parent then
+                animator = hum:FindFirstChildOfClass("Animator") or char:FindFirstChildWhichIsA("Animator", true)
+            end
+
+            -- mostra no status os nomes das animações detectadas (a cada 0.25s)
+            local names = nil
+            if currentTime - lastNameTick >= 0.25 then
+                lastNameTick = currentTime
+                names = {}
+            end
+
+            if animator then
+                table.clear(frameSeen)
+                for _, trackObj in ipairs(animator:GetPlayingAnimationTracks()) do
+                    local a = trackObj.Animation
+                    if a and trackObj.WeightCurrent > 0.01 then
+                        local id = a.AnimationId
+                        if id ~= "" and not frameSeen[id] then
+                            frameSeen[id] = true
+                            table.insert(anims, {
+                                Id = id,
+                                Speed = trackObj.Speed,
+                                Weight = trackObj.WeightCurrent,
+                                Priority = trackObj.Priority.Name,
+                                Looped = trackObj.Looped,
+                            })
+                            if names then
+                                local nm = a.Name
+                                if nm == "" then nm = id:match("%d+") or "?" end
+                                table.insert(names, nm)
+                            end
+                        end
                     end
                 end
             end
-        end
 
-        table.insert(recordedData, {
-            Time = currentTime,
-            CF = { cf:GetComponents() },
-            Velocity = { vel.X, vel.Y, vel.Z },
-            State = hum:GetState().Name,
-            Animations = anims,
-        })
+            table.insert(recordedData, {
+                Time = currentTime,
+                CF = { cf:GetComponents() },
+                Velocity = { vel.X, vel.Y, vel.Z },
+                State = state.Name,
+                Animations = anims,
+            })
 
-        if names then
-            local txt = string.format("Gravando | %d anim", #names)
-            if #names > 0 then txt = txt .. ": " .. table.concat(names, ", ") end
-            setStatus(txt, "rec")
+            if names then
+                local txt = string.format("Gravando | %d anim", #names)
+                if #names > 0 then txt = txt .. ": " .. table.concat(names, ", ") end
+                setStatus(txt, "rec")
+            end
+        end)
+    else
+        if recordingConnection then
+            recordingConnection:Disconnect()
+            recordingConnection = nil
         end
-    end)
+        stopTimer()
+        resetRecordButton()
+        setStatus(string.format("%.2fs  |  %d pts  |  %d anims", timerFrozen, #recordedData, countAnims(recordedData)), "ok")
+    end
 end))
 
 track(TestBtn.MouseButton1Click:Connect(function()
     if isRecording then setStatus("Pare a gravação antes", "warn") return end
     if #recordedData == 0 then setStatus("Nada gravado", "warn") return end
     playRoute(recordedData)
-end))
-
-track(ModeBtn.MouseButton1Click:Connect(function()
-    if isRecording or playingBusy or playbackConnection then
-        setStatus("Pare antes de trocar o modo", "warn")
-        return
-    end
-    fullMode = not fullMode
-    ModeBtn.Text = fullMode and "Modo: Completo" or "Modo: Leve"
-    ModeBtn.BackgroundColor3 = fullMode and C.AccentDark or C.Bg3
-    setStatus(fullMode and "Modo completo (mais controle)" or "Modo leve (mexe menos no personagem)", "idle")
 end))
 
 -- popup de salvar --------------------------------------------------------
@@ -1216,17 +1092,15 @@ local function buildCopyText(name, entry)
     local lines = { string.format("-- drip admin | %s | %.3fs\nreturn {", name, entry.Duracao) }
     for _, node in ipairs(entry.Data) do
         local cfStr = table.concat(node.CF, ", ")
-        local vel = node.Velocity or { 0, 0, 0 }
-        local velStr = table.concat(vel, ", ")
+        local velStr = table.concat(node.Velocity, ", ")
         local stateName = "Running"
         if typeof(node.State) == "EnumItem" then stateName = node.State.Name
         elseif type(node.State) == "string" then stateName = node.State end
         local parts = {}
         for _, a in ipairs(node.Animations or {}) do
             table.insert(parts, string.format(
-                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\",Pos=%.3f,Looped=%s}",
-                a.Id, a.Speed or 1, a.Weight or 1, a.Priority or "Movement", a.Pos or 0,
-                tostring(a.Looped ~= false)))
+                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\",Looped=%s}",
+                a.Id, a.Speed or 1, a.Weight or 1, a.Priority or "Movement", tostring(a.Looped ~= false)))
         end
         table.insert(lines, string.format(
             "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s,Animations={%s}},",
@@ -1354,9 +1228,8 @@ end
 
 track(LocalPlayer.CharacterAdded:Connect(function()
     stopPlayback()
-    trackCache = {}
-    ownedSet = {}
-    trackCacheOwner = nil
+    animationCache = {}
+    animationCacheOwner = nil
 end))
 
 env.DripAdminCleanup = function()
