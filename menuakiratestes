@@ -1,1254 +1,883 @@
--- gravar rota drip Admin
--- criador: angel
+--[[ PRANCHETA V1 | DRIP MENU — LuaU (client / executor)
+     Ordem: item -> equipar abre menu -> desequipar fecha menu.
+     Dados de tempos extraídos do script de referência (Drip treinos v1.7). ]]
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local HttpService = game:GetService("HttpService")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then return end
 
-local env = (getgenv and getgenv()) or _G
-if env.DripAdminCleanup then
-    pcall(env.DripAdminCleanup)
+local ENV = (getgenv and getgenv()) or _G
+
+-- =========================================================
+-- 1. CONFIGURAÇÃO / INICIALIZAÇÃO
+-- =========================================================
+local TOOL_NAME = "Prancheta V1"
+local HOTBAR_SIZE = 6
+local MAX_POINTS = 100                          -- AJUSTAR: limite real do sistema é desconhecido
+local TITLER_TEMPLATE = ";titler {NOME} {PONTOS}" -- AJUSTAR: prefixo/sintaxe a confirmar no jogo
+local NOTES_FILE = "PranchetaV1_notas.txt"
+local CREATOR = "Angel"
+local SERVER_URL = "https://discord.gg/dripmenu"
+local HOTBAR_MSG = "A prancheta comum foi para o inventário, abra Prancheta V1 e jogue realmente Prancheta da hotbar principal para o inventário."
+
+-- Reexecução: destrói a instância anterior
+if ENV.__PranchetaV1 and ENV.__PranchetaV1.Destroy then
+    pcall(ENV.__PranchetaV1.Destroy)
 end
+ENV.__PranchetaV1 = nil
 
-local connections = {}
-local function track(conn)
-    table.insert(connections, conn)
-    return conn
-end
-
-local C = {
-    Accent     = Color3.fromRGB(96, 142, 255),
-    AccentHi   = Color3.fromRGB(150, 185, 255),
-    AccentDark = Color3.fromRGB(52, 84, 178),
-    Bg         = Color3.fromRGB(14, 15, 22),
-    Bg2        = Color3.fromRGB(23, 25, 36),
-    Bg3        = Color3.fromRGB(36, 39, 56),
-    Text       = Color3.fromRGB(248, 250, 255),
-    TextDim    = Color3.fromRGB(176, 184, 208),
-    Red        = Color3.fromRGB(232, 72, 92),
-    Green      = Color3.fromRGB(70, 220, 140),
-    Amber      = Color3.fromRGB(250, 192, 84),
-    Violet     = Color3.fromRGB(128, 92, 226),
+-- Dados de sessão (sobrevivem à reexecução e ao desequipar)
+local Session = ENV.__PranchetaV1_Session or {}
+ENV.__PranchetaV1_Session = Session
+Session.notes = Session.notes or ""
+Session.cfg = Session.cfg or {
+    cmds = { char = ";char me nemokjk", clone = ";clone", title = ";titlebk me INSTRUTOR" },
+    on = { char = true, clone = true, title = true },
+    pos = {},
 }
 
--- arquivos ---------------------------------------------------------------
+local conns, toolConns = {}, {}
+local function track(c) table.insert(conns, c); return c end
 
-local FOLDER = "DripAdmin"
-local canFS = (writefile and readfile and isfile and makefolder and isfolder and listfiles) and true or false
+local C = {
+    bg = Color3.fromRGB(10, 10, 13), card = Color3.fromRGB(19, 20, 25),
+    btn = Color3.fromRGB(28, 34, 42), baby = Color3.fromRGB(137, 207, 240),
+    text = Color3.fromRGB(240, 246, 250), dim = Color3.fromRGB(150, 165, 175),
+}
 
-local function ensureFolder()
-    if not canFS then return end
-    pcall(function()
-        if not isfolder(FOLDER) then makefolder(FOLDER) end
-    end)
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
+local function stroke(o, color, tr, th)
+    return new("UIStroke", { Color = color, Transparency = tr, Thickness = th or 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
 end
 
-local function safeName(name)
-    local s = tostring(name):gsub("[^%w_%-]", "_")
-    if s == "" then s = "rota" end
-    return s
+local function guiParent()
+    local ok, h = pcall(function() return gethui and gethui() end)
+    if ok and h then return h end
+    return LocalPlayer:WaitForChild("PlayerGui")
 end
 
-local function rnd(n, d)
-    local m = 10 ^ d
-    return math.floor(n * m + 0.5) / m
+local Gui = new("ScreenGui", { Name = "PranchetaV1_Gui", ResetOnSpawn = false, IgnoreGuiInset = true,
+    DisplayOrder = 100, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
+Gui.Parent = guiParent()
+
+-- =========================================================
+-- 2. UTILITÁRIOS (clipboard, chat, arrastar)
+-- =========================================================
+local function getClipboardFn()
+    if type(setclipboard) == "function" then return setclipboard end
+    if type(toclipboard) == "function" then return toclipboard end
+    return nil
 end
 
--- conta quantas animações diferentes existem numa rota
-local function countAnims(data)
-    local set, n = {}, 0
-    for _, p in ipairs(data) do
-        if p.Animations then
-            for _, a in ipairs(p.Animations) do
-                if a.Id and not set[a.Id] then
-                    set[a.Id] = true
-                    n = n + 1
-                end
-            end
-        end
+local notify -- declarada abaixo
+
+local function copyText(text, okTitle)
+    local fn = getClipboardFn()
+    if not fn then
+        notify("error", "Cópia indisponível", "O executor não suporta área de transferência. Nada foi copiado.", 4)
+        return false
     end
-    return n
-end
-
-local function compress(data)
-    local out = table.create(#data)
-    for i, p in ipairs(data) do
-        local cf = table.create(12)
-        for k, v in ipairs(p.CF) do cf[k] = rnd(v, 5) end
-        local anims = {}
-        for _, a in ipairs(p.Animations or {}) do
-            table.insert(anims, {
-                Id = a.Id,
-                Speed = rnd(a.Speed or 1, 3),
-                Weight = rnd(a.Weight or 1, 3),
-                Priority = a.Priority,
-                Looped = a.Looped,
-            })
-        end
-        out[i] = {
-            Time = rnd(p.Time, 4),
-            CF = cf,
-            Velocity = { rnd(p.Velocity[1], 3), rnd(p.Velocity[2], 3), rnd(p.Velocity[3], 3) },
-            State = p.State,
-            Animations = anims,
-        }
-    end
-    return out
-end
-
-local savedRoutes = {}
-
-local function saveToDisk(name, entry)
-    if not canFS then return false end
-    ensureFolder()
-    local ok = pcall(function()
-        local json = HttpService:JSONEncode({
-            Name = name,
-            Duracao = entry.Duracao,
-            Pontos = entry.Pontos,
-            Data = compress(entry.Data),
-        })
-        writefile(entry.File, json)
-    end)
+    local ok = pcall(fn, text)
+    if ok then notify("success", okTitle or "Copiado", "Texto copiado para a área de transferência.", 2)
+    else notify("error", "Falha ao copiar", "O executor retornou erro.", 3) end
     return ok
 end
 
-local function deleteFromDisk(entry)
-    if not canFS or not entry.File then return end
-    pcall(function()
-        if delfile and isfile(entry.File) then delfile(entry.File) end
+local function sendChat(text)
+    return pcall(function()
+        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+            local folder = TextChatService:FindFirstChild("TextChannels")
+            local ch = folder and folder:FindFirstChild("RBXGeneral")
+            if not ch then error("canal RBXGeneral não encontrado") end
+            ch:SendAsync(text)
+        else
+            local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+            local say = ev and ev:FindFirstChild("SayMessageRequest")
+            if not say then error("chat legado não encontrado") end
+            say:FireServer(text, "All")
+        end
     end)
 end
 
-local function loadAllFromDisk()
-    if not canFS then return 0 end
-    ensureFolder()
-    local count = 0
-    local ok, files = pcall(function() return listfiles(FOLDER) end)
-    if not ok or type(files) ~= "table" then return 0 end
-    for _, path in ipairs(files) do
-        if tostring(path):sub(-5) == ".json" then
-            pcall(function()
-                local decoded = HttpService:JSONDecode(readfile(path))
-                if type(decoded) == "table" and type(decoded.Data) == "table" and #decoded.Data > 0 then
-                    local name = decoded.Name or tostring(path):match("([^/\\]+)%.json$") or "rota"
-                    local base, n = name, 2
-                    while savedRoutes[name] do
-                        name = base .. "_" .. n
-                        n = n + 1
-                    end
-                    savedRoutes[name] = {
-                        Duracao = decoded.Duracao or 0,
-                        Pontos = decoded.Pontos or #decoded.Data,
-                        Data = decoded.Data,
-                        Anims = countAnims(decoded.Data),
-                        File = path,
-                    }
-                    count = count + 1
-                end
+local lastSent = 0
+local function sendAction(text, what)
+    if os.clock() - lastSent < 1 then return false end -- evita envio duplicado
+    local ok, err = sendChat(text)
+    if ok then
+        lastSent = os.clock()
+        notify("success", "Enviado ao chat", what .. " (a execução depende do jogo).", 2.5)
+    else
+        notify("error", "Falha ao enviar", tostring(err), 4)
+    end
+    return ok
+end
+
+local function makeDraggable(handle, target)
+    local dragging, startPos, startFrame
+    track(handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, startPos, startFrame = true, input.Position, target.Position
+            local c; c = input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false; c:Disconnect() end
             end)
         end
-    end
-    return count
+    end))
+    track(UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - startPos
+            target.Position = UDim2.new(startFrame.X.Scale, startFrame.X.Offset + d.X,
+                startFrame.Y.Scale, startFrame.Y.Offset + d.Y)
+        end
+    end))
 end
 
--- interface --------------------------------------------------------------
-
-local function new(class, props, parent)
-    local inst = Instance.new(class)
-    for k, v in pairs(props or {}) do inst[k] = v end
-    if parent then inst.Parent = parent end
-    return inst
+local function waitAny(signals, timeout)
+    local bind = Instance.new("BindableEvent")
+    local cs = {}
+    for _, s in ipairs(signals) do table.insert(cs, s:Connect(function() pcall(function() bind:Fire(true) end) end)) end
+    task.delay(timeout, function() pcall(function() bind:Fire(false) end) end)
+    local r = bind.Event:Wait()
+    for _, c in ipairs(cs) do c:Disconnect() end
+    bind:Destroy()
+    return r
 end
 
-local function corner(inst, r)
-    return new("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
+-- =========================================================
+-- 3. SISTEMA DE NOTIFICAÇÕES
+-- =========================================================
+local notifyHolder = new("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, 10), Size = UDim2.fromOffset(300, 0),
+    AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 50 }, Gui)
+new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    SortOrder = Enum.SortOrder.LayoutOrder }, notifyHolder)
+
+local KIND_COLOR = {
+    success = Color3.fromRGB(120, 220, 160), warn = Color3.fromRGB(255, 205, 100),
+    error = Color3.fromRGB(255, 120, 120), info = C.baby,
+}
+local activeNotifs = {}
+
+notify = function(kind, title, msg, duration)
+    local key = tostring(title) .. "|" .. tostring(msg)
+    if activeNotifs[key] then return end -- sem duplicadas
+    activeNotifs[key] = true
+    duration = duration or 3
+    local accent = KIND_COLOR[kind] or C.baby
+
+    local wrap = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y }, notifyHolder)
+    local box = new("CanvasGroup", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, Position = UDim2.fromOffset(0, -12), GroupTransparency = 1 }, wrap)
+    corner(box, 10)
+    new("UIGradient", { Rotation = 20, Color = ColorSequence.new(Color3.fromRGB(8, 8, 10), Color3.fromRGB(38, 72, 92)) }, box)
+    local st = stroke(box, accent, 0.6, 1)
+    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, box)
+    new("UIListLayout", { Padding = UDim.new(0, 2) }, box)
+    new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = accent,
+        TextXAlignment = Enum.TextXAlignment.Left, Text = string.upper(title), Size = UDim2.new(1, 0, 0, 14) }, box)
+    new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = C.text,
+        TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Text = msg,
+        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, box)
+
+    local info = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    TweenService:Create(box, info, { GroupTransparency = 0, Position = UDim2.fromOffset(0, 0) }):Play()
+    TweenService:Create(st, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 1, true),
+        { Transparency = 0.1 }):Play() -- brilho discreto
+
+    task.delay(duration, function()
+        if not box.Parent then activeNotifs[key] = nil; return end
+        local t = TweenService:Create(box, TweenInfo.new(0.35), { GroupTransparency = 1, Position = UDim2.fromOffset(0, -8) })
+        t:Play(); t.Completed:Wait()
+        wrap:Destroy()
+        activeNotifs[key] = nil
+    end)
 end
 
-local function stroke(inst, color, thick, transp)
-    return new("UIStroke", {
-        Color = color, Thickness = thick or 1, Transparency = transp or 0,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, inst)
+-- =========================================================
+-- 4. DADOS (extraídos do script de referência)
+-- =========================================================
+local CATEGORIES = { "Praças", "Graduados", "AMAN", "Oficiais Subalternos", "Oficiais Intermediários",
+    "Oficiais Superiores", "EPC", "APG", "CPE" }
+
+local DATA = {
+    ["Praças"] = { min = "4 pontos", jj = "150 JJs em 210 s.", pk = { 35, 40, 30, 32 }, torre = { 15, 16 } },
+    ["Graduados"] = { min = "5 pontos", jj = "170 JJs em 230 s.", pk = { 30, 35, 27, 29 }, torre = { 15, 16 } },
+    ["AMAN"] = { min = "7 pontos · máx. 4 aprovados", jj = "PC e Console: 75 JJs. Celular: 100 JJs. Tempo: 100 s.",
+        pk = { 19, 22, 19, 17 }, torre = { 12, 11 } },
+    ["Oficiais Subalternos"] = { min = "5 pontos", jj = "200 JJs em 260 s.", pk = { 14, 17, 15, 13 }, torre = { 11, 11 } },
+    ["Oficiais Intermediários"] = { min = "5,5 pontos", jj = "250 JJs em 310 s.", pk = { 13, 16, 14, 12 }, torre = { 11, 11 } },
+    ["Oficiais Superiores"] = { min = "6 pontos", jj = "320 JJs em 380 s.", pk = { 12, 15, 13, 11 }, torre = { 10, 10 } },
+    ["EPC"] = { min = "7 pontos · máx. 3 aprovados", jj = "PC e Console: 80 JJs. Mobile: 115 JJs. Tempo: 100 s.",
+        pk = { 9, 13, 9, 10 }, torre = { 8, 9 } },
+    ["APG"] = { min = "8 pontos · máx. 2 aprovados", jj = "PC e Console: 82 JJs. Mobile: 120 JJs. Tempo: 100 s.",
+        pk = { 11, 13, 10, 6 }, torre = { 7, 8 }, nota = "Parkour 4 é com burla; os demais, sem burla." },
+    ["CPE"] = { min = "7 pontos · máx. 1 aprovado", jj = "PC e Console: 85 JJs. Mobile: 125 JJs. Tempo: 100 s.",
+        pk = { 6, 9, 7, 6 }, torre = { 7, 8 } },
+}
+
+local PRESENTATIONS = {
+    ";hb Olá, me chamo {USERNAME} e serei o instrutor de vocês. Peço respeito e disciplina durante todo o treinamento.",
+    ";hb Atenção, militares! Sou {USERNAME}, instrutor deste treinamento. Exijo respeito e disciplina em todas as etapas.",
+    ";hb Saudações, militares. Meu nome é {USERNAME} e conduzirei este treinamento. Espero respeito e disciplina de todos.",
+    ";hb Militares, atenção! {USERNAME} será o instrutor de vocês hoje. Respeito e disciplina serão cobrados no treinamento.",
+    ";hb Apresento-me: {USERNAME}, instrutor responsável por este treinamento. Solicito respeito e disciplina de todos.",
+    ";hb Em forma, militares! Meu nome é {USERNAME} e serei seu instrutor. Respeito e disciplina são obrigatórios aqui.",
+    ";hb Prestem atenção, militares. Sou {USERNAME}, instrutor desta formação. Peço disciplina e respeito do início ao fim.",
+    ";hb Atenção, tropa! Quem instruirá vocês é {USERNAME}. Exijo postura, respeito e disciplina durante o treinamento.",
+}
+
+local function presentationText(i)
+    return (PRESENTATIONS[i]:gsub("{USERNAME}", function() return LocalPlayer.Name end))
 end
 
-local function gradient(inst, c1, c2, rot)
-    return new("UIGradient", {
-        Color = ColorSequence.new(c1, c2),
-        Rotation = rot or 90,
-    }, inst)
+local function parkourTime(i)
+    local d = DATA[Session.category or ""]
+    if not d or not d.pk[i] then return nil end
+    return d.pk[i] .. " s"
+end
+local function torreTime()
+    local d = DATA[Session.category or ""]
+    if not d then return nil end
+    local pc, cel = d.torre[1], d.torre[2]
+    if pc == cel then return pc .. " s" end
+    return pc .. " s (PC/Console) · " .. cel .. " s (Celular)"
 end
 
-local function lighten(c, amt)
-    return Color3.new(math.min(c.R + amt, 1), math.min(c.G + amt, 1), math.min(c.B + amt, 1))
+-- =========================================================
+-- 5. INTERFACE
+-- =========================================================
+local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+local W = math.clamp(vp.X - 30, 280, 340)
+local H = math.clamp(vp.Y - 60, 220, 310)
+
+local Main = new("CanvasGroup", { Name = "Main", BackgroundColor3 = C.bg, Size = UDim2.fromOffset(W, H),
+    Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2), GroupTransparency = 1, Visible = false }, Gui)
+corner(Main, 12)
+stroke(Main, C.baby, 0.55, 1)
+new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(10, 10, 13), Color3.fromRGB(20, 34, 44)) }, Main)
+local mainScale = new("UIScale", { Scale = 0.92 }, Main)
+
+local TitleBar = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30) }, Main)
+new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.baby,
+    Text = "PRANCHETA V1 | DRIP MENU", Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(12, 0),
+    TextXAlignment = Enum.TextXAlignment.Left }, TitleBar)
+new("Frame", { BackgroundColor3 = C.baby, BackgroundTransparency = 0.7, BorderSizePixel = 0,
+    Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1) }, TitleBar)
+makeDraggable(TitleBar, Main)
+
+local TabBar = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 32), Size = UDim2.new(1, 0, 0, 28) }, Main)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }, TabBar)
+new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, TabBar)
+local Content = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 62),
+    Size = UDim2.new(1, 0, 1, -62), ClipsDescendants = true }, Main)
+
+local function label(parent, text, size, bold, color)
+    return new("TextLabel", { BackgroundTransparency = 1, Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextSize = size or 11, TextColor3 = color or C.text, TextWrapped = true, Text = text,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, parent)
 end
 
-local function makeButton(parent, text, color, textColor, size, pos, textSize)
-    local b = new("TextButton", {
-        Size = size, Position = pos,
-        BackgroundColor3 = color,
-        Font = Enum.Font.GothamBold,
-        Text = text,
-        TextColor3 = textColor or C.Text,
-        TextSize = textSize or 12,
-        BorderSizePixel = 0,
-        AutoButtonColor = true,
-    }, parent)
-    corner(b, 7)
-    gradient(b, lighten(color, 0.1), color, 90)
+local function button(parent, text, cb, props)
+    local b = new("TextButton", { AutoButtonColor = true, BackgroundColor3 = C.btn, Font = Enum.Font.GothamBold,
+        TextSize = 10, TextColor3 = C.text, Text = text, Size = UDim2.new(0, 0, 0, 26),
+        AutomaticSize = Enum.AutomaticSize.X, BorderSizePixel = 0 })
+    for k, v in pairs(props or {}) do b[k] = v end
+    if props and props.Size then b.AutomaticSize = Enum.AutomaticSize.None end
+    corner(b, 6); stroke(b, C.baby, 0.65, 1)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, b)
+    b.Activated:Connect(function()
+        if b:GetAttribute("Off") then return end
+        cb()
+    end)
+    b.Parent = parent
     return b
 end
-
-local guiParent
-do
-    local ok, h = pcall(function() return gethui and gethui() end)
-    if ok and h then
-        guiParent = h
-    else
-        guiParent = LocalPlayer:WaitForChild("PlayerGui")
-    end
+local function setEnabled(b, on)
+    b:SetAttribute("Off", not on)
+    b.TextTransparency = on and 0 or 0.6
 end
 
-local ScreenGui = new("ScreenGui", {
-    Name = "DripAdmin",
-    ResetOnSpawn = false,
-    IgnoreGuiInset = true,
-    DisplayOrder = 999,
-    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-}, guiParent)
-
--- botao flutuante
-local FloatButton = new("TextButton", {
-    Size = UDim2.new(0, 42, 0, 42),
-    Position = UDim2.new(0, 12, 0.5, -21),
-    BackgroundColor3 = C.Bg2,
-    Text = "⚡",
-    TextColor3 = Color3.fromRGB(255, 222, 90),
-    TextSize = 22,
-    Font = Enum.Font.GothamBold,
-    BorderSizePixel = 0,
-    AutoButtonColor = false,
-    Active = true,
-}, ScreenGui)
-corner(FloatButton, 21)
-stroke(FloatButton, Color3.fromRGB(255, 214, 80), 2)
-gradient(FloatButton, C.Bg3, C.Bg, 90)
-
--- janela
-local MainFrame = new("Frame", {
-    Size = UDim2.new(0, 214, 0, 262),
-    Position = UDim2.new(0.5, -107, 0.5, -131),
-    BackgroundColor3 = C.Bg,
-    BorderSizePixel = 0,
-    Active = true,
-    Visible = false,
-}, ScreenGui)
-corner(MainFrame, 12)
-stroke(MainFrame, C.Accent, 1.5, 0.15)
-
-local TitleBar = new("Frame", {
-    Size = UDim2.new(1, 0, 0, 30),
-    BackgroundColor3 = C.Bg3,
-    BorderSizePixel = 0,
-    Active = true,
-}, MainFrame)
-corner(TitleBar, 12)
-gradient(TitleBar, C.Bg3, C.Bg2, 0)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -44, 1, 0),
-    Position = UDim2.new(0, 11, 0, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "gravar rota drip Admin",
-    TextColor3 = C.Text,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextTruncate = Enum.TextTruncate.AtEnd,
-}, TitleBar)
-
-local CloseBtn = new("TextButton", {
-    Size = UDim2.new(0, 20, 0, 20),
-    Position = UDim2.new(1, -26, 0, 5),
-    BackgroundColor3 = C.Red,
-    Text = "",
-    BorderSizePixel = 0,
-    AutoButtonColor = true,
-}, TitleBar)
-corner(CloseBtn, 6)
-for _, rot in ipairs({ 45, -45 }) do
-    new("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0.5, 0, 0.5, 0),
-        Size = UDim2.new(0, 10, 0, 2),
-        Rotation = rot,
-        BackgroundColor3 = Color3.fromRGB(255, 240, 242),
-        BorderSizePixel = 0,
-    }, CloseBtn)
+local function card(parent, title)
+    local f = new("Frame", { BackgroundColor3 = C.card, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y }, parent)
+    corner(f, 8); stroke(f, C.baby, 0.8, 1)
+    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, f)
+    new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, f)
+    if title then label(f, title, 11, true, C.baby) end
+    return f
 end
-
--- abas
-local TabBar = new("Frame", {
-    Size = UDim2.new(1, -16, 0, 26),
-    Position = UDim2.new(0, 8, 0, 36),
-    BackgroundColor3 = C.Bg2,
-    BorderSizePixel = 0,
-}, MainFrame)
-corner(TabBar, 8)
-
-local function makeTab(text, index, active)
-    local t = new("TextButton", {
-        Size = UDim2.new(1 / 3, -4, 1, -6),
-        Position = UDim2.new((index - 1) / 3, 2, 0, 3),
-        BackgroundColor3 = active and C.AccentDark or C.Bg2,
-        Font = Enum.Font.GothamBold,
-        Text = text,
-        TextColor3 = active and C.Text or C.TextDim,
-        TextSize = 10,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-    }, TabBar)
-    corner(t, 6)
+local function row(parent)
+    local r = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, parent)
+    new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Wraps = true, Padding = UDim.new(0, 5),
+        SortOrder = Enum.SortOrder.LayoutOrder }, r)
+    return r
+end
+local function textBox(parent, text, placeholder, height)
+    local t = new("TextBox", { BackgroundColor3 = Color3.fromRGB(14, 15, 19), TextColor3 = C.text, Font = Enum.Font.Gotham,
+        TextSize = 11, Text = text or "", PlaceholderText = placeholder or "", PlaceholderColor3 = C.dim,
+        ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, height or 26),
+        BorderSizePixel = 0 }, parent)
+    corner(t, 6); stroke(t, C.baby, 0.75, 1)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, t)
     return t
 end
 
-local TabRota = makeTab("Gravar", 1, true)
-local TabDados = makeTab("Rotas", 2, false)
-local TabCred = makeTab("Créditos", 3, false)
-
--- pagina gravar
-local RotaPage = new("Frame", {
-    Size = UDim2.new(1, 0, 1, -74),
-    Position = UDim2.new(0, 0, 0, 68),
-    BackgroundTransparency = 1,
-    Visible = true,
-}, MainFrame)
-
-local TimerFrame = new("Frame", {
-    Size = UDim2.new(1, -16, 0, 46),
-    Position = UDim2.new(0, 8, 0, 0),
-    BackgroundColor3 = C.Bg2,
-    BorderSizePixel = 0,
-}, RotaPage)
-corner(TimerFrame, 9)
-local TimerStroke = stroke(TimerFrame, C.AccentDark, 1.5)
-
-local TimerLabel = new("TextLabel", {
-    Size = UDim2.new(1, 0, 1, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.Code,
-    Text = "00:00.000",
-    TextColor3 = C.Text,
-    TextSize = 24,
-}, TimerFrame)
-
-local StatusRow = new("Frame", {
-    Size = UDim2.new(1, -16, 0, 16),
-    Position = UDim2.new(0, 8, 0, 51),
-    BackgroundTransparency = 1,
-}, RotaPage)
-
-local StatusDot = new("Frame", {
-    Size = UDim2.new(0, 7, 0, 7),
-    Position = UDim2.new(0, 2, 0.5, -3),
-    BackgroundColor3 = C.TextDim,
-    BorderSizePixel = 0,
-}, StatusRow)
-corner(StatusDot, 4)
-
-local StatusLabel = new("TextLabel", {
-    Size = UDim2.new(1, -16, 1, 0),
-    Position = UDim2.new(0, 15, 0, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "Parado",
-    TextColor3 = C.TextDim,
-    TextSize = 11,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextTruncate = Enum.TextTruncate.AtEnd,
-}, StatusRow)
-
-local function setStatus(text, kind)
-    local color = C.TextDim
-    if kind == "rec" then color = C.Red
-    elseif kind == "play" then color = C.Accent
-    elseif kind == "ok" then color = C.Green
-    elseif kind == "warn" then color = C.Amber end
-    StatusLabel.Text = text
-    StatusLabel.TextColor3 = C.Text
-    StatusDot.BackgroundColor3 = color
+local pages, tabButtons = {}, {}
+local function newPage()
+    local sf = new("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1),
+        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
+        ScrollBarImageColor3 = C.baby, Visible = false }, Content)
+    new("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 10) }, sf)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
+    table.insert(pages, sf)
+    return sf
+end
+local function setTab(i)
+    for k, p in ipairs(pages) do
+        p.Visible = (k == i)
+        tabButtons[k].BackgroundColor3 = (k == i) and Color3.fromRGB(42, 78, 98) or C.btn
+    end
+end
+local function addTab(name)
+    local i = #tabButtons + 1
+    local b = new("TextButton", { BackgroundColor3 = C.btn, Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.text,
+        Text = name, Size = UDim2.new(1 / 3, -3, 1, -4), BorderSizePixel = 0, TextTruncate = Enum.TextTruncate.AtEnd }, TabBar)
+    corner(b, 6)
+    b.Activated:Connect(function() setTab(i) end)
+    tabButtons[i] = b
 end
 
-local RecordBtn = makeButton(RotaPage, "Gravar", C.Accent, C.Text,
-    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 74), 13)
-local TestBtn = makeButton(RotaPage, "Testar", C.Bg3, C.Text,
-    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 110), 13)
-local SaveRenameBtn = makeButton(RotaPage, "Salvar rota", C.Violet, C.Text,
-    UDim2.new(1, -16, 0, 32), UDim2.new(0, 8, 0, 146), 13)
-
--- pagina rotas
-local DadosPage = new("Frame", {
-    Size = UDim2.new(1, 0, 1, -74),
-    Position = UDim2.new(0, 0, 0, 68),
-    BackgroundTransparency = 1,
-    Visible = false,
-}, MainFrame)
-
-local CountLabel = new("TextLabel", {
-    Size = UDim2.new(1, -16, 0, 14),
-    Position = UDim2.new(0, 8, 0, 0),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "",
-    TextColor3 = C.TextDim,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, DadosPage)
-
-local DataScroll = new("ScrollingFrame", {
-    Size = UDim2.new(1, -16, 1, -20),
-    Position = UDim2.new(0, 8, 0, 18),
-    BackgroundTransparency = 1,
-    BorderSizePixel = 0,
-    CanvasSize = UDim2.new(0, 0, 0, 0),
-    ScrollBarThickness = 3,
-    ScrollBarImageColor3 = C.Accent,
-    ScrollingDirection = Enum.ScrollingDirection.Y,
-    ElasticBehavior = Enum.ElasticBehavior.WhenScrollable,
-    Active = true,
-}, DadosPage)
-
-local DataLayout = new("UIListLayout", {
-    Padding = UDim.new(0, 5),
-    SortOrder = Enum.SortOrder.LayoutOrder,
-}, DataScroll)
-
-track(DataLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    DataScroll.CanvasSize = UDim2.new(0, 0, 0, DataLayout.AbsoluteContentSize.Y + 6)
-end))
-
--- pagina creditos
-local CredPage = new("Frame", {
-    Size = UDim2.new(1, 0, 1, -74),
-    Position = UDim2.new(0, 0, 0, 68),
-    BackgroundTransparency = 1,
-    Visible = false,
-}, MainFrame)
-
-local CredCard = new("Frame", {
-    Size = UDim2.new(1, -16, 0, 150),
-    Position = UDim2.new(0, 8, 0, 0),
-    BackgroundColor3 = C.Bg2,
-    BorderSizePixel = 0,
-}, CredPage)
-corner(CredCard, 9)
-stroke(CredCard, C.Bg3, 1)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 14),
-    Position = UDim2.new(0, 10, 0, 10),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "Criador",
-    TextColor3 = C.TextDim,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, CredCard)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 20),
-    Position = UDim2.new(0, 10, 0, 26),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "Angel",
-    TextColor3 = C.AccentHi,
-    TextSize = 16,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, CredCard)
-
-new("Frame", {
-    Size = UDim2.new(1, -20, 0, 1),
-    Position = UDim2.new(0, 10, 0, 56),
-    BackgroundColor3 = C.Bg3,
-    BorderSizePixel = 0,
-}, CredCard)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 14),
-    Position = UDim2.new(0, 10, 0, 64),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "Aviso",
-    TextColor3 = C.Amber,
-    TextSize = 10,
-    TextXAlignment = Enum.TextXAlignment.Left,
-}, CredCard)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 74),
-    Position = UDim2.new(0, 10, 0, 80),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamMedium,
-    Text = "Este script é totalmente destinado à equipe administrativa do drip menu. Proibido qualquer vazamento do script!",
-    TextColor3 = C.Text,
-    TextSize = 11,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
-}, CredCard)
-
--- cronometro -------------------------------------------------------------
-
-local timerStartTime, timerFrozen, timerRunning, timerConnection = 0, 0, false, nil
-
-local function formatTime(t)
-    if t < 0 then t = 0 end
-    local mins = math.floor(t / 60)
-    local secs = t - mins * 60
-    return string.format("%02d:%06.3f", mins, secs)
+-- ---------- ABA GERAL ----------
+local refreshers = {}
+local categoryInfoLabel
+local function setCategory(name, silent)
+    Session.category = name
+    for _, fn in ipairs(refreshers) do fn() end
+    if not silent then notify("info", "Categoria selecionada", name, 2) end
 end
 
-local function updateTimerDisplay()
-    local elapsed = timerRunning and (os.clock() - timerStartTime) or timerFrozen
-    TimerLabel.Text = formatTime(elapsed)
-end
+local function buildGeral()
+    local p = newPage()
+    local info = card(p, "INFORMAÇÕES")
+    label(info, "Criador do script: " .. CREATOR, 11)
+    label(info, "Servidor: " .. SERVER_URL, 11)
+    button(info, "COPIAR SERVIDOR", function() copyText(SERVER_URL, "Servidor copiado") end)
 
-local function startTimer()
-    timerStartTime = os.clock()
-    timerRunning = true
-    timerFrozen = 0
-    if timerConnection then timerConnection:Disconnect() end
-    timerConnection = RunService.RenderStepped:Connect(updateTimerDisplay)
-    TimerStroke.Color = C.Accent
-    TimerLabel.TextColor3 = C.Text
-end
+    local cat = card(p, "CATEGORIA DO TREINAMENTO")
+    label(cat, "Selecione a categoria do treinamento que você está conduzindo. Os tempos, quantidades e instruções serão utilizados automaticamente na aba Msg Pronta.", 10, false, C.dim)
+    local head = button(cat, (Session.category or "Selecione a categoria") .. "  ▾", function() end,
+        { Size = UDim2.new(1, 0, 0, 28) })
+    local list = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, Visible = false }, cat)
+    new("UIListLayout", { Padding = UDim.new(0, 3) }, list)
+    head.Activated:Connect(function() list.Visible = not list.Visible end)
+    for _, name in ipairs(CATEGORIES) do
+        button(list, name, function()
+            head.Text = name .. "  ▾"
+            list.Visible = false
+            setCategory(name)
+        end, { Size = UDim2.new(1, 0, 0, 24) })
+    end
 
-local function stopTimer()
-    if timerRunning then timerFrozen = os.clock() - timerStartTime end
-    timerRunning = false
-    if timerConnection then timerConnection:Disconnect() timerConnection = nil end
-    updateTimerDisplay()
-    TimerStroke.Color = C.Amber
-    TimerLabel.TextColor3 = Color3.fromRGB(255, 226, 170)
-end
+    -- Auto organizar
+    local auto = card(p, "AUTO SE ORGANIZAR")
+    label(auto, "Esta ferramenta auxilia na preparação do personagem para o treinamento, incluindo personagem de referência, posicionamento, clonagem e título de instrutor, conforme os comandos disponíveis no jogo.", 10, false, C.dim)
+    local autoBtn = button(auto, "AUTO ORGANIZAR", function() end, { Size = UDim2.new(1, 0, 0, 28) })
 
--- arrastar ---------------------------------------------------------------
+    local cfg = Session.cfg
+    local running = false
 
-local function makeDraggable(handle, target, onTap)
-    local dragging, startInput, dragStart, startPos, moved, t0 = false, nil, nil, nil, false, 0
+    local function rootPart()
+        local ch = LocalPlayer.Character
+        return ch and ch:FindFirstChild("HumanoidRootPart")
+    end
+    local function savePos(key, nice)
+        local r = rootPart()
+        if not r then notify("error", "Sem personagem", "Não foi possível ler a posição.", 3); return end
+        cfg.pos[key] = r.CFrame
+        notify("success", "Posição salva", nice, 2)
+    end
+    local function gotoPos(key, nice)
+        local pos = cfg.pos[key]
+        if not pos then notify("warn", "Configuração incompleta", nice .. ": posição não salva.", 3); return false end
+        local r = rootPart()
+        if not r then notify("error", "Sem personagem", "Não foi possível posicionar.", 3); return false end
+        r.CFrame = pos
+        return true
+    end
 
-    track(handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            moved = false
-            startInput = input
-            dragStart = input.Position
-            startPos = target.Position
-            t0 = os.clock()
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if onTap and not moved and (os.clock() - t0) < 0.4 then onTap() end
+    local function runAuto()
+        if running then return end
+        running = true
+        local steps = {
+            { key = "char", nice = "Preparar personagem", posKey = "p1",
+                wait = { LocalPlayer.CharacterAppearanceLoaded, LocalPlayer.CharacterAdded } },
+            { key = "clone", nice = "Clonagem", posKey = "p2", wait = { Workspace.ChildAdded } },
+            { key = "title", nice = "Título", wait = nil },
+        }
+        for _, s in ipairs(steps) do
+            local cmd = cfg.cmds[s.key]
+            if cfg.on[s.key] and cmd and cmd ~= "" then
+                local ok, err = sendChat(cmd)
+                if not ok then
+                    notify("error", "Auto Organizar interrompido", s.nice .. ": " .. tostring(err), 5)
+                    running = false
+                    return
                 end
-            end)
-        end
-    end))
-
-    track(UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input == startInput or input.UserInputType == Enum.UserInputType.MouseMovement then
-            local d = input.Position - dragStart
-            if d.Magnitude > 6 then moved = true end
-            if moved then
-                target.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + d.X,
-                    startPos.Y.Scale, startPos.Y.Offset + d.Y
-                )
-            end
-        end
-    end))
-end
-
-makeDraggable(FloatButton, FloatButton, function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
-makeDraggable(TitleBar, MainFrame, nil)
-
-track(CloseBtn.MouseButton1Click:Connect(function()
-    MainFrame.Visible = false
-end))
-
--- abas -------------------------------------------------------------------
-
-local refreshDataList
-
-local function switchTab(tab)
-    RotaPage.Visible = tab == "rota"
-    DadosPage.Visible = tab == "dados"
-    CredPage.Visible = tab == "cred"
-    local list = { { TabRota, "rota" }, { TabDados, "dados" }, { TabCred, "cred" } }
-    for _, t in ipairs(list) do
-        local on = t[2] == tab
-        t[1].BackgroundColor3 = on and C.AccentDark or C.Bg2
-        t[1].TextColor3 = on and C.Text or C.TextDim
-    end
-    if tab == "dados" then refreshDataList() end
-end
-
-track(TabRota.MouseButton1Click:Connect(function() switchTab("rota") end))
-track(TabDados.MouseButton1Click:Connect(function() switchTab("dados") end))
-track(TabCred.MouseButton1Click:Connect(function() switchTab("cred") end))
-
--- gravar e reproduzir ----------------------------------------------------
-
-local recordedData = {}
-local isRecording = false
-local recordingConnection = nil
-local playbackConnection = nil
-local playingBusy = false
-local startTime = 0
-local antigravidade = nil
-local originalCollides = {}
-local animationCache = {}
-local animationCacheOwner = nil
-local activeTracks = {}
-local preWalkTracks = {}
-
-local DEFAULT_WALKSPEED = 16
-local savedWalkSpeed = nil
-
--- carrega a track uma vez só e reaproveita (antes criava uma nova a cada uso)
-local function getOrLoadTrack(animator, animationId)
-    if animationCacheOwner ~= animator then
-        animationCache = {}
-        animationCacheOwner = animator
-    end
-    local cached = animationCache[animationId]
-    if cached ~= nil then return cached or nil end
-    local anim = Instance.new("Animation")
-    anim.AnimationId = animationId
-    local ok, trackObj = pcall(function() return animator:LoadAnimation(anim) end)
-    if ok and trackObj then
-        animationCache[animationId] = trackObj
-        return trackObj
-    end
-    animationCache[animationId] = false
-    return nil
-end
-
-local function getStartAnimations(data)
-    if #data == 0 then return {} end
-    local counts = {}
-    local sampleCount = math.min(30, #data)
-    for i = 1, sampleCount do
-        local anims = data[i].Animations
-        if anims then
-            for _, a in ipairs(anims) do
-                if not counts[a.Id] then counts[a.Id] = { anim = a, count = 0 } end
-                counts[a.Id].count = counts[a.Id].count + 1
-            end
-        end
-    end
-    local result = {}
-    local threshold = math.max(2, sampleCount * 0.3)
-    for _, info in pairs(counts) do
-        if info.count >= threshold then table.insert(result, info.anim) end
-    end
-    local prioOrder = { Action = 4, Action2 = 4, Action3 = 4, Action4 = 4, Movement = 3, Idle = 2, Core = 1 }
-    table.sort(result, function(a, b)
-        return (prioOrder[a.Priority] or 0) > (prioOrder[b.Priority] or 0)
-    end)
-    return result
-end
-
-local function stopPreWalkAnimations()
-    for _, t in ipairs(preWalkTracks) do
-        pcall(function() t:Stop(0.1) end)
-    end
-    preWalkTracks = {}
-end
-
-local function restoreWalkSpeed()
-    if savedWalkSpeed then
-        local char = LocalPlayer.Character
-        local hum = char and char:FindFirstChild("Humanoid")
-        if hum then hum.WalkSpeed = savedWalkSpeed end
-        savedWalkSpeed = nil
-    end
-end
-
-local function stopPlayback()
-    if playbackConnection then
-        playbackConnection:Disconnect()
-        playbackConnection = nil
-    end
-    playingBusy = false
-    stopPreWalkAnimations()
-    restoreWalkSpeed()
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChild("Humanoid")
-    if antigravidade then antigravidade:Destroy() antigravidade = nil end
-    if hum then hum.AutoRotate = true end
-    for _, t in pairs(activeTracks) do
-        pcall(function() t:Stop(0.1) end)
-    end
-    activeTracks = {}
-    for parte, status in pairs(originalCollides) do
-        if parte and parte.Parent then parte.CanCollide = status end
-    end
-    table.clear(originalCollides)
-end
-
-local function toStateEnum(s)
-    if typeof(s) == "EnumItem" then return s end
-    if type(s) == "string" then
-        local ok, e = pcall(function() return Enum.HumanoidStateType[s] end)
-        if ok then return e end
-    end
-    return nil
-end
-
-local function playRoute(data)
-    if #data == 0 then setStatus("Nada gravado", "warn") return end
-    if playbackConnection then
-        stopPlayback()
-        stopTimer()
-        setStatus("Cancelado", "warn")
-        return
-    end
-    if playingBusy then return end
-    playingBusy = true
-
-    task.spawn(function()
-        setStatus("Indo para o início...", "play")
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        if not hrp or not hum then
-            playingBusy = false
-            setStatus("Sem personagem", "warn")
-            return
-        end
-
-        savedWalkSpeed = hum.WalkSpeed
-
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if not animator then animator = Instance.new("Animator", hum) end
-
-        -- pré-carrega (sem esperar) as animações da rota enquanto o boneco anda até o início
-        local warmed = {}
-        for _, p in ipairs(data) do
-            if p.Animations then
-                for _, a in ipairs(p.Animations) do
-                    if a.Id and a.Id ~= "" and not warmed[a.Id] then
-                        warmed[a.Id] = true
-                        getOrLoadTrack(animator, a.Id)
+                if s.wait then
+                    local seen = waitAny(s.wait, 4)
+                    if not seen then
+                        notify("warn", s.nice, "Comando enviado, sem confirmação de efeito.", 3)
                     end
+                else
+                    notify("info", s.nice, "Comando enviado (sem como confirmar o efeito).", 3)
                 end
+                if s.posKey and cfg.pos[s.posKey] then gotoPos(s.posKey, s.nice) end
             end
         end
-
-        local animateScript = char:FindFirstChild("Animate")
-        local animateWasDisabled = false
-        if animateScript and animateScript:IsA("BaseScript") then
-            animateScript.Disabled = true
-            animateWasDisabled = true
-        end
-
-        local detectedAnims = getStartAnimations(data)
-        preWalkTracks = {}
-        for _, animData in ipairs(detectedAnims) do
-            local trackObj = getOrLoadTrack(animator, animData.Id)
-            if trackObj then
-                pcall(function()
-                    trackObj.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
-                    trackObj.Looped = true
-                    trackObj:Play(0.1)
-                    trackObj:AdjustSpeed(animData.Speed or 1)
-                end)
-                table.insert(preWalkTracks, trackObj)
-            end
-        end
-
-        hum.WalkSpeed = DEFAULT_WALKSPEED
-
-        local startCF = CFrame.new(unpack(data[1].CF))
-        hum:MoveTo(startCF.Position)
-
-        local reached = false
-        local conn
-        conn = hum.MoveToFinished:Connect(function()
-            reached = true
-            if conn then conn:Disconnect() end
-        end)
-        local timeout = tick() + 5
-        while not reached and tick() < timeout do task.wait(0.1) end
-        if conn then conn:Disconnect() end
-
-        stopPreWalkAnimations()
-        restoreWalkSpeed()
-
-        if animateWasDisabled and animateScript then
-            pcall(function() animateScript.Disabled = false end)
-        end
-
-        hum.AutoRotate = false
-        antigravidade = Instance.new("BodyForce", hrp)
-
-        local totalMass = 0
-        for _, parte in ipairs(char:GetChildren()) do
-            if parte:IsA("BasePart") then
-                originalCollides[parte] = parte.CanCollide
-                parte.CanCollide = false
-                totalMass = totalMass + parte:GetMass()
-            end
-        end
-        antigravidade.Force = Vector3.new(0, totalMass * workspace.Gravity, 0)
-
-        local pstartTime = os.clock()
-        local totalPoints = #data
-        local currentIndex = 1
-        local lastState = nil
-        activeTracks = {}
-
-        setStatus("Reproduzindo...", "play")
-        startTimer()
-
-        playbackConnection = RunService.Heartbeat:Connect(function()
-            local elapsedTime = os.clock() - pstartTime
-            while currentIndex < totalPoints and elapsedTime >= data[currentIndex + 1].Time do
-                currentIndex = currentIndex + 1
-            end
-            if currentIndex >= totalPoints then
-                stopPlayback()
-                stopTimer()
-                setStatus(string.format("Concluído em %.2fs", timerFrozen), "ok")
-                return
-            end
-
-            local p0 = data[currentIndex]
-            local p1 = data[currentIndex + 1]
-            local alpha = (p1.Time - p0.Time > 0)
-                and math.clamp((elapsedTime - p0.Time) / (p1.Time - p0.Time), 0, 1) or 1
-
-            local cf0 = CFrame.new(unpack(p0.CF))
-            local cf1 = CFrame.new(unpack(p1.CF))
-            hrp.CFrame = cf0:Lerp(cf1, alpha)
-
-            if p1.Velocity then
-                hrp.AssemblyLinearVelocity = Vector3.new(p1.Velocity[1], p1.Velocity[2], p1.Velocity[3])
-            end
-
-            if p0.State and p0.State ~= lastState then
-                lastState = p0.State
-                local st = toStateEnum(p0.State)
-                if st then pcall(function() hum:ChangeState(st) end) end
-            end
-
-            if p1.Animations then
-                local wanted = {}
-                for _, animData in ipairs(p1.Animations) do
-                    wanted[animData.Id] = animData
-                    local trackObj = activeTracks[animData.Id]
-                    if not trackObj then
-                        trackObj = getOrLoadTrack(animator, animData.Id)
-                        if trackObj then
-                            pcall(function()
-                                trackObj.Priority = Enum.AnimationPriority[animData.Priority] or Enum.AnimationPriority.Movement
-                                trackObj.Looped = (animData.Looped ~= false)
-                                trackObj:Play(0.05)
-                            end)
-                            activeTracks[animData.Id] = trackObj
-                        end
-                    end
-                    local t = activeTracks[animData.Id]
-                    if t then pcall(function() t:AdjustSpeed(animData.Speed) end) end
-                end
-                for id, trackObj in pairs(activeTracks) do
-                    if not wanted[id] then
-                        pcall(function() trackObj:Stop(0.1) end)
-                        activeTracks[id] = nil
-                    end
-                end
-            end
-        end)
-    end)
-end
-
-local function resetRecordButton()
-    RecordBtn.Text = "Gravar"
-    RecordBtn.BackgroundColor3 = C.Accent
-end
-
-track(RecordBtn.MouseButton1Click:Connect(function()
-    if playbackConnection then stopPlayback() end
-    isRecording = not isRecording
-
-    if isRecording then
-        local char = LocalPlayer.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChild("Humanoid")
-        if not hrp or not hum then
-            isRecording = false
-            setStatus("Sem personagem", "warn")
-            return
-        end
-
-        recordedData = {}
-        startTime = os.clock()
-        startTimer()
-        RecordBtn.Text = "Parar"
-        RecordBtn.BackgroundColor3 = C.Red
-        setStatus("Gravando...", "rec")
-
-        local animator = hum:FindFirstChildOfClass("Animator") or char:FindFirstChildWhichIsA("Animator", true)
-        local frameSeen = {}
-        local lastNameTick = 0
-
-        recordingConnection = RunService.Heartbeat:Connect(function()
-            local currentTime = os.clock() - startTime
-            local cf = hrp.CFrame
-            local vel = hrp.AssemblyLinearVelocity
-            local state = hum:GetState()
-            local anims = {}
-
-            if not animator or not animator.Parent then
-                animator = hum:FindFirstChildOfClass("Animator") or char:FindFirstChildWhichIsA("Animator", true)
-            end
-
-            -- mostra no status os nomes das animações detectadas (a cada 0.25s)
-            local names = nil
-            if currentTime - lastNameTick >= 0.25 then
-                lastNameTick = currentTime
-                names = {}
-            end
-
-            if animator then
-                table.clear(frameSeen)
-                for _, trackObj in ipairs(animator:GetPlayingAnimationTracks()) do
-                    local a = trackObj.Animation
-                    if a and trackObj.WeightCurrent > 0.01 then
-                        local id = a.AnimationId
-                        if id ~= "" and not frameSeen[id] then
-                            frameSeen[id] = true
-                            table.insert(anims, {
-                                Id = id,
-                                Speed = trackObj.Speed,
-                                Weight = trackObj.WeightCurrent,
-                                Priority = trackObj.Priority.Name,
-                                Looped = trackObj.Looped,
-                            })
-                            if names then
-                                local nm = a.Name
-                                if nm == "" then nm = id:match("%d+") or "?" end
-                                table.insert(names, nm)
-                            end
-                        end
-                    end
-                end
-            end
-
-            table.insert(recordedData, {
-                Time = currentTime,
-                CF = { cf:GetComponents() },
-                Velocity = { vel.X, vel.Y, vel.Z },
-                State = state.Name,
-                Animations = anims,
-            })
-
-            if names then
-                local txt = string.format("Gravando | %d anim", #names)
-                if #names > 0 then txt = txt .. ": " .. table.concat(names, ", ") end
-                setStatus(txt, "rec")
-            end
-        end)
-    else
-        if recordingConnection then
-            recordingConnection:Disconnect()
-            recordingConnection = nil
-        end
-        stopTimer()
-        resetRecordButton()
-        setStatus(string.format("%.2fs  |  %d pts  |  %d anims", timerFrozen, #recordedData, countAnims(recordedData)), "ok")
-    end
-end))
-
-track(TestBtn.MouseButton1Click:Connect(function()
-    if isRecording then setStatus("Pare a gravação antes", "warn") return end
-    if #recordedData == 0 then setStatus("Nada gravado", "warn") return end
-    playRoute(recordedData)
-end))
-
--- popup de salvar --------------------------------------------------------
-
-local RenamePopup = new("Frame", {
-    Size = UDim2.new(0, 200, 0, 98),
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0.5, 0),
-    BackgroundColor3 = C.Bg,
-    BorderSizePixel = 0,
-    Visible = false,
-    ZIndex = 10,
-    Active = true,
-}, ScreenGui)
-corner(RenamePopup, 12)
-stroke(RenamePopup, C.Violet, 1.5)
-
-new("TextLabel", {
-    Size = UDim2.new(1, -20, 0, 20),
-    Position = UDim2.new(0, 10, 0, 7),
-    BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
-    Text = "Nome da rota",
-    TextColor3 = C.Text,
-    TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    ZIndex = 11,
-}, RenamePopup)
-
-local RenameBox = new("TextBox", {
-    Size = UDim2.new(1, -20, 0, 26),
-    Position = UDim2.new(0, 10, 0, 30),
-    BackgroundColor3 = C.Bg2,
-    BorderSizePixel = 0,
-    Font = Enum.Font.Gotham,
-    Text = "",
-    PlaceholderText = "rota_1",
-    PlaceholderColor3 = C.TextDim,
-    TextColor3 = C.Text,
-    TextSize = 12,
-    ClearTextOnFocus = false,
-    ZIndex = 11,
-}, RenamePopup)
-corner(RenameBox, 7)
-
-local RenameOK = makeButton(RenamePopup, "Salvar", C.Violet, C.Text,
-    UDim2.new(0.5, -14, 0, 26), UDim2.new(0, 10, 0, 63), 12)
-RenameOK.ZIndex = 11
-local RenameCancel = makeButton(RenamePopup, "Cancelar", C.Bg3, C.Text,
-    UDim2.new(0.5, -14, 0, 26), UDim2.new(0.5, 4, 0, 63), 12)
-RenameCancel.ZIndex = 11
-
-track(SaveRenameBtn.MouseButton1Click:Connect(function()
-    if isRecording then setStatus("Pare a gravação antes", "warn") return end
-    if #recordedData == 0 then setStatus("Nada gravado", "warn") return end
-    RenameBox.Text = "rota_" .. os.date("%H%M%S")
-    RenamePopup.Visible = true
-    RenameBox:CaptureFocus()
-end))
-
-track(RenameCancel.MouseButton1Click:Connect(function()
-    RenamePopup.Visible = false
-end))
-
-track(RenameOK.MouseButton1Click:Connect(function()
-    local name = RenameBox.Text
-    if name == "" then name = "rota_" .. os.date("%H%M%S") end
-
-    local baseName, counter = name, 2
-    local function fileFor(n) return FOLDER .. "/" .. safeName(n) .. ".json" end
-    local function taken(n)
-        if savedRoutes[n] then return true end
-        if canFS then
-            local ok, exists = pcall(function() return isfile(fileFor(n)) end)
-            if ok and exists then return true end
-        end
-        return false
-    end
-    while taken(name) do
-        name = baseName .. "_" .. counter
-        counter = counter + 1
-    end
-
-    local entry = {
-        Duracao = timerFrozen,
-        Pontos = #recordedData,
-        Data = recordedData,
-        Anims = countAnims(recordedData),
-        File = fileFor(name),
-    }
-    savedRoutes[name] = entry
-    RenamePopup.Visible = false
-
-    if canFS then
-        if saveToDisk(name, entry) then
-            setStatus("Salva: " .. name, "ok")
+        if cfg.pos.dest then
+            if gotoPos("dest", "STS Central") then notify("success", "Posicionamento", "Posição de destino aplicada.", 2.5) end
         else
-            setStatus("Falha ao gravar arquivo", "warn")
+            notify("warn", "Configuração incompleta", "Posição de destino (STS Central) não salva.", 3.5)
         end
+        running = false
+    end
+    autoBtn.Activated:Connect(function() task.spawn(runAuto) end)
+
+    -- Configuração admin (recolhível)
+    local adminHead = button(auto, "CONFIGURAÇÃO ADMIN ▸", function() end, { Size = UDim2.new(1, 0, 0, 24) })
+    local admin = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, Visible = false }, auto)
+    new("UIListLayout", { Padding = UDim.new(0, 5) }, admin)
+    adminHead.Activated:Connect(function()
+        admin.Visible = not admin.Visible
+        adminHead.Text = "CONFIGURAÇÃO ADMIN " .. (admin.Visible and "▾" or "▸")
+    end)
+
+    local function stepRow(title, key, posKey, posNice)
+        label(admin, title, 10, true, C.baby)
+        local box = textBox(admin, cfg.cmds[key], "comando")
+        box.FocusLost:Connect(function() cfg.cmds[key] = box.Text end)
+        local r = row(admin)
+        local tgl
+        tgl = button(r, cfg.on[key] and "ATIVA" or "DESLIGADA", function()
+            cfg.on[key] = not cfg.on[key]
+            tgl.Text = cfg.on[key] and "ATIVA" or "DESLIGADA"
+        end)
+        button(r, "EXECUTAR", function()
+            cfg.cmds[key] = box.Text
+            sendAction(box.Text, title)
+        end)
+        if posKey then button(r, "SALVAR POSIÇÃO", function() savePos(posKey, posNice) end) end
+    end
+    stepRow("ETAPA 1 — PREPARAR PERSONAGEM", "char", "p1", "Posição pós-preparo")
+    stepRow("ETAPA 2 — CLONAGEM", "clone", "p2", "Posição pós-clone")
+    stepRow("ETAPA 3 — TÍTULO", "title", nil)
+    label(admin, "ETAPA 4 — POSIÇÃO DE DESTINO (STS CENTRAL)", 10, true, C.baby)
+    local r4 = row(admin)
+    button(r4, "SALVAR DESTINO", function() savePos("dest", "Destino STS Central") end)
+    button(r4, "IR AO DESTINO", function() gotoPos("dest", "STS Central") end)
+
+    button(auto, "COPIAR DIAGNÓSTICO", function()
+        local function fp(cf)
+            if not cf then return "não salva" end
+            local v = cf.Position
+            return string.format("%.1f, %.1f, %.1f", v.X, v.Y, v.Z)
+        end
+        local lines = {
+            "DIAGNÓSTICO — PRANCHETA V1 | AUTO ORGANIZAR",
+            "Comandos configurados:",
+            "  char: " .. tostring(cfg.cmds.char), "  clone: " .. tostring(cfg.cmds.clone),
+            "  título: " .. tostring(cfg.cmds.title),
+            "Etapas habilitadas: char=" .. tostring(cfg.on.char) .. ", clone=" .. tostring(cfg.on.clone)
+                .. ", título=" .. tostring(cfg.on.title),
+            "Posições salvas: p1=" .. fp(cfg.pos.p1) .. " | p2=" .. fp(cfg.pos.p2) .. " | destino=" .. fp(cfg.pos.dest),
+            "Ordem de execução atual: char -> (ir p1) -> clone -> (ir p2) -> título -> ir destino",
+            "Dependências identificadas: comandos com ';' dependem do sistema administrativo do jogo e de permissão; "
+                .. "o envio é feito pelo chat (" .. (TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+                    and "TextChatService" or "chat legado") .. ").",
+            "Erros encontrados: nenhum registrado nesta sessão.",
+            "Pendente: confirmar ordem real das etapas, se o ;char recria o personagem, onde o clone aparece, "
+                .. "coordenada do STS Central e se o executor tem permissão para os comandos.",
+        }
+        copyText(table.concat(lines, "\n"), "Diagnóstico copiado")
+    end, { Size = UDim2.new(1, 0, 0, 26) })
+end
+
+-- ---------- ABA MSG PRONTA ----------
+local function messageCard(parent, title, getText, extra)
+    local c = card(parent, title)
+    local msg = label(c, "", 11)
+    local r = row(c)
+    local sendBtn = button(r, "ENVIAR", function()
+        local t = getText(); if t then sendAction(t, title) end
+    end)
+    for _, e in ipairs(extra or {}) do button(r, e[1], e[2]) end
+    button(r, "COPIAR", function()
+        local t = getText(); if t then copyText(t) end
+    end)
+    local function update()
+        local t = getText()
+        msg.Text = t or "TEMPO NÃO CONFIGURADO"
+        msg.TextColor3 = t and C.text or KIND_COLOR.warn
+        setEnabled(sendBtn, t ~= nil)
+    end
+    update()
+    return update
+end
+
+local function buildMsg()
+    local p = newPage()
+    -- Apresentação
+    local cur = math.random(#PRESENTATIONS)
+    local upd
+    upd = messageCard(p, "APRESENTAÇÃO", function() return presentationText(cur) end, {
+        { "OUTRA VERSÃO", function()
+            local n
+            repeat n = math.random(#PRESENTATIONS) until n ~= cur
+            cur = n
+            upd()
+        end },
+    })
+    -- Marcha
+    local m = card(p, "MARCHA")
+    local m1 = card(m, "Preparar"); label(m1, ";hb PREPARAR PARA MARCHAR!", 11)
+    button(m1, "ENVIAR", function() sendAction(";hb PREPARAR PARA MARCHAR!", "Preparar para marchar") end)
+    local m2 = card(m, "Marchar"); label(m2, ";hb MARCHEM!", 11)
+    button(m2, "ENVIAR", function() sendAction(";hb MARCHEM!", "Marchem") end)
+
+    -- Tempos
+    local t = card(p, "TEMPOS DO TREINAMENTO")
+    categoryInfoLabel = label(t, "", 10, false, C.dim)
+    local function updateInfo()
+        local d = DATA[Session.category or ""]
+        if not d then categoryInfoLabel.Text = "Nenhuma categoria selecionada (aba Geral)."; return end
+        categoryInfoLabel.Text = "Categoria: " .. Session.category .. "\nMínimo: " .. d.min .. "\nPolichinelos: " .. d.jj
+            .. (d.nota and ("\n" .. d.nota) or "")
+    end
+    table.insert(refreshers, updateInfo); updateInfo()
+    for i = 1, 4 do
+        local u = messageCard(t, "PARKOUR " .. i, function()
+            local tm = parkourTime(i); return tm and (";hb ao " .. tm) or nil
+        end)
+        table.insert(refreshers, u)
+    end
+    table.insert(refreshers, messageCard(t, "TORRE", function()
+        local tm = torreTime(); return tm and (";hb ao " .. tm) or nil
+    end))
+end
+
+-- ---------- ABA PONTOS / ANOTAÇÕES ----------
+local startSelection -- definida abaixo
+
+local function buildNotes()
+    local p = newPage()
+    local n = card(p, "ANOTAÇÕES")
+    local box = new("TextBox", { BackgroundColor3 = Color3.fromRGB(14, 15, 19), TextColor3 = C.text, Font = Enum.Font.Gotham,
+        TextSize = 11, Text = Session.notes, PlaceholderText = "Observações sobre militares, desempenho, ocorrências...",
+        PlaceholderColor3 = C.dim, ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        Size = UDim2.new(1, 0, 0, 110), BorderSizePixel = 0 }, n)
+    corner(box, 6); stroke(box, C.baby, 0.75, 1)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 4) }, box)
+    local counter = label(n, "", 9, false, C.dim)
+    local function upCount() counter.Text = #box.Text .. " caracteres" end
+    upCount()
+    box:GetPropertyChangedSignal("Text"):Connect(upCount)
+    box.FocusLost:Connect(function() Session.notes = box.Text end) -- mantém na sessão
+
+    local r = row(n)
+    button(r, "SALVAR", function()
+        Session.notes = box.Text
+        local canFile = type(writefile) == "function"
+        if canFile then
+            local ok = pcall(writefile, NOTES_FILE, box.Text)
+            if ok then notify("success", "Anotações salvas", "Sessão + arquivo " .. NOTES_FILE .. ".", 2.5)
+            else notify("warn", "Salvas só na sessão", "Falha ao gravar o arquivo.", 3) end
+        else
+            notify("warn", "Salvas só na sessão", "O executor não permite gravar arquivos.", 3)
+        end
+    end)
+    local clearBtn, confirming
+    clearBtn = button(r, "LIMPAR", function()
+        if not confirming then
+            confirming = true; clearBtn.Text = "CONFIRMAR?"
+            task.delay(3, function()
+                if confirming and clearBtn.Parent then confirming = false; clearBtn.Text = "LIMPAR" end
+            end)
+        else
+            confirming = false; clearBtn.Text = "LIMPAR"
+            box.Text = ""; Session.notes = ""
+            notify("info", "Anotações limpas", "O texto foi apagado.", 2)
+        end
+    end)
+    button(r, "COPIAR", function() copyText(box.Text, "Anotações copiadas") end)
+
+    local pts = card(p, "REGISTRAR PONTOS")
+    label(pts, "Ao apertar em Pontos, feche o menu e clique em algum militar. Será aberta uma pequena janela contendo o nome dele e o campo para definir quantos pontos você deseja registrar.", 10, false, C.dim)
+    button(pts, "PONTOS", function() startSelection() end, { Size = UDim2.new(1, 0, 0, 28) })
+end
+
+-- =========================================================
+-- 6. ABRIR / FECHAR MENU
+-- =========================================================
+local tool
+local function isEquipped()
+    return tool ~= nil and tool.Parent ~= nil and tool.Parent == LocalPlayer.Character
+end
+
+local menuToken = 0
+local function openMenu()
+    if not isEquipped() then return end
+    menuToken += 1
+    Main.Visible = true
+    local info = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    TweenService:Create(Main, info, { GroupTransparency = 0 }):Play()
+    TweenService:Create(mainScale, info, { Scale = 1 }):Play()
+end
+local function closeMenu()
+    menuToken += 1
+    local my = menuToken
+    local info = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local t = TweenService:Create(Main, info, { GroupTransparency = 1 })
+    TweenService:Create(mainScale, info, { Scale = 0.92 }):Play()
+    t.Completed:Connect(function() if my == menuToken then Main.Visible = false end end)
+    t:Play()
+end
+
+-- =========================================================
+-- 7. SELEÇÃO DE JOGADOR + JANELA DE PONTOS
+-- =========================================================
+local selecting, selConn, selectedPlayer = false, nil, nil
+
+local Hint = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), AnchorPoint = Vector2.new(0.5, 1),
+    Position = UDim2.new(0.5, 0, 1, -24), Size = UDim2.fromOffset(260, 0), AutomaticSize = Enum.AutomaticSize.Y,
+    Visible = false, ZIndex = 40 }, Gui)
+corner(Hint, 10); stroke(Hint, C.baby, 0.5, 1)
+new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, Hint)
+new("UIListLayout", { Padding = UDim.new(0, 5), HorizontalAlignment = Enum.HorizontalAlignment.Center }, Hint)
+local hintLabel = label(Hint, "Toque/clique em um militar para registrar pontos.", 11)
+hintLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+local PointsWin = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), Size = UDim2.fromOffset(250, 0),
+    AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
+    Visible = false, ZIndex = 45 }, Gui)
+corner(PointsWin, 10); stroke(PointsWin, C.baby, 0.5, 1)
+new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(10, 10, 13), Color3.fromRGB(20, 34, 44)) }, PointsWin)
+local pwHandle = new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.baby,
+    Text = "REGISTRAR PONTOS", Size = UDim2.new(1, 0, 0, 28), ZIndex = 46 }, PointsWin)
+pwHandle.Active = true
+local pwBody = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, 0, 0, 0),
+    AutomaticSize = Enum.AutomaticSize.Y }, PointsWin)
+new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10) }, pwBody)
+new("UIListLayout", { Padding = UDim.new(0, 5) }, pwBody)
+label(pwBody, "Jogador", 10, false, C.dim)
+local pwName = textBox(pwBody, "", "")
+pwName.TextEditable = false
+label(pwBody, "Quantidade de pontos (1 a " .. MAX_POINTS .. ")", 10, false, C.dim)
+local pwQty = textBox(pwBody, "", "ex.: 3")
+pwQty.ClearTextOnFocus = false
+local pwRow = row(pwBody)
+makeDraggable(pwHandle, PointsWin)
+
+local function endSelection()
+    selecting = false
+    if selConn then selConn:Disconnect(); selConn = nil end
+    Hint.Visible = false
+end
+local function closePointsWin(reopen)
+    PointsWin.Visible = false
+    selectedPlayer = nil
+    if reopen and isEquipped() then openMenu() end
+end
+local function closeAll() -- desequipou / perdeu a ferramenta
+    endSelection()
+    closePointsWin(false)
+    closeMenu()
+end
+
+local function pickPlayerAt(pos)
+    local cam = Workspace.CurrentCamera
+    if not cam then return nil end
+    local ray = cam:ScreenPointToRay(pos.X, pos.Y)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = { LocalPlayer.Character }
+    local res = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+    if not res then return nil end
+    local model = res.Instance:FindFirstAncestorOfClass("Model")
+    while model do
+        local plr = Players:GetPlayerFromCharacter(model)
+        if plr then return plr end
+        model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
+    end
+    return nil
+end
+
+startSelection = function()
+    if not isEquipped() or selecting then return end
+    selecting = true
+    closeMenu()
+    Hint.Visible = true
+    selConn = UIS.InputBegan:Connect(function(input, processed)
+        if processed or not selecting then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        local plr = pickPlayerAt(input.Position)
+        if not plr then return end
+        if plr == LocalPlayer then notify("warn", "Seleção inválida", "Selecione outro militar.", 2.5); return end
+        endSelection()
+        selectedPlayer = plr
+        pwName.Text = plr.Name
+        pwQty.Text = ""
+        PointsWin.Visible = true
+    end)
+end
+
+local confirmBusy = false
+button(pwRow, "CONFIRMAR", function()
+    if confirmBusy then return end
+    local plr = selectedPlayer
+    if not plr or plr.Parent ~= Players then
+        notify("error", "Jogador inválido", "O militar selecionado saiu do servidor.", 3)
+        closePointsWin(true); return
+    end
+    local n = tonumber(pwQty.Text)
+    if not n or n ~= math.floor(n) or n < 1 or n > MAX_POINTS then
+        notify("error", "Valor inválido", "Informe um número inteiro de 1 a " .. MAX_POINTS .. ".", 3); return
+    end
+    confirmBusy = true
+    local msg = TITLER_TEMPLATE:gsub("{NOME}", function() return plr.Name end)
+    msg = msg:gsub("{PONTOS}", function() return tostring(n) end)
+    local ok = sendChat(msg)
+    if ok then
+        notify("success", "Comando enviado", msg .. " (execução depende do jogo).", 3.5)
     else
-        setStatus("Salva só nesta sessão", "warn")
+        copyText(msg, "Comando copiado (envio falhou)")
+        notify("warn", "Envie manualmente", "Não foi possível enviar pelo chat; o texto foi copiado se possível.", 4)
     end
-    switchTab("dados")
+    confirmBusy = false
+    closePointsWin(true)
+end)
+button(pwRow, "CANCELAR", function() closePointsWin(true) end)
+button(Hint, "CANCELAR", function() endSelection(); if isEquipped() then openMenu() end end)
+
+-- =========================================================
+-- 8. GERENCIAMENTO DA PRANCHETA V1 (item + hotbar)
+-- =========================================================
+local function countTools()
+    local n = 0
+    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if bp then for _, c in ipairs(bp:GetChildren()) do if c:IsA("Tool") then n += 1 end end end
+    local ch = LocalPlayer.Character
+    if ch then for _, c in ipairs(ch:GetChildren()) do if c:IsA("Tool") then n += 1 end end end
+    return n
+end
+
+local function unbindTool()
+    for _, c in ipairs(toolConns) do c:Disconnect() end
+    table.clear(toolConns)
+end
+local function bindTool(t)
+    unbindTool()
+    tool = t
+    table.insert(toolConns, t.Equipped:Connect(function() task.defer(openMenu) end))
+    table.insert(toolConns, t.Unequipped:Connect(closeAll))
+    table.insert(toolConns, t.AncestryChanged:Connect(function()
+        local par = t.Parent
+        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
+        if par == nil or (par ~= bp and par ~= LocalPlayer.Character) then
+            closeAll()
+            if par == nil then tool = nil end
+        end
+    end))
+    if isEquipped() then openMenu() end
+end
+
+local ensuring = false
+local function ensureTool()
+    if ensuring then return end
+    if tool and tool:IsDescendantOf(game) then return end
+    ensuring = true
+    local backpack = LocalPlayer:WaitForChild("Backpack", 10)
+    if not backpack then
+        notify("error", "Prancheta V1", "Backpack não encontrado; item não criado.", 4)
+        ensuring = false; return
+    end
+    local existing
+    for _, container in ipairs({ backpack, LocalPlayer.Character }) do
+        if container then
+            for _, c in ipairs(container:GetChildren()) do
+                if c:IsA("Tool") and c:GetAttribute("PranchetaV1") then existing = c end
+            end
+        end
+    end
+    if existing then bindTool(existing); ensuring = false; return end
+
+    local before = countTools() -- verifica os seis espaços antes de inserir
+    local t = new("Tool", { Name = TOOL_NAME, ToolTip = "Prancheta V1 | Drip Menu", RequiresHandle = false, CanBeDropped = false })
+    t:SetAttribute("PranchetaV1", true)
+    t.Parent = backpack
+    if t.Parent ~= backpack then
+        notify("error", "Prancheta V1", "O jogo impediu a criação do item. Nada foi criado.", 4)
+        t:Destroy(); ensuring = false; return
+    end
+    bindTool(t)
+    if before >= HOTBAR_SIZE then
+        notify("warn", "HOTBAR CHEIA", HOTBAR_MSG, 6.5)
+    end
+    ensuring = false
+end
+
+-- =========================================================
+-- 9. INICIALIZAÇÃO E LIMPEZA
+-- =========================================================
+-- restaura anotações do arquivo, se a sessão estiver vazia
+if Session.notes == "" and type(isfile) == "function" and type(readfile) == "function" then
+    pcall(function()
+        if isfile(NOTES_FILE) then Session.notes = readfile(NOTES_FILE) end
+    end)
+end
+
+addTab("GERAL"); addTab("MSG PRONTA"); addTab("PONTOS / NOTAS")
+buildGeral(); buildMsg(); buildNotes()
+setTab(1)
+if Session.category then setCategory(Session.category, true) end
+
+local function destroy()
+    closeAll()
+    unbindTool()
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    table.clear(conns)
+    if tool then pcall(function() tool:Destroy() end); tool = nil end
+    pcall(function() Gui:Destroy() end)
+    ENV.__PranchetaV1 = nil
+end
+ENV.__PranchetaV1 = { Destroy = destroy }
+
+track(LocalPlayer.CharacterAdded:Connect(function(char)
+    closeAll()
+    char:WaitForChild("Humanoid", 10)
+    ensureTool()
+end))
+track(LocalPlayer.ChildAdded:Connect(function(c)
+    if c:IsA("Backpack") then task.defer(ensureTool) end
 end))
 
--- lista de rotas ---------------------------------------------------------
-
-local function buildCopyText(name, entry)
-    local lines = { string.format("-- drip admin | %s | %.3fs\nreturn {", name, entry.Duracao) }
-    for _, node in ipairs(entry.Data) do
-        local cfStr = table.concat(node.CF, ", ")
-        local velStr = table.concat(node.Velocity, ", ")
-        local stateName = "Running"
-        if typeof(node.State) == "EnumItem" then stateName = node.State.Name
-        elseif type(node.State) == "string" then stateName = node.State end
-        local parts = {}
-        for _, a in ipairs(node.Animations or {}) do
-            table.insert(parts, string.format(
-                "{Id=\"%s\",Speed=%.3f,Weight=%.3f,Priority=\"%s\",Looped=%s}",
-                a.Id, a.Speed or 1, a.Weight or 1, a.Priority or "Movement", tostring(a.Looped ~= false)))
-        end
-        table.insert(lines, string.format(
-            "{Time=%.3f,CF={%s},Velocity={%s},State=Enum.HumanoidStateType.%s,Animations={%s}},",
-            node.Time, cfStr, velStr, stateName, table.concat(parts, ",")))
-    end
-    table.insert(lines, "}")
-    return table.concat(lines, "\n")
-end
-
-refreshDataList = function()
-    for _, child in ipairs(DataScroll:GetChildren()) do
-        if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end
-    end
-    local names = {}
-    for n in pairs(savedRoutes) do table.insert(names, n) end
-    table.sort(names)
-
-    CountLabel.Text = string.format("%d rota(s)%s", #names, canFS and "  |  salvas no aparelho" or "  |  só nesta sessão")
-
-    if #names == 0 then
-        new("TextLabel", {
-            Size = UDim2.new(1, 0, 0, 60),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamMedium,
-            Text = "Nenhuma rota salva\nGrave uma rota e toque em Salvar rota",
-            TextColor3 = C.TextDim,
-            TextSize = 11,
-            TextWrapped = true,
-        }, DataScroll)
-        return
-    end
-
-    for i, name in ipairs(names) do
-        local entry = savedRoutes[name]
-
-        local item = new("Frame", {
-            Size = UDim2.new(1, -4, 0, 64),
-            BackgroundColor3 = C.Bg2,
-            BorderSizePixel = 0,
-            LayoutOrder = i,
-        }, DataScroll)
-        corner(item, 8)
-        stroke(item, C.Bg3, 1)
-
-        new("TextLabel", {
-            Size = UDim2.new(1, -14, 0, 15),
-            Position = UDim2.new(0, 7, 0, 5),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.GothamBold,
-            Text = name,
-            TextColor3 = C.Text,
-            TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd,
-        }, item)
-
-        new("TextLabel", {
-            Size = UDim2.new(1, -14, 0, 12),
-            Position = UDim2.new(0, 7, 0, 20),
-            BackgroundTransparency = 1,
-            Font = Enum.Font.Code,
-            Text = string.format("%.2fs | %d pts | %d anims", entry.Duracao, entry.Pontos, entry.Anims or 0),
-            TextColor3 = C.AccentHi,
-            TextSize = 10,
-            TextXAlignment = Enum.TextXAlignment.Left,
-        }, item)
-
-        local row = new("Frame", {
-            Size = UDim2.new(1, -14, 0, 22),
-            Position = UDim2.new(0, 7, 0, 36),
-            BackgroundTransparency = 1,
-        }, item)
-
-        local function rowBtn(text, color, index, onClick)
-            local b = new("TextButton", {
-                Size = UDim2.new(1 / 3, -4, 1, 0),
-                Position = UDim2.new((index - 1) / 3, (index - 1) * 2, 0, 0),
-                BackgroundColor3 = color,
-                Font = Enum.Font.GothamBold,
-                Text = text,
-                TextColor3 = C.Text,
-                TextSize = 10,
-                BorderSizePixel = 0,
-                AutoButtonColor = true,
-            }, row)
-            corner(b, 6)
-            track(b.MouseButton1Click:Connect(function() onClick(b) end))
-            return b
-        end
-
-        rowBtn("Testar", C.AccentDark, 1, function()
-            if isRecording then setStatus("Pare a gravação antes", "warn") return end
-            MainFrame.Visible = true
-            playRoute(entry.Data)
-        end)
-
-        rowBtn("Copiar", C.Bg3, 2, function()
-            if setclipboard then
-                local ok = pcall(function() setclipboard(buildCopyText(name, entry)) end)
-                setStatus(ok and ("Copiado: " .. name) or "Falha ao copiar", ok and "ok" or "warn")
-            else
-                setStatus("Sem clipboard neste executor", "warn")
-            end
-        end)
-
-        local confirmAt = 0
-        rowBtn("Apagar", Color3.fromRGB(150, 44, 60), 3, function(btn)
-            if os.clock() - confirmAt < 2.5 then
-                deleteFromDisk(entry)
-                savedRoutes[name] = nil
-                setStatus("Apagada: " .. name, "warn")
-                refreshDataList()
-            else
-                confirmAt = os.clock()
-                btn.Text = "Certeza?"
-                task.delay(2.5, function()
-                    if btn and btn.Parent then btn.Text = "Apagar" end
-                end)
-            end
-        end)
-    end
-end
-
--- respawn e limpeza ------------------------------------------------------
-
-track(LocalPlayer.CharacterAdded:Connect(function()
-    stopPlayback()
-    animationCache = {}
-    animationCacheOwner = nil
-end))
-
-env.DripAdminCleanup = function()
-    stopPlayback()
-    if recordingConnection then recordingConnection:Disconnect() end
-    if timerConnection then timerConnection:Disconnect() end
-    for _, c in ipairs(connections) do
-        pcall(function() c:Disconnect() end)
-    end
-    if ScreenGui then ScreenGui:Destroy() end
-end
-
--- inicio -----------------------------------------------------------------
-
-local loaded = loadAllFromDisk()
-if loaded > 0 then
-    setStatus(loaded .. " rota(s) carregada(s)", "ok")
-elseif not canFS then
-    setStatus("Sem armazenamento no executor", "warn")
-else
-    setStatus("Pronto", "idle")
-end
+task.spawn(ensureTool)
