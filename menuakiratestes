@@ -1,883 +1,2215 @@
---[[ PRANCHETA V1 | DRIP MENU — LuaU (client / executor)
-     Ordem: item -> equipar abre menu -> desequipar fecha menu.
-     Dados de tempos extraídos do script de referência (Drip treinos v1.7). ]]
+--[[
+    EB DO ZP SCRIPT
+    Criador: angel007p (discord)
+    Abas: Parkour | Combate | JJs | Creditos
+]]
 
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
-local TextChatService = game:GetService("TextChatService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
-if not LocalPlayer then return end
 
-local ENV = (getgenv and getgenv()) or _G
+--------------------------------------------------------------------
+-- CONFIG
+--------------------------------------------------------------------
+local JJS_URL = "https://pastebin.com/raw/HQwt3Vs1"
 
--- =========================================================
--- 1. CONFIGURAÇÃO / INICIALIZAÇÃO
--- =========================================================
-local TOOL_NAME = "Prancheta V1"
-local HOTBAR_SIZE = 6
-local MAX_POINTS = 100                          -- AJUSTAR: limite real do sistema é desconhecido
-local TITLER_TEMPLATE = ";titler {NOME} {PONTOS}" -- AJUSTAR: prefixo/sintaxe a confirmar no jogo
-local NOTES_FILE = "PranchetaV1_notas.txt"
-local CREATOR = "Angel"
-local SERVER_URL = "https://discord.gg/dripmenu"
-local HOTBAR_MSG = "A prancheta comum foi para o inventário, abra Prancheta V1 e jogue realmente Prancheta da hotbar principal para o inventário."
+--------------------------------------------------------------------
+-- PARKOURS (todas as gravacoes ficam embutidas no FIM deste arquivo)
+--------------------------------------------------------------------
+local ZPData = { macros = {}, states = {}, anims = {} }
 
--- Reexecução: destrói a instância anterior
-if ENV.__PranchetaV1 and ENV.__PranchetaV1.Destroy then
-    pcall(ENV.__PranchetaV1.Destroy)
-end
-ENV.__PranchetaV1 = nil
-
--- Dados de sessão (sobrevivem à reexecução e ao desequipar)
-local Session = ENV.__PranchetaV1_Session or {}
-ENV.__PranchetaV1_Session = Session
-Session.notes = Session.notes or ""
-Session.cfg = Session.cfg or {
-    cmds = { char = ";char me nemokjk", clone = ";clone", title = ";titlebk me INSTRUTOR" },
-    on = { char = true, clone = true, title = true },
-    pos = {},
+-- Blocos da aba Parkour: { titulo, { {nome da opcao, id}, ... } }
+-- id = nil significa "ainda nao tem" (aparece como "em breve")
+local TOWER_BLOCKS = {
+    { "Torre Civil", {
+        { "Torre civil 1", "torre_civil_1" },
+        { "Torre civil 2", "torre_civil_2" },
+    } },
+    { "Torre", {
+        { "Torre 1", "torre_1" },
+        { "Torre 2", "torre_2" },
+    } },
 }
 
-local conns, toolConns = {}, {}
-local function track(c) table.insert(conns, c); return c end
+local RAPIDO = "R\u{00E1}pido"
+local SEMBURLA = "Sem burla"
 
-local C = {
-    bg = Color3.fromRGB(10, 10, 13), card = Color3.fromRGB(19, 20, 25),
-    btn = Color3.fromRGB(28, 34, 42), baby = Color3.fromRGB(137, 207, 240),
-    text = Color3.fromRGB(240, 246, 250), dim = Color3.fromRGB(150, 165, 175),
+local PARKOUR_BLOCKS = {
+    { "Parkour Civil", { { RAPIDO, "civil_rapido" },    { SEMBURLA, "civil_semburla" } } },
+    { "Parkour 1",     { { RAPIDO, "parkour1_rapido" }, { SEMBURLA, "parkour1_semburla" } } },
+    { "Parkour 2",     { { RAPIDO, nil },                    { SEMBURLA, nil } } },
+    { "Parkour 3",     { { RAPIDO, "parkour3_rapido" }, { SEMBURLA, "parkour3_semburla" } } },
+    { "Parkour 4",     { { RAPIDO, "parkour4_rapido" }, { SEMBURLA, "parkour4_semburla" } } },
+    { "Parkour 5",     { { RAPIDO, "parkour5_rapido" }, { SEMBURLA, "parkour5_semburla" } } },
+    { "Parkour 6",     { { RAPIDO, "parkour6_rapido" }, { SEMBURLA, nil } } },
 }
 
+local GREEN = Color3.fromRGB(120, 255, 180)
+local TEXT = Color3.fromRGB(235, 245, 240)
+local MUTED = Color3.fromRGB(140, 160, 150)
+local CARD = Color3.fromRGB(14, 17, 15)
+local TRACK = Color3.fromRGB(30, 38, 34)
+
+--------------------------------------------------------------------
+-- HELPERS
+--------------------------------------------------------------------
 local function new(class, props, parent)
     local o = Instance.new(class)
-    for k, v in pairs(props or {}) do o[k] = v end
+    for k, v in pairs(props) do o[k] = v end
     if parent then o.Parent = parent end
     return o
 end
-local function corner(o, r) return new("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
-local function stroke(o, color, tr, th)
-    return new("UIStroke", { Color = color, Transparency = tr, Thickness = th or 1,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
+
+local function corner(inst, r)
+    return new("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
 end
 
-local function guiParent()
-    local ok, h = pcall(function() return gethui and gethui() end)
-    if ok and h then return h end
-    return LocalPlayer:WaitForChild("PlayerGui")
+local function stroke(inst, color, thick, transp)
+    return new("UIStroke", {
+        Color = color, Thickness = thick, Transparency = transp,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, inst)
 end
 
-local Gui = new("ScreenGui", { Name = "PranchetaV1_Gui", ResetOnSpawn = false, IgnoreGuiInset = true,
-    DisplayOrder = 100, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
-Gui.Parent = guiParent()
-
--- =========================================================
--- 2. UTILITÁRIOS (clipboard, chat, arrastar)
--- =========================================================
-local function getClipboardFn()
-    if type(setclipboard) == "function" then return setclipboard end
-    if type(toclipboard) == "function" then return toclipboard end
-    return nil
+local function label(parent, text, size, font, color)
+    return new("TextLabel", {
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+        Text = text, TextSize = size, Font = font, TextColor3 = color,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    }, parent)
 end
 
-local notify -- declarada abaixo
+local function tween(inst, t, props)
+    local tw = TweenService:Create(inst, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
+end
 
-local function copyText(text, okTitle)
-    local fn = getClipboardFn()
-    if not fn then
-        notify("error", "Cópia indisponível", "O executor não suporta área de transferência. Nada foi copiado.", 4)
-        return false
+local function tweenEx(inst, t, style, dir, delay, props)
+    local tw = TweenService:Create(inst, TweenInfo.new(t, style, dir, 0, false, delay or 0), props)
+    tw:Play()
+    return tw
+end
+
+local function strokeGradient(stk)
+    return new("UIGradient", {
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 45, 35)),
+            ColorSequenceKeypoint.new(0.5, GREEN),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 45, 35)),
+        }),
+    }, stk)
+end
+
+local function addShine(parent)
+    local f = new("Frame", {
+        Name = "Shine", Size = UDim2.new(1, 0, 1, 0), ZIndex = 0,
+        BackgroundColor3 = Color3.fromRGB(200, 255, 225), BorderSizePixel = 0,
+    }, parent)
+    return new("UIGradient", {
+        Rotation = 25, Offset = Vector2.new(-1, 0),
+        Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(0.4, 1),
+            NumberSequenceKeypoint.new(0.5, 0.93),
+            NumberSequenceKeypoint.new(0.6, 1),
+            NumberSequenceKeypoint.new(1, 1),
+        }),
+    }, f)
+end
+
+--------------------------------------------------------------------
+-- GUI ROOT
+--------------------------------------------------------------------
+local GUI_NAME = "AngelMenuGui"
+
+pcall(function()
+    local old = LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild(GUI_NAME)
+    if old then old:Destroy() end
+end)
+pcall(function()
+    local old = game:GetService("CoreGui"):FindFirstChild(GUI_NAME)
+    if old then old:Destroy() end
+end)
+pcall(function()
+    if gethui then
+        local old = gethui():FindFirstChild(GUI_NAME)
+        if old then old:Destroy() end
     end
-    local ok = pcall(fn, text)
-    if ok then notify("success", okTitle or "Copiado", "Texto copiado para a área de transferência.", 2)
-    else notify("error", "Falha ao copiar", "O executor retornou erro.", 3) end
-    return ok
-end
+end)
 
-local function sendChat(text)
-    return pcall(function()
-        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-            local folder = TextChatService:FindFirstChild("TextChannels")
-            local ch = folder and folder:FindFirstChild("RBXGeneral")
-            if not ch then error("canal RBXGeneral não encontrado") end
-            ch:SendAsync(text)
-        else
-            local ev = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-            local say = ev and ev:FindFirstChild("SayMessageRequest")
-            if not say then error("chat legado não encontrado") end
-            say:FireServer(text, "All")
-        end
+for _, getRoot in ipairs({
+    function() return LocalPlayer:FindFirstChild("PlayerGui") end,
+    function() return game:GetService("CoreGui") end,
+    function() return gethui and gethui() end,
+}) do
+    pcall(function()
+        local root = getRoot()
+        local old = root and root:FindFirstChild("AngelHitboxGui")
+        if old then old:Destroy() end
     end)
 end
 
-local lastSent = 0
-local function sendAction(text, what)
-    if os.clock() - lastSent < 1 then return false end -- evita envio duplicado
-    local ok, err = sendChat(text)
-    if ok then
-        lastSent = os.clock()
-        notify("success", "Enviado ao chat", what .. " (a execução depende do jogo).", 2.5)
-    else
-        notify("error", "Falha ao enviar", tostring(err), 4)
-    end
-    return ok
-end
+local gui = new("ScreenGui", {
+    Name = GUI_NAME, ResetOnSpawn = false, IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
+})
 
-local function makeDraggable(handle, target)
-    local dragging, startPos, startFrame
-    track(handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging, startPos, startFrame = true, input.Position, target.Position
-            local c; c = input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false; c:Disconnect() end
+local function attach()
+    local targets = {}
+    if gethui then table.insert(targets, function() return gethui() end) end
+    table.insert(targets, function() return game:GetService("CoreGui") end)
+    table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
+    for _, get in ipairs(targets) do
+        local ok, target = pcall(get)
+        if ok and target then
+            local ok2 = pcall(function() gui.Parent = target end)
+            if ok2 and gui.Parent == target then return end
+        end
+    end
+end
+attach()
+
+local connections = {}
+
+--------------------------------------------------------------------
+-- ARRASTAR (generico) - com suporte a "toque" (clique sem arrastar)
+--------------------------------------------------------------------
+local function makeDrag(handle, target, onTap, onPress, onRelease, bucket)
+    local dragging, dragStart, startPos, moved = false, nil, nil, false
+
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            moved = false
+            dragStart = input.Position
+            startPos = target.Position
+            if onPress then onPress() end
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if onRelease then onRelease() end
+                    if onTap and not moved then onTap() end
+                end
             end)
         end
-    end))
-    track(UIS.InputChanged:Connect(function(input)
+    end)
+
+    table.insert(bucket or connections, UIS.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - startPos
-            target.Position = UDim2.new(startFrame.X.Scale, startFrame.X.Offset + d.X,
-                startFrame.Y.Scale, startFrame.Y.Offset + d.Y)
+            local d = input.Position - dragStart
+            if d.Magnitude > 6 then moved = true end
+            if moved or not onTap then
+                target.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y
+                )
+            end
         end
     end))
 end
 
-local function waitAny(signals, timeout)
-    local bind = Instance.new("BindableEvent")
-    local cs = {}
-    for _, s in ipairs(signals) do table.insert(cs, s:Connect(function() pcall(function() bind:Fire(true) end) end)) end
-    task.delay(timeout, function() pcall(function() bind:Fire(false) end) end)
-    local r = bind.Event:Wait()
-    for _, c in ipairs(cs) do c:Disconnect() end
-    bind:Destroy()
-    return r
+--------------------------------------------------------------------
+-- LOGO (retangulo arredondado deitado)
+--------------------------------------------------------------------
+local Logo = new("Frame", {
+    Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0, 56),
+    Size = UDim2.fromOffset(150, 44),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BorderSizePixel = 0, ClipsDescendants = true, Active = true,
+}, gui)
+corner(Logo, 14)
+new("UIGradient", {
+    Rotation = 20,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(10, 14, 12)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+    }),
+}, Logo)
+local logoStroke = stroke(Logo, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local logoStrokeGrad = strokeGradient(logoStroke)
+local logoShine = addShine(Logo)
+local logoScale = new("UIScale", { Scale = 0 }, Logo)
+
+local logoDot = new("Frame", {
+    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+    BackgroundColor3 = GREEN, BorderSizePixel = 0,
+}, Logo)
+corner(logoDot, 4)
+
+local logoTitle = label(Logo, "EB DO ZP", 15, Enum.Font.GothamBold, TEXT)
+logoTitle.Position = UDim2.new(0, 34, 0, 6)
+logoTitle.Size = UDim2.new(1, -44, 0, 18)
+
+local logoSub = label(Logo, "SCRIPT", 10, Enum.Font.GothamMedium, GREEN)
+logoSub.Position = UDim2.new(0, 34, 0, 24)
+logoSub.Size = UDim2.new(1, -44, 0, 14)
+
+--------------------------------------------------------------------
+-- HOLDER (CanvasGroup: permite fade + escala na animacao)
+--------------------------------------------------------------------
+local MAIN_W, MAIN_H = 340, 270
+local BAR_H, GAP, PAD = 44, 8, 8
+local TOTAL_H = MAIN_H + GAP + BAR_H
+
+local Holder = new("CanvasGroup", {
+    Name = "Holder", BackgroundTransparency = 1,
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.fromOffset(MAIN_W + PAD * 2, TOTAL_H + PAD * 2),
+    GroupTransparency = 1, Visible = false,
+}, gui)
+local holderScale = new("UIScale", { Scale = 0.88 }, Holder)
+
+local Inner = new("Frame", {
+    Name = "Inner", BackgroundTransparency = 1,
+    Position = UDim2.fromOffset(PAD, PAD),
+    Size = UDim2.fromOffset(MAIN_W, TOTAL_H),
+}, Holder)
+
+--------------------------------------------------------------------
+-- MENU PRINCIPAL
+--------------------------------------------------------------------
+local Main = new("Frame", {
+    Name = "Main", Size = UDim2.new(1, 0, 0, MAIN_H),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+    BorderSizePixel = 0, ClipsDescendants = true,
+}, Inner)
+corner(Main, 18)
+new("UIGradient", {
+    Rotation = 65,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+    }),
+}, Main)
+local mainStroke = stroke(Main, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local mainStrokeGrad = strokeGradient(mainStroke)
+local mainShine = addShine(Main)
+
+local TitleBar = new("Frame", {
+    Name = "TitleBar", Size = UDim2.new(1, 0, 0, 44),
+    BackgroundTransparency = 1,
+}, Main)
+
+local dot = new("Frame", {
+    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+    BackgroundColor3 = GREEN, BorderSizePixel = 0,
+}, TitleBar)
+corner(dot, 4)
+
+local title = label(TitleBar, "EB DO ZP SCRIPT", 15, Enum.Font.GothamBold, TEXT)
+title.Position = UDim2.new(0, 32, 0, 0)
+title.Size = UDim2.new(1, -90, 1, 0)
+
+local CloseBtn = new("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
+    BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
+    Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+}, TitleBar)
+corner(CloseBtn, 14)
+stroke(CloseBtn, GREEN, 1, 0.8)
+CloseBtn.MouseEnter:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = GREEN }) end)
+CloseBtn.MouseLeave:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = MUTED }) end)
+
+new("Frame", {
+    Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
+    BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
+}, Main)
+
+local Content = new("Frame", {
+    Name = "Content", BackgroundTransparency = 1,
+    Position = UDim2.new(0, 12, 0, 52), Size = UDim2.new(1, -24, 1, -62),
+}, Main)
+
+--------------------------------------------------------------------
+-- HOTBAR (separada do menu, mas dentro do mesmo grupo)
+--------------------------------------------------------------------
+local HOTBAR_Y = MAIN_H + GAP
+local HOTBAR_Y_HIDDEN = MAIN_H - 24
+
+local Hotbar = new("Frame", {
+    Name = "Hotbar", AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, HOTBAR_Y),
+    Size = UDim2.fromOffset(324, BAR_H),
+    BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
+}, Inner)
+corner(Hotbar, 22)
+new("UIGradient", {
+    Rotation = 0,
+    Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(24, 58, 42)),
+    }),
+}, Hotbar)
+local barStroke = stroke(Hotbar, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+local barStrokeGrad = strokeGradient(barStroke)
+
+local barInner = new("Frame", {
+    Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+}, Hotbar)
+new("UIPadding", {
+    PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6),
+    PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
+}, barInner)
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+    VerticalAlignment = Enum.VerticalAlignment.Center,
+    Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
+}, barInner)
+
+-- menu e hotbar arrastam juntos (arrastando o Holder)
+makeDrag(TitleBar, Holder)
+makeDrag(Hotbar, Holder)
+
+--------------------------------------------------------------------
+-- COMPONENTES
+--------------------------------------------------------------------
+local function makeCard(parent)
+    local c = new("Frame", {
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+    }, parent)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
+    return c
 end
 
--- =========================================================
--- 3. SISTEMA DE NOTIFICAÇÕES
--- =========================================================
-local notifyHolder = new("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, 10), Size = UDim2.fromOffset(300, 0),
-    AutomaticSize = Enum.AutomaticSize.Y, ZIndex = 50 }, Gui)
-new("UIListLayout", { Padding = UDim.new(0, 6), HorizontalAlignment = Enum.HorizontalAlignment.Center,
-    SortOrder = Enum.SortOrder.LayoutOrder }, notifyHolder)
+local function makePage()
+    local p = new("ScrollingFrame", {
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        ScrollBarThickness = 3, ScrollBarImageColor3 = GREEN,
+        Visible = false,
+    }, Content)
+    new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, p)
+    new("UIPadding", { PaddingRight = UDim.new(0, 4) }, p)
+    return p
+end
 
-local KIND_COLOR = {
-    success = Color3.fromRGB(120, 220, 160), warn = Color3.fromRGB(255, 205, 100),
-    error = Color3.fromRGB(255, 120, 120), info = C.baby,
-}
-local activeNotifs = {}
+-- card simples de "abrir algo" (titulo + descricao + botao redondo >)
+local function makeOpenCard(page, titleText, descText, onClick)
+    local c = new("Frame", {
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+        Size = UDim2.new(1, 0, 0, 76),
+    }, page)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
 
-notify = function(kind, title, msg, duration)
-    local key = tostring(title) .. "|" .. tostring(msg)
-    if activeNotifs[key] then return end -- sem duplicadas
-    activeNotifs[key] = true
-    duration = duration or 3
-    local accent = KIND_COLOR[kind] or C.baby
+    local t = label(c, titleText, 16, Enum.Font.GothamBold, TEXT)
+    t.Position = UDim2.new(0, 16, 0, 16)
+    t.Size = UDim2.new(1, -90, 0, 20)
 
-    local wrap = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y }, notifyHolder)
-    local box = new("CanvasGroup", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y, Position = UDim2.fromOffset(0, -12), GroupTransparency = 1 }, wrap)
-    corner(box, 10)
-    new("UIGradient", { Rotation = 20, Color = ColorSequence.new(Color3.fromRGB(8, 8, 10), Color3.fromRGB(38, 72, 92)) }, box)
-    local st = stroke(box, accent, 0.6, 1)
-    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, box)
-    new("UIListLayout", { Padding = UDim.new(0, 2) }, box)
-    new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = accent,
-        TextXAlignment = Enum.TextXAlignment.Left, Text = string.upper(title), Size = UDim2.new(1, 0, 0, 14) }, box)
-    new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = C.text,
-        TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, Text = msg,
-        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, box)
+    local d = label(c, descText, 12, Enum.Font.Gotham, MUTED)
+    d.Position = UDim2.new(0, 16, 0, 38)
+    d.Size = UDim2.new(1, -90, 0, 18)
 
-    local info = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    TweenService:Create(box, info, { GroupTransparency = 0, Position = UDim2.fromOffset(0, 0) }):Play()
-    TweenService:Create(st, TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 1, true),
-        { Transparency = 0.1 }):Play() -- brilho discreto
+    local btn = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0),
+        Size = UDim2.fromOffset(46, 46), BackgroundColor3 = GREEN,
+        AutoButtonColor = false, Text = ">", TextSize = 22,
+        Font = Enum.Font.GothamBold, TextColor3 = Color3.fromRGB(8, 18, 12),
+    }, c)
+    corner(btn, 23)
+    new("UIGradient", {
+        Rotation = 90,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(70, 200, 130)),
+        }),
+    }, btn)
 
-    task.delay(duration, function()
-        if not box.Parent then activeNotifs[key] = nil; return end
-        local t = TweenService:Create(box, TweenInfo.new(0.35), { GroupTransparency = 1, Position = UDim2.fromOffset(0, -8) })
-        t:Play(); t.Completed:Wait()
-        wrap:Destroy()
-        activeNotifs[key] = nil
+    btn.MouseButton1Down:Connect(function() tween(btn, 0.08, { Size = UDim2.fromOffset(40, 40) }) end)
+    btn.MouseButton1Up:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
+    btn.MouseLeave:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
+    btn.MouseButton1Click:Connect(function() onClick(d) end)
+
+    return c, d
+end
+
+--------------------------------------------------------------------
+-- MOTOR DOS PARKOURS (decodifica e toca as gravacoes embutidas)
+--------------------------------------------------------------------
+local macroCache = {}
+local Macro = { cleanup = nil, token = 0 }
+local setStatus = function() end -- trocado quando a pagina for criada
+
+local B64 = {}
+do
+    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    for i = 1, #chars do B64[string.byte(chars, i)] = i - 1 end
+end
+
+local function b64decode(s)
+    s = s:gsub("%s+", "")
+    local out, n = {}, 0
+    for i = 1, #s, 4 do
+        local a, b, c, d = string.byte(s, i, i + 3)
+        a, b = B64[a], B64[b]
+        c = c and B64[c]
+        d = d and B64[d]
+        n += 1; out[n] = a * 4 + math.floor(b / 16)
+        if c then n += 1; out[n] = (b % 16) * 16 + math.floor(c / 4) end
+        if d then n += 1; out[n] = (c % 4) * 64 + d end
+    end
+    return out
+end
+
+local function getFrames(id)
+    if macroCache[id] then return macroCache[id] end
+    local text = ZPData.macros[id]
+    if not text then return nil, "sem dados" end
+
+    local bytes = b64decode(text)
+    local pos = 1
+    local function rv()
+        local r, shift = 0, 1
+        while true do
+            local b = bytes[pos]
+            pos += 1
+            if b < 128 then return r + b * shift end
+            r += (b - 128) * shift
+            shift *= 128
+        end
+    end
+    local function rz()
+        local v = rv()
+        if v % 2 == 0 then return v / 2 else return -(v + 1) / 2 end
+    end
+
+    local ok, frames = pcall(function()
+        local n = rv()
+        local fr = {}
+        local t, x, y, z, yaw = 0, 0, 0, 0, 0
+        for i = 1, n do
+            t += rz(); x += rz(); y += rz(); z += rz(); yaw += rz()
+            local px, py, pz = x / 100, y / 100, z / 100
+            fr[i] = {
+                t = t / 1000,
+                pos = Vector3.new(px, py, pz),
+                cf = CFrame.new(px, py, pz) * CFrame.Angles(0, yaw / 1000, 0),
+            }
+            if i % 500 == 0 then task.wait() end
+        end
+
+        local k = 1
+        for _ = 1, rv() do -- estados (Running, Jumping, ...)
+            local len, si = rv(), rv()
+            local name = ZPData.states[si]
+            for _ = 1, len do
+                if fr[k] then fr[k].state = name end
+                k += 1
+            end
+        end
+
+        k = 1
+        for _ = 1, rv() do -- animacao dominante
+            local len, ai = rv(), rv()
+            local anim = ai > 0 and ZPData.anims[ai] or nil
+            for _ = 1, len do
+                if fr[k] then fr[k].anim = anim end
+                k += 1
+            end
+        end
+
+        -- velocidade derivada das posicoes
+        for i = 1, n - 1 do
+            local a, b = fr[i], fr[i + 1]
+            local dt = b.t - a.t
+            local d = b.pos - a.pos
+            if dt > 0.004 and d.Magnitude < 8 then a.vel = d / dt else a.vel = Vector3.zero end
+        end
+        fr[n].vel = Vector3.zero
+        return fr
+    end)
+
+    if not ok or type(frames) ~= "table" or #frames < 2 then
+        return nil, "dados inv\u{00E1}lidos"
+    end
+    macroCache[id] = frames
+    return frames
+end
+
+local function stopMacro(msg)
+    Macro.token += 1
+    local c = Macro.cleanup
+    Macro.cleanup = nil
+    if c then pcall(c) end
+    setStatus(msg or "Parado", false)
+end
+
+local function playMacro(frames, name)
+    stopMacro()
+
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp or hum.Health <= 0 then
+        setStatus("Personagem indispon\u{00ED}vel", false)
+        return
+    end
+
+    Macro.token += 1
+    local token = Macro.token
+    local animator = hum:FindFirstChildOfClass("Animator")
+    local animate = char:FindFirstChild("Animate")
+    local animateWasDisabled = animate and animate.Disabled
+    local tracks, currentAnim, lastState = {}, nil, nil
+    local n, idx = #frames, 1
+    local conn
+
+    -- desliga o Animate padrao enquanto roda (para nao misturar animacoes)
+    if animate and animator then
+        pcall(function() animate.Disabled = true end)
+        pcall(function()
+            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do tr:Stop(0) end
+        end)
+    end
+
+    local function setAnim(f)
+        local a = f.anim
+        if a == currentAnim then return end
+        currentAnim = a
+        if not animator then return end
+        local key = a and tostring(a[1]) or nil
+        for k, tr in pairs(tracks) do
+            if k ~= key and tr.IsPlaying then pcall(function() tr:Stop(0.1) end) end
+        end
+        if not a then return end
+        local tr = tracks[key]
+        if not tr then
+            local ok, t = pcall(function()
+                local anim = Instance.new("Animation")
+                anim.AnimationId = "rbxassetid://" .. key
+                return animator:LoadAnimation(anim)
+            end)
+            if ok and t then
+                tr = t
+                tracks[key] = tr
+                pcall(function() tr.Priority = Enum.AnimationPriority.Core end)
+            end
+        end
+        if tr then
+            pcall(function()
+                if tr.IsPlaying then
+                    tr:AdjustSpeed(a[2])
+                else
+                    tr:Play(0.1, 1, a[2])
+                end
+            end)
+        end
+    end
+
+    Macro.cleanup = function()
+        if conn then conn:Disconnect() end
+        for _, tr in pairs(tracks) do
+            pcall(function() tr:Stop(0.1) end)
+        end
+        if animate and animate.Parent and not animateWasDisabled then
+            pcall(function() animate.Disabled = false end)
+        end
+        pcall(function() hrp.AssemblyLinearVelocity = Vector3.zero end)
+    end
+
+    hrp.CFrame = frames[1].cf
+    local t0 = os.clock()
+    setStatus("Rodando: " .. name, true)
+
+    conn = RunService.Heartbeat:Connect(function()
+        if Macro.token ~= token then return end
+        if not hrp.Parent or hum.Health <= 0 or LocalPlayer.Character ~= char then
+            stopMacro("Interrompido")
+            return
+        end
+
+        local el = os.clock() - t0
+        while idx < n and frames[idx + 1].t <= el do idx += 1 end
+        local a = frames[idx]
+
+        if idx >= n then
+            hrp.CFrame = a.cf
+            stopMacro("Conclu\u{00ED}do: " .. name)
+            return
+        end
+
+        local b = frames[idx + 1]
+        local cf = a.cf
+        local span = b.t - a.t
+        -- suaviza entre pontos; se houver "salto" grande na gravacao, nao interpola
+        if span > 0 and (b.pos - a.pos).Magnitude < 8 then
+            cf = a.cf:Lerp(b.cf, math.clamp((el - a.t) / span, 0, 1))
+        end
+
+        hrp.CFrame = cf
+        hrp.AssemblyLinearVelocity = a.vel
+
+        if a.state ~= lastState then
+            lastState = a.state
+            pcall(function() hum:ChangeState(Enum.HumanoidStateType[a.state]) end)
+        end
+        setAnim(a)
     end)
 end
 
--- =========================================================
--- 4. DADOS (extraídos do script de referência)
--- =========================================================
-local CATEGORIES = { "Praças", "Graduados", "AMAN", "Oficiais Subalternos", "Oficiais Intermediários",
-    "Oficiais Superiores", "EPC", "APG", "CPE" }
-
-local DATA = {
-    ["Praças"] = { min = "4 pontos", jj = "150 JJs em 210 s.", pk = { 35, 40, 30, 32 }, torre = { 15, 16 } },
-    ["Graduados"] = { min = "5 pontos", jj = "170 JJs em 230 s.", pk = { 30, 35, 27, 29 }, torre = { 15, 16 } },
-    ["AMAN"] = { min = "7 pontos · máx. 4 aprovados", jj = "PC e Console: 75 JJs. Celular: 100 JJs. Tempo: 100 s.",
-        pk = { 19, 22, 19, 17 }, torre = { 12, 11 } },
-    ["Oficiais Subalternos"] = { min = "5 pontos", jj = "200 JJs em 260 s.", pk = { 14, 17, 15, 13 }, torre = { 11, 11 } },
-    ["Oficiais Intermediários"] = { min = "5,5 pontos", jj = "250 JJs em 310 s.", pk = { 13, 16, 14, 12 }, torre = { 11, 11 } },
-    ["Oficiais Superiores"] = { min = "6 pontos", jj = "320 JJs em 380 s.", pk = { 12, 15, 13, 11 }, torre = { 10, 10 } },
-    ["EPC"] = { min = "7 pontos · máx. 3 aprovados", jj = "PC e Console: 80 JJs. Mobile: 115 JJs. Tempo: 100 s.",
-        pk = { 9, 13, 9, 10 }, torre = { 8, 9 } },
-    ["APG"] = { min = "8 pontos · máx. 2 aprovados", jj = "PC e Console: 82 JJs. Mobile: 120 JJs. Tempo: 100 s.",
-        pk = { 11, 13, 10, 6 }, torre = { 7, 8 }, nota = "Parkour 4 é com burla; os demais, sem burla." },
-    ["CPE"] = { min = "7 pontos · máx. 1 aprovado", jj = "PC e Console: 85 JJs. Mobile: 125 JJs. Tempo: 100 s.",
-        pk = { 6, 9, 7, 6 }, torre = { 7, 8 } },
-}
-
-local PRESENTATIONS = {
-    ";hb Olá, me chamo {USERNAME} e serei o instrutor de vocês. Peço respeito e disciplina durante todo o treinamento.",
-    ";hb Atenção, militares! Sou {USERNAME}, instrutor deste treinamento. Exijo respeito e disciplina em todas as etapas.",
-    ";hb Saudações, militares. Meu nome é {USERNAME} e conduzirei este treinamento. Espero respeito e disciplina de todos.",
-    ";hb Militares, atenção! {USERNAME} será o instrutor de vocês hoje. Respeito e disciplina serão cobrados no treinamento.",
-    ";hb Apresento-me: {USERNAME}, instrutor responsável por este treinamento. Solicito respeito e disciplina de todos.",
-    ";hb Em forma, militares! Meu nome é {USERNAME} e serei seu instrutor. Respeito e disciplina são obrigatórios aqui.",
-    ";hb Prestem atenção, militares. Sou {USERNAME}, instrutor desta formação. Peço disciplina e respeito do início ao fim.",
-    ";hb Atenção, tropa! Quem instruirá vocês é {USERNAME}. Exijo postura, respeito e disciplina durante o treinamento.",
-}
-
-local function presentationText(i)
-    return (PRESENTATIONS[i]:gsub("{USERNAME}", function() return LocalPlayer.Name end))
-end
-
-local function parkourTime(i)
-    local d = DATA[Session.category or ""]
-    if not d or not d.pk[i] then return nil end
-    return d.pk[i] .. " s"
-end
-local function torreTime()
-    local d = DATA[Session.category or ""]
-    if not d then return nil end
-    local pc, cel = d.torre[1], d.torre[2]
-    if pc == cel then return pc .. " s" end
-    return pc .. " s (PC/Console) · " .. cel .. " s (Celular)"
-end
-
--- =========================================================
--- 5. INTERFACE
--- =========================================================
-local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
-local W = math.clamp(vp.X - 30, 280, 340)
-local H = math.clamp(vp.Y - 60, 220, 310)
-
-local Main = new("CanvasGroup", { Name = "Main", BackgroundColor3 = C.bg, Size = UDim2.fromOffset(W, H),
-    Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2), GroupTransparency = 1, Visible = false }, Gui)
-corner(Main, 12)
-stroke(Main, C.baby, 0.55, 1)
-new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(10, 10, 13), Color3.fromRGB(20, 34, 44)) }, Main)
-local mainScale = new("UIScale", { Scale = 0.92 }, Main)
-
-local TitleBar = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30) }, Main)
-new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.baby,
-    Text = "PRANCHETA V1 | DRIP MENU", Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(12, 0),
-    TextXAlignment = Enum.TextXAlignment.Left }, TitleBar)
-new("Frame", { BackgroundColor3 = C.baby, BackgroundTransparency = 0.7, BorderSizePixel = 0,
-    Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1) }, TitleBar)
-makeDraggable(TitleBar, Main)
-
-local TabBar = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 32), Size = UDim2.new(1, 0, 0, 28) }, Main)
-new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }, TabBar)
-new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, TabBar)
-local Content = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 62),
-    Size = UDim2.new(1, 0, 1, -62), ClipsDescendants = true }, Main)
-
-local function label(parent, text, size, bold, color)
-    return new("TextLabel", { BackgroundTransparency = 1, Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham,
-        TextSize = size or 11, TextColor3 = color or C.text, TextWrapped = true, Text = text,
-        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, parent)
-end
-
-local function button(parent, text, cb, props)
-    local b = new("TextButton", { AutoButtonColor = true, BackgroundColor3 = C.btn, Font = Enum.Font.GothamBold,
-        TextSize = 10, TextColor3 = C.text, Text = text, Size = UDim2.new(0, 0, 0, 26),
-        AutomaticSize = Enum.AutomaticSize.X, BorderSizePixel = 0 })
-    for k, v in pairs(props or {}) do b[k] = v end
-    if props and props.Size then b.AutomaticSize = Enum.AutomaticSize.None end
-    corner(b, 6); stroke(b, C.baby, 0.65, 1)
-    new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, b)
-    b.Activated:Connect(function()
-        if b:GetAttribute("Off") then return end
-        cb()
+local requestId = 0
+local function runMacroFile(id, name)
+    if not id then
+        setStatus("Ainda sem arquivo: " .. name, false)
+        return
+    end
+    requestId += 1
+    local mine = requestId
+    task.spawn(function()
+        setStatus("Carregando: " .. name .. "...", false)
+        local frames, err = getFrames(id)
+        if mine ~= requestId then return end -- outro clique aconteceu enquanto carregava
+        if not frames then
+            setStatus("Falha (" .. tostring(err) .. "): " .. name, false)
+            return
+        end
+        playMacro(frames, name)
     end)
-    b.Parent = parent
-    return b
-end
-local function setEnabled(b, on)
-    b:SetAttribute("Off", not on)
-    b.TextTransparency = on and 0 or 0.6
 end
 
-local function card(parent, title)
-    local f = new("Frame", { BackgroundColor3 = C.card, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y }, parent)
-    corner(f, 8); stroke(f, C.baby, 0.8, 1)
-    new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 8) }, f)
-    new("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, f)
-    if title then label(f, title, 11, true, C.baby) end
-    return f
-end
-local function row(parent)
-    local r = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, parent)
-    new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Wraps = true, Padding = UDim.new(0, 5),
-        SortOrder = Enum.SortOrder.LayoutOrder }, r)
-    return r
-end
-local function textBox(parent, text, placeholder, height)
-    local t = new("TextBox", { BackgroundColor3 = Color3.fromRGB(14, 15, 19), TextColor3 = C.text, Font = Enum.Font.Gotham,
-        TextSize = 11, Text = text or "", PlaceholderText = placeholder or "", PlaceholderColor3 = C.dim,
-        ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, height or 26),
-        BorderSizePixel = 0 }, parent)
-    corner(t, 6); stroke(t, C.baby, 0.75, 1)
-    new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, t)
-    return t
+--------------------------------------------------------------------
+-- PAGINA: PARKOUR (blocos)
+--------------------------------------------------------------------
+local PageParkour = makePage()
+
+-- status + botao de parar
+do
+    local c = new("Frame", {
+        LayoutOrder = 0, Size = UDim2.new(1, 0, 0, 52),
+        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+    }, PageParkour)
+    corner(c, 12)
+    stroke(c, GREEN, 1, 0.82)
+
+    local st = label(c, "", 12, Enum.Font.GothamMedium, MUTED)
+    st.Position = UDim2.new(0, 14, 0, 0)
+    st.Size = UDim2.new(1, -96, 1, 0)
+    st.TextWrapped = true
+
+    local stop = new("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+        Size = UDim2.fromOffset(62, 30), BackgroundColor3 = Color3.fromRGB(24, 31, 27),
+        AutoButtonColor = false, Text = "Parar", TextSize = 12,
+        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+    }, c)
+    corner(stop, 15)
+    stroke(stop, GREEN, 1, 0.8)
+    stop.MouseButton1Click:Connect(function() stopMacro("Parado") end)
+
+    setStatus = function(text, running)
+        st.Text = text
+        st.TextColor3 = running and GREEN or MUTED
+        tween(stop, 0.15, {
+            TextColor3 = running and GREEN or MUTED,
+            BackgroundColor3 = running and Color3.fromRGB(32, 48, 40) or Color3.fromRGB(24, 31, 27),
+        })
+    end
+    setStatus("Nenhum parkour rodando", false)
 end
 
-local pages, tabButtons = {}, {}
-local function newPage()
-    local sf = new("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1),
-        CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 3,
-        ScrollBarImageColor3 = C.baby, Visible = false }, Content)
-    new("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 10) }, sf)
-    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, sf)
-    table.insert(pages, sf)
-    return sf
+local function sectionLabel(order, text)
+    local l = label(PageParkour, text, 11, Enum.Font.GothamBold, GREEN)
+    l.LayoutOrder = order
+    l.Size = UDim2.new(1, 0, 0, 18)
+    new("UIPadding", { PaddingLeft = UDim.new(0, 4) }, l)
+    return l
 end
-local function setTab(i)
-    for k, p in ipairs(pages) do
-        p.Visible = (k == i)
-        tabButtons[k].BackgroundColor3 = (k == i) and Color3.fromRGB(42, 78, 98) or C.btn
+
+-- bloco recolhivel: titulo ^ + opcoes
+-- prefix: se informado, aparece no nome do status ("Parkour 3 \u{00B7} R\u{00E1}pido")
+local function makeBlock(order, titleText, options, prefix)
+    local card = makeCard(PageParkour)
+    card.LayoutOrder = order
+    new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, card)
+
+    local header = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1,
+        Text = "", AutoButtonColor = false, LayoutOrder = 1,
+    }, card)
+
+    local ht = label(header, titleText, 14, Enum.Font.GothamBold, TEXT)
+    ht.Position = UDim2.new(0, 14, 0, 0)
+    ht.Size = UDim2.new(1, -50, 1, 0)
+
+    local arrow = label(header, "v", 16, Enum.Font.GothamBold, GREEN)
+    arrow.TextXAlignment = Enum.TextXAlignment.Center
+    arrow.Position = UDim2.new(1, -36, 0, 0)
+    arrow.Size = UDim2.fromOffset(24, 42)
+
+    local body = new("Frame", {
+        BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2,
+        Visible = false,
+    }, card)
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
+        PaddingBottom = UDim.new(0, 10),
+    }, body)
+    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+
+    header.MouseButton1Click:Connect(function()
+        body.Visible = not body.Visible
+        arrow.Text = body.Visible and "^" or "v"
+    end)
+
+    for n, opt in ipairs(options) do
+        local optName, file = opt[1], opt[2]
+        local has = file ~= nil
+        local ob = new("TextButton", {
+            Size = UDim2.new(1, 0, 0, 34), LayoutOrder = n,
+            BackgroundColor3 = Color3.fromRGB(24, 31, 27), AutoButtonColor = false,
+            Text = has and optName or (optName .. "  \u{00B7}  em breve"),
+            TextSize = 13, Font = Enum.Font.GothamMedium,
+            TextColor3 = has and TEXT or MUTED, TextXAlignment = Enum.TextXAlignment.Left,
+        }, body)
+        corner(ob, 9)
+        new("UIPadding", { PaddingLeft = UDim.new(0, 28) }, ob)
+        local od = new("Frame", {
+            Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, -16, 0.5, -3),
+            BackgroundColor3 = has and GREEN or MUTED, BorderSizePixel = 0,
+        }, ob)
+        corner(od, 3)
+
+        ob.MouseEnter:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(32, 48, 40) }) end)
+        ob.MouseLeave:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) }) end)
+        ob.MouseButton1Click:Connect(function()
+            ob.BackgroundColor3 = Color3.fromRGB(50, 110, 80)
+            tween(ob, 0.35, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) })
+            runMacroFile(file, prefix and (prefix .. " \u{00B7} " .. optName) or optName)
+        end)
     end
 end
-local function addTab(name)
-    local i = #tabButtons + 1
-    local b = new("TextButton", { BackgroundColor3 = C.btn, Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = C.text,
-        Text = name, Size = UDim2.new(1 / 3, -3, 1, -4), BorderSizePixel = 0, TextTruncate = Enum.TextTruncate.AtEnd }, TabBar)
-    corner(b, 6)
-    b.Activated:Connect(function() setTab(i) end)
-    tabButtons[i] = b
+
+do
+    local order = 1
+    sectionLabel(order, "TORRES"); order += 1
+    for _, blk in ipairs(TOWER_BLOCKS) do
+        makeBlock(order, blk[1], blk[2], nil); order += 1
+    end
+    sectionLabel(order, "PARKOURS"); order += 1
+    for _, blk in ipairs(PARKOUR_BLOCKS) do
+        makeBlock(order, blk[1], blk[2], blk[1]); order += 1
+    end
 end
 
--- ---------- ABA GERAL ----------
-local refreshers = {}
-local categoryInfoLabel
-local function setCategory(name, silent)
-    Session.category = name
-    for _, fn in ipairs(refreshers) do fn() end
-    if not silent then notify("info", "Categoria selecionada", name, 2) end
-end
+--------------------------------------------------------------------
+-- HITBOX (modulo INDEPENDENTE: ScreenGui proprio, loop proprio,
+-- tudo protegido com pcall. Se algo falhar, o menu principal segue ok)
+--------------------------------------------------------------------
+local HitboxMenu = { onStatus = nil }
 
-local function buildGeral()
-    local p = newPage()
-    local info = card(p, "INFORMAÇÕES")
-    label(info, "Criador do script: " .. CREATOR, 11)
-    label(info, "Servidor: " .. SERVER_URL, 11)
-    button(info, "COPIAR SERVIDOR", function() copyText(SERVER_URL, "Servidor copiado") end)
+do
+    local cfg = { Enabled = false, Size = 6, Transparency = 0.6, Color = GREEN }
+    local MIN_SIZE, MAX_SIZE = 2, 25
+    local originals = {}
+    local conns = {}
+    local hbGui, panel, hitScale
+    local alive = false
+    local opened = false
 
-    local cat = card(p, "CATEGORIA DO TREINAMENTO")
-    label(cat, "Selecione a categoria do treinamento que você está conduzindo. Os tempos, quantidades e instruções serão utilizados automaticamente na aba Msg Pronta.", 10, false, C.dim)
-    local head = button(cat, (Session.category or "Selecione a categoria") .. "  ▾", function() end,
-        { Size = UDim2.new(1, 0, 0, 28) })
-    local list = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y, Visible = false }, cat)
-    new("UIListLayout", { Padding = UDim.new(0, 3) }, list)
-    head.Activated:Connect(function() list.Visible = not list.Visible end)
-    for _, name in ipairs(CATEGORIES) do
-        button(list, name, function()
-            head.Text = name .. "  ▾"
-            list.Visible = false
-            setCategory(name)
-        end, { Size = UDim2.new(1, 0, 0, 24) })
+    ----------------------------------------------------------------
+    -- logica (leve: so escreve quando algo muda, 4x por segundo)
+    ----------------------------------------------------------------
+    local function signature()
+        local c = cfg.Color
+        return string.format("%d|%.2f|%d,%d,%d", cfg.Size, cfg.Transparency,
+            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
     end
 
-    -- Auto organizar
-    local auto = card(p, "AUTO SE ORGANIZAR")
-    label(auto, "Esta ferramenta auxilia na preparação do personagem para o treinamento, incluindo personagem de referência, posicionamento, clonagem e título de instrutor, conforme os comandos disponíveis no jogo.", 10, false, C.dim)
-    local autoBtn = button(auto, "AUTO ORGANIZAR", function() end, { Size = UDim2.new(1, 0, 0, 28) })
+    local function applyOne(plr)
+        if plr == LocalPlayer then return end
+        local char = plr.Character
+        if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp or not hrp:IsA("BasePart") then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health <= 0 then return end
 
-    local cfg = Session.cfg
-    local running = false
+        local o = originals[hrp]
+        if not o then
+            o = {
+                Size = hrp.Size, Transparency = hrp.Transparency, Color = hrp.Color,
+                CanCollide = hrp.CanCollide, Massless = hrp.Massless, sig = "",
+            }
+            originals[hrp] = o
+        end
 
-    local function rootPart()
-        local ch = LocalPlayer.Character
-        return ch and ch:FindFirstChild("HumanoidRootPart")
+        local s = cfg.Size
+        local target = Vector3.new(s, s, s)
+        local sig = signature()
+        if o.sig == sig and hrp.Size == target then return end -- nada mudou
+        o.sig = sig
+
+        hrp.Massless = true      -- nao pesa: evita bagunçar a fisica
+        hrp.CanCollide = false
+        hrp.Size = target
+        hrp.Transparency = cfg.Transparency
+        hrp.Color = cfg.Color
     end
-    local function savePos(key, nice)
-        local r = rootPart()
-        if not r then notify("error", "Sem personagem", "Não foi possível ler a posição.", 3); return end
-        cfg.pos[key] = r.CFrame
-        notify("success", "Posição salva", nice, 2)
+
+    local function restoreAll()
+        local snapshot = originals
+        originals = {}
+        for hrp, o in pairs(snapshot) do
+            if hrp and hrp.Parent then
+                pcall(function()
+                    hrp.Size = o.Size
+                    hrp.Transparency = o.Transparency
+                    hrp.Color = o.Color
+                    hrp.CanCollide = o.CanCollide
+                    hrp.Massless = o.Massless
+                end)
+            end
+        end
     end
-    local function gotoPos(key, nice)
-        local pos = cfg.pos[key]
-        if not pos then notify("warn", "Configuração incompleta", nice .. ": posição não salva.", 3); return false end
-        local r = rootPart()
-        if not r then notify("error", "Sem personagem", "Não foi possível posicionar.", 3); return false end
-        r.CFrame = pos
+
+    local function startLoop()
+        task.spawn(function()
+            while alive do
+                task.wait(0.25)
+                if cfg.Enabled then
+                    for _, plr in ipairs(Players:GetPlayers()) do
+                        pcall(applyOne, plr)
+                    end
+                    for hrp in pairs(originals) do
+                        if not hrp.Parent then originals[hrp] = nil end
+                    end
+                end
+            end
+        end)
+    end
+
+    ----------------------------------------------------------------
+    -- interface
+    ----------------------------------------------------------------
+    local function parentGui(g)
+        local targets = {}
+        if gethui then table.insert(targets, function() return gethui() end) end
+        table.insert(targets, function() return game:GetService("CoreGui") end)
+        table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
+        for _, get in ipairs(targets) do
+            local ok, target = pcall(get)
+            if ok and target then
+                local ok2 = pcall(function() g.Parent = target end)
+                if ok2 and g.Parent == target then return true end
+            end
+        end
+        return false
+    end
+
+    local function bindSlide(hit, track, setRel)
+        local dragging = false
+        local function fromInput(input)
+            setRel((input.Position.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1))
+        end
+        hit.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                fromInput(input)
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
+                end)
+            end
+        end)
+        table.insert(conns, UIS.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch) then
+                fromInput(input)
+            end
+        end))
+    end
+
+    local function makeKnob(track)
+        local k = new("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
+            Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.fromRGB(235, 255, 245),
+            BorderSizePixel = 0, ZIndex = 2,
+        }, track)
+        corner(k, 8)
+        stroke(k, GREEN, 1.5, 0)
+        return k
+    end
+
+    local function build()
+        local g = new("ScreenGui", {
+            Name = "AngelHitboxGui", ResetOnSpawn = false, IgnoreGuiInset = true,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000,
+        })
+
+        local p = new("Frame", {
+            Name = "HitboxPanel", AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            Size = UDim2.fromOffset(300, 0), AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+            BorderSizePixel = 0, ClipsDescendants = true, Active = true, Visible = false,
+        }, g)
+        corner(p, 18)
+        new("UIGradient", {
+            Rotation = 65,
+            Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
+                ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
+                ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
+            }),
+        }, p)
+        local pStroke = stroke(p, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
+        local pStrokeGrad = strokeGradient(pStroke)
+        local pShine = addShine(p)
+        local pScale = new("UIScale", { Scale = 0 }, p)
+
+        local titleBar = new("Frame", {
+            Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
+        }, p)
+        local d = new("Frame", {
+            Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
+            BackgroundColor3 = GREEN, BorderSizePixel = 0,
+        }, titleBar)
+        corner(d, 4)
+        local t = label(titleBar, "HITBOX", 15, Enum.Font.GothamBold, TEXT)
+        t.Position = UDim2.new(0, 32, 0, 0)
+        t.Size = UDim2.new(1, -90, 1, 0)
+
+        local closeBtn = new("TextButton", {
+            Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
+            BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
+            Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+        }, titleBar)
+        corner(closeBtn, 14)
+        stroke(closeBtn, GREEN, 1, 0.8)
+        closeBtn.MouseEnter:Connect(function() tween(closeBtn, 0.15, { TextColor3 = GREEN }) end)
+        closeBtn.MouseLeave:Connect(function() tween(closeBtn, 0.15, { TextColor3 = MUTED }) end)
+        closeBtn.MouseButton1Click:Connect(function() HitboxMenu.close() end)
+
+        new("Frame", {
+            Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
+            BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
+        }, p)
+
+        makeDrag(titleBar, p, nil, nil, nil, conns)
+
+        local list = new("Frame", {
+            BackgroundTransparency = 1, Position = UDim2.new(0, 14, 0, 54),
+            Size = UDim2.new(1, -28, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        }, p)
+        new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+        local function row(order, height)
+            local r = new("Frame", {
+                LayoutOrder = order, Size = UDim2.new(1, 0, 0, height),
+                BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
+            }, list)
+            corner(r, 12)
+            stroke(r, GREEN, 1, 0.82)
+            return r
+        end
+
+        -- 1) liga/desliga
+        local tr = row(1, 44)
+        local tl = label(tr, "Ativar hitbox", 13, Enum.Font.GothamMedium, TEXT)
+        tl.Position = UDim2.new(0, 14, 0, 0)
+        tl.Size = UDim2.new(1, -80, 1, 0)
+        local sw = new("TextButton", {
+            AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
+            Size = UDim2.fromOffset(44, 24), BackgroundColor3 = TRACK,
+            AutoButtonColor = false, Text = "",
+        }, tr)
+        corner(sw, 12)
+        local swKnob = new("Frame", {
+            Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 3, 0.5, -9),
+            BackgroundColor3 = MUTED, BorderSizePixel = 0,
+        }, sw)
+        corner(swKnob, 9)
+
+        local function setEnabled(v)
+            cfg.Enabled = v
+            tween(sw, 0.18, { BackgroundColor3 = v and GREEN or TRACK })
+            tween(swKnob, 0.18, {
+                Position = v and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+                BackgroundColor3 = v and Color3.fromRGB(8, 18, 12) or MUTED,
+            })
+            if not v then
+                task.spawn(function() pcall(restoreAll) end)
+            end
+            if HitboxMenu.onStatus then pcall(HitboxMenu.onStatus, v) end
+        end
+        -- a hitbox em si e aplicada pelo loop (fora do clique), entao o clique nunca trava
+        sw.MouseButton1Click:Connect(function() setEnabled(not cfg.Enabled) end)
+
+        -- 2) sliders
+        local function slider(order, name, min, max, default, decimals, suffix, onChange)
+            local r = row(order, 54)
+            local nl = label(r, name, 12, Enum.Font.GothamMedium, MUTED)
+            nl.Position = UDim2.new(0, 14, 0, 8)
+            nl.Size = UDim2.new(0.5, 0, 0, 16)
+            local vl = label(r, "", 12, Enum.Font.GothamBold, GREEN)
+            vl.TextXAlignment = Enum.TextXAlignment.Right
+            vl.Position = UDim2.new(0.5, 0, 0, 8)
+            vl.Size = UDim2.new(0.5, -14, 0, 16)
+
+            local track = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 36), Size = UDim2.new(1, -28, 0, 6),
+                BackgroundColor3 = TRACK, BorderSizePixel = 0,
+            }, r)
+            corner(track, 3)
+            local fill = new("Frame", {
+                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = GREEN, BorderSizePixel = 0,
+            }, track)
+            corner(fill, 3)
+            new("UIGradient", {
+                Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(70, 200, 130)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 255, 210)),
+                }),
+            }, fill)
+            local knob = makeKnob(track)
+            local hit = new("TextButton", {
+                Position = UDim2.new(0, 6, 0, 24), Size = UDim2.new(1, -12, 0, 28),
+                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
+            }, r)
+
+            local fmt = "%." .. decimals .. "f"
+            local function render(rel, value)
+                fill.Size = UDim2.new(rel, 0, 1, 0)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                vl.Text = string.format(fmt, value) .. suffix
+            end
+            render((default - min) / (max - min), default)
+
+            bindSlide(hit, track, function(rel)
+                rel = math.clamp(rel, 0, 1)
+                local value = tonumber(string.format(fmt, min + (max - min) * rel))
+                render(rel, value)
+                onChange(value)
+            end)
+        end
+
+        slider(2, "Tamanho", MIN_SIZE, MAX_SIZE, cfg.Size, 0, " studs", function(v) cfg.Size = v end)
+        slider(3, "Transpar\u{00EA}ncia", 0, 1, cfg.Transparency, 2, "", function(v) cfg.Transparency = v end)
+
+        -- 3) cor
+        do
+            local r = row(4, 102)
+            local nl = label(r, "Cor", 12, Enum.Font.GothamMedium, MUTED)
+            nl.Position = UDim2.new(0, 14, 0, 8)
+            nl.Size = UDim2.new(0.5, 0, 0, 16)
+
+            local preview = new("Frame", {
+                AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 8),
+                Size = UDim2.fromOffset(36, 16), BackgroundColor3 = cfg.Color, BorderSizePixel = 0,
+            }, r)
+            corner(preview, 8)
+            stroke(preview, Color3.fromRGB(255, 255, 255), 1, 0.7)
+
+            local track = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 38), Size = UDim2.new(1, -28, 0, 8),
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
+            }, r)
+            corner(track, 4)
+            local kp = {}
+            for i = 0, 6 do
+                table.insert(kp, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 0.7, 1)))
+            end
+            new("UIGradient", { Color = ColorSequence.new(kp) }, track)
+            local knob = makeKnob(track)
+            local hit = new("TextButton", {
+                Position = UDim2.new(0, 6, 0, 26), Size = UDim2.new(1, -12, 0, 32),
+                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
+            }, r)
+
+            local function setColor(c, moveKnob)
+                cfg.Color = c
+                preview.BackgroundColor3 = c
+                if moveKnob then
+                    local h, s = c:ToHSV()
+                    if s > 0.15 then knob.Position = UDim2.new(h, 0, 0.5, 0) end
+                end
+            end
+            setColor(cfg.Color, true)
+
+            bindSlide(hit, track, function(rel)
+                rel = math.clamp(rel, 0, 1)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                setColor(Color3.fromHSV(rel, 0.7, 1), false)
+            end)
+
+            local presets = new("Frame", {
+                Position = UDim2.new(0, 14, 0, 66), Size = UDim2.new(1, -28, 0, 26),
+                BackgroundTransparency = 1,
+            }, r)
+            new("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
+            }, presets)
+
+            local colors = {
+                GREEN,
+                Color3.fromRGB(255, 70, 70),
+                Color3.fromRGB(70, 150, 255),
+                Color3.fromRGB(190, 100, 255),
+                Color3.fromRGB(255, 220, 70),
+                Color3.fromRGB(255, 255, 255),
+            }
+            for i, c in ipairs(colors) do
+                local b = new("TextButton", {
+                    LayoutOrder = i, Size = UDim2.fromOffset(30, 26),
+                    BackgroundColor3 = c, AutoButtonColor = false, Text = "",
+                }, presets)
+                corner(b, 8)
+                stroke(b, Color3.fromRGB(255, 255, 255), 1, 0.75)
+                b.MouseButton1Click:Connect(function() setColor(c, true) end)
+            end
+        end
+
+        new("Frame", {
+            LayoutOrder = 99, Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1,
+        }, list)
+
+        -- animacao continua (so enquanto o painel esta aberto)
+        table.insert(conns, RunService.Heartbeat:Connect(function()
+            if not opened then return end
+            local now = os.clock()
+            pStrokeGrad.Rotation = (now * 50) % 360
+            pShine.Offset = Vector2.new(math.min(1, -1 + ((now % 6) / 6) * 3), 0)
+        end))
+
+        if not parentGui(g) then
+            g:Destroy()
+            error("nao foi possivel anexar a GUI")
+        end
+
+        g.Destroying:Connect(function()
+            alive = false
+            cfg.Enabled = false
+            pcall(restoreAll)
+            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+            conns = {}
+        end)
+
+        -- so publica o estado quando tudo deu certo
+        hbGui, panel, hitScale = g, p, pScale
+        alive = true
+        startLoop()
+    end
+
+    ----------------------------------------------------------------
+    -- API publica
+    ----------------------------------------------------------------
+    function HitboxMenu.open()
+        if not hbGui then
+            local ok, err = pcall(build)
+            if not ok then
+                warn("[Hitbox] falha ao criar o menu: " .. tostring(err))
+                return false
+            end
+        end
+        if opened then return true end
+        opened = true
+        panel.Visible = true
+        hitScale.Scale = 0.85
+        tweenEx(hitScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
         return true
     end
 
-    local function runAuto()
-        if running then return end
-        running = true
-        local steps = {
-            { key = "char", nice = "Preparar personagem", posKey = "p1",
-                wait = { LocalPlayer.CharacterAppearanceLoaded, LocalPlayer.CharacterAdded } },
-            { key = "clone", nice = "Clonagem", posKey = "p2", wait = { Workspace.ChildAdded } },
-            { key = "title", nice = "Título", wait = nil },
-        }
-        for _, s in ipairs(steps) do
-            local cmd = cfg.cmds[s.key]
-            if cfg.on[s.key] and cmd and cmd ~= "" then
-                local ok, err = sendChat(cmd)
-                if not ok then
-                    notify("error", "Auto Organizar interrompido", s.nice .. ": " .. tostring(err), 5)
-                    running = false
-                    return
-                end
-                if s.wait then
-                    local seen = waitAny(s.wait, 4)
-                    if not seen then
-                        notify("warn", s.nice, "Comando enviado, sem confirmação de efeito.", 3)
-                    end
-                else
-                    notify("info", s.nice, "Comando enviado (sem como confirmar o efeito).", 3)
-                end
-                if s.posKey and cfg.pos[s.posKey] then gotoPos(s.posKey, s.nice) end
-            end
-        end
-        if cfg.pos.dest then
-            if gotoPos("dest", "STS Central") then notify("success", "Posicionamento", "Posição de destino aplicada.", 2.5) end
-        else
-            notify("warn", "Configuração incompleta", "Posição de destino (STS Central) não salva.", 3.5)
-        end
-        running = false
-    end
-    autoBtn.Activated:Connect(function() task.spawn(runAuto) end)
-
-    -- Configuração admin (recolhível)
-    local adminHead = button(auto, "CONFIGURAÇÃO ADMIN ▸", function() end, { Size = UDim2.new(1, 0, 0, 24) })
-    local admin = new("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y, Visible = false }, auto)
-    new("UIListLayout", { Padding = UDim.new(0, 5) }, admin)
-    adminHead.Activated:Connect(function()
-        admin.Visible = not admin.Visible
-        adminHead.Text = "CONFIGURAÇÃO ADMIN " .. (admin.Visible and "▾" or "▸")
-    end)
-
-    local function stepRow(title, key, posKey, posNice)
-        label(admin, title, 10, true, C.baby)
-        local box = textBox(admin, cfg.cmds[key], "comando")
-        box.FocusLost:Connect(function() cfg.cmds[key] = box.Text end)
-        local r = row(admin)
-        local tgl
-        tgl = button(r, cfg.on[key] and "ATIVA" or "DESLIGADA", function()
-            cfg.on[key] = not cfg.on[key]
-            tgl.Text = cfg.on[key] and "ATIVA" or "DESLIGADA"
+    function HitboxMenu.close()
+        if not opened or not hitScale then return end
+        opened = false
+        tweenEx(hitScale, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
+        task.delay(0.24, function()
+            if not opened and panel then panel.Visible = false end
         end)
-        button(r, "EXECUTAR", function()
-            cfg.cmds[key] = box.Text
-            sendAction(box.Text, title)
-        end)
-        if posKey then button(r, "SALVAR POSIÇÃO", function() savePos(posKey, posNice) end) end
     end
-    stepRow("ETAPA 1 — PREPARAR PERSONAGEM", "char", "p1", "Posição pós-preparo")
-    stepRow("ETAPA 2 — CLONAGEM", "clone", "p2", "Posição pós-clone")
-    stepRow("ETAPA 3 — TÍTULO", "title", nil)
-    label(admin, "ETAPA 4 — POSIÇÃO DE DESTINO (STS CENTRAL)", 10, true, C.baby)
-    local r4 = row(admin)
-    button(r4, "SALVAR DESTINO", function() savePos("dest", "Destino STS Central") end)
-    button(r4, "IR AO DESTINO", function() gotoPos("dest", "STS Central") end)
 
-    button(auto, "COPIAR DIAGNÓSTICO", function()
-        local function fp(cf)
-            if not cf then return "não salva" end
-            local v = cf.Position
-            return string.format("%.1f, %.1f, %.1f", v.X, v.Y, v.Z)
-        end
-        local lines = {
-            "DIAGNÓSTICO — PRANCHETA V1 | AUTO ORGANIZAR",
-            "Comandos configurados:",
-            "  char: " .. tostring(cfg.cmds.char), "  clone: " .. tostring(cfg.cmds.clone),
-            "  título: " .. tostring(cfg.cmds.title),
-            "Etapas habilitadas: char=" .. tostring(cfg.on.char) .. ", clone=" .. tostring(cfg.on.clone)
-                .. ", título=" .. tostring(cfg.on.title),
-            "Posições salvas: p1=" .. fp(cfg.pos.p1) .. " | p2=" .. fp(cfg.pos.p2) .. " | destino=" .. fp(cfg.pos.dest),
-            "Ordem de execução atual: char -> (ir p1) -> clone -> (ir p2) -> título -> ir destino",
-            "Dependências identificadas: comandos com ';' dependem do sistema administrativo do jogo e de permissão; "
-                .. "o envio é feito pelo chat (" .. (TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
-                    and "TextChatService" or "chat legado") .. ").",
-            "Erros encontrados: nenhum registrado nesta sessão.",
-            "Pendente: confirmar ordem real das etapas, se o ;char recria o personagem, onde o clone aparece, "
-                .. "coordenada do STS Central e se o executor tem permissão para os comandos.",
-        }
-        copyText(table.concat(lines, "\n"), "Diagnóstico copiado")
-    end, { Size = UDim2.new(1, 0, 0, 26) })
+    function HitboxMenu.toggle()
+        if opened then HitboxMenu.close() else HitboxMenu.open() end
+    end
+
+    function HitboxMenu.destroy()
+        alive = false
+        cfg.Enabled = false
+        pcall(restoreAll)
+        if hbGui then pcall(function() hbGui:Destroy() end) end
+        for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+        conns = {}
+    end
 end
 
--- ---------- ABA MSG PRONTA ----------
-local function messageCard(parent, title, getText, extra)
-    local c = card(parent, title)
-    local msg = label(c, "", 11)
-    local r = row(c)
-    local sendBtn = button(r, "ENVIAR", function()
-        local t = getText(); if t then sendAction(t, title) end
-    end)
-    for _, e in ipairs(extra or {}) do button(r, e[1], e[2]) end
-    button(r, "COPIAR", function()
-        local t = getText(); if t then copyText(t) end
-    end)
-    local function update()
-        local t = getText()
-        msg.Text = t or "TEMPO NÃO CONFIGURADO"
-        msg.TextColor3 = t and C.text or KIND_COLOR.warn
-        setEnabled(sendBtn, t ~= nil)
-    end
-    update()
-    return update
-end
+--------------------------------------------------------------------
+-- PAGINA: COMBATE
+--------------------------------------------------------------------
+local PageCombat = makePage()
 
-local function buildMsg()
-    local p = newPage()
-    -- Apresentação
-    local cur = math.random(#PRESENTATIONS)
-    local upd
-    upd = messageCard(p, "APRESENTAÇÃO", function() return presentationText(cur) end, {
-        { "OUTRA VERSÃO", function()
-            local n
-            repeat n = math.random(#PRESENTATIONS) until n ~= cur
-            cur = n
-            upd()
-        end },
-    })
-    -- Marcha
-    local m = card(p, "MARCHA")
-    local m1 = card(m, "Preparar"); label(m1, ";hb PREPARAR PARA MARCHAR!", 11)
-    button(m1, "ENVIAR", function() sendAction(";hb PREPARAR PARA MARCHAR!", "Preparar para marchar") end)
-    local m2 = card(m, "Marchar"); label(m2, ";hb MARCHEM!", 11)
-    button(m2, "ENVIAR", function() sendAction(";hb MARCHEM!", "Marchem") end)
-
-    -- Tempos
-    local t = card(p, "TEMPOS DO TREINAMENTO")
-    categoryInfoLabel = label(t, "", 10, false, C.dim)
-    local function updateInfo()
-        local d = DATA[Session.category or ""]
-        if not d then categoryInfoLabel.Text = "Nenhuma categoria selecionada (aba Geral)."; return end
-        categoryInfoLabel.Text = "Categoria: " .. Session.category .. "\nMínimo: " .. d.min .. "\nPolichinelos: " .. d.jj
-            .. (d.nota and ("\n" .. d.nota) or "")
-    end
-    table.insert(refreshers, updateInfo); updateInfo()
-    for i = 1, 4 do
-        local u = messageCard(t, "PARKOUR " .. i, function()
-            local tm = parkourTime(i); return tm and (";hb ao " .. tm) or nil
-        end)
-        table.insert(refreshers, u)
-    end
-    table.insert(refreshers, messageCard(t, "TORRE", function()
-        local tm = torreTime(); return tm and (";hb ao " .. tm) or nil
-    end))
-end
-
--- ---------- ABA PONTOS / ANOTAÇÕES ----------
-local startSelection -- definida abaixo
-
-local function buildNotes()
-    local p = newPage()
-    local n = card(p, "ANOTAÇÕES")
-    local box = new("TextBox", { BackgroundColor3 = Color3.fromRGB(14, 15, 19), TextColor3 = C.text, Font = Enum.Font.Gotham,
-        TextSize = 11, Text = Session.notes, PlaceholderText = "Observações sobre militares, desempenho, ocorrências...",
-        PlaceholderColor3 = C.dim, ClearTextOnFocus = false, MultiLine = true, TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-        Size = UDim2.new(1, 0, 0, 110), BorderSizePixel = 0 }, n)
-    corner(box, 6); stroke(box, C.baby, 0.75, 1)
-    new("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6), PaddingTop = UDim.new(0, 4) }, box)
-    local counter = label(n, "", 9, false, C.dim)
-    local function upCount() counter.Text = #box.Text .. " caracteres" end
-    upCount()
-    box:GetPropertyChangedSignal("Text"):Connect(upCount)
-    box.FocusLost:Connect(function() Session.notes = box.Text end) -- mantém na sessão
-
-    local r = row(n)
-    button(r, "SALVAR", function()
-        Session.notes = box.Text
-        local canFile = type(writefile) == "function"
-        if canFile then
-            local ok = pcall(writefile, NOTES_FILE, box.Text)
-            if ok then notify("success", "Anotações salvas", "Sessão + arquivo " .. NOTES_FILE .. ".", 2.5)
-            else notify("warn", "Salvas só na sessão", "Falha ao gravar o arquivo.", 3) end
-        else
-            notify("warn", "Salvas só na sessão", "O executor não permite gravar arquivos.", 3)
+do
+    local _, d = makeOpenCard(PageCombat, "Hitbox", "Abra o menu de hitbox", function()
+        local ok = pcall(HitboxMenu.toggle)
+        if not ok then
+            d.Text = "Falha ao abrir"
+            task.delay(1.5, function() d.Text = "Abra o menu de hitbox" end)
         end
     end)
-    local clearBtn, confirming
-    clearBtn = button(r, "LIMPAR", function()
-        if not confirming then
-            confirming = true; clearBtn.Text = "CONFIRMAR?"
-            task.delay(3, function()
-                if confirming and clearBtn.Parent then confirming = false; clearBtn.Text = "LIMPAR" end
+    HitboxMenu.onStatus = function(on)
+        d.Text = on and "Hitbox ativa" or "Abra o menu de hitbox"
+        d.TextColor3 = on and GREEN or MUTED
+    end
+end
+
+--------------------------------------------------------------------
+-- PAGINA: JJs
+--------------------------------------------------------------------
+local PageJJ = makePage()
+
+do
+    local busy = false
+    makeOpenCard(PageJJ, "Menu de JJs", "Abra o menu de JJs", function(d)
+        if busy then return end
+        busy = true
+        task.spawn(function()
+            d.Text = "Abrindo..."
+            local ok = pcall(function()
+                loadstring(game:HttpGet(JJS_URL))()
             end)
-        else
-            confirming = false; clearBtn.Text = "LIMPAR"
-            box.Text = ""; Session.notes = ""
-            notify("info", "Anotações limpas", "O texto foi apagado.", 2)
-        end
+            d.Text = ok and "Menu aberto" or "Falha ao abrir"
+            task.wait(1.5)
+            d.Text = "Abra o menu de JJs"
+            busy = false
+        end)
     end)
-    button(r, "COPIAR", function() copyText(box.Text, "Anotações copiadas") end)
-
-    local pts = card(p, "REGISTRAR PONTOS")
-    label(pts, "Ao apertar em Pontos, feche o menu e clique em algum militar. Será aberta uma pequena janela contendo o nome dele e o campo para definir quantos pontos você deseja registrar.", 10, false, C.dim)
-    button(pts, "PONTOS", function() startSelection() end, { Size = UDim2.new(1, 0, 0, 28) })
 end
 
--- =========================================================
--- 6. ABRIR / FECHAR MENU
--- =========================================================
-local tool
-local function isEquipped()
-    return tool ~= nil and tool.Parent ~= nil and tool.Parent == LocalPlayer.Character
+--------------------------------------------------------------------
+-- PAGINA: CREDITOS
+--------------------------------------------------------------------
+local PageCred = makePage()
+
+do
+    local c1 = makeCard(PageCred)
+    c1.LayoutOrder = 1
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+    }, c1)
+    new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, c1)
+
+    local l1 = label(c1, "CRIADOR DO SCRIPT", 11, Enum.Font.GothamBold, GREEN)
+    l1.Size = UDim2.new(1, 0, 0, 16); l1.LayoutOrder = 1
+    local l2 = label(c1, "angel007p", 22, Enum.Font.GothamBold, TEXT)
+    l2.Size = UDim2.new(1, 0, 0, 28); l2.LayoutOrder = 2
+    local l3 = label(c1, "discord", 12, Enum.Font.Gotham, MUTED)
+    l3.Size = UDim2.new(1, 0, 0, 16); l3.LayoutOrder = 3
+
+    local c2 = makeCard(PageCred)
+    c2.LayoutOrder = 2
+    new("UIPadding", {
+        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
+        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
+    }, c2)
+    new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, c2)
+
+    local a1 = label(c2, "AVISO", 11, Enum.Font.GothamBold, GREEN)
+    a1.Size = UDim2.new(1, 0, 0, 16); a1.LayoutOrder = 1
+    local a2 = label(c2,
+        "Este menu parou na fase de testes. Para aumentar fun\u{00E7}\u{00F5}es ou adaptar para futuras atualiza\u{00E7}\u{00F5}es, contate o Criador.",
+        13, Enum.Font.Gotham, TEXT)
+    a2.TextWrapped = true
+    a2.Size = UDim2.new(1, 0, 0, 0)
+    a2.AutomaticSize = Enum.AutomaticSize.Y
+    a2.LayoutOrder = 2
 end
 
-local menuToken = 0
+--------------------------------------------------------------------
+-- ABAS (hotbar): Parkour | Combate | JJs | Creditos (ultima)
+--------------------------------------------------------------------
+local CRED = "Cr\u{00E9}ditos"
+local pages = {
+    ["Parkour"] = PageParkour,
+    ["Combate"] = PageCombat,
+    ["JJs"] = PageJJ,
+    [CRED] = PageCred,
+}
+local order = { "Parkour", "Combate", "JJs", CRED }
+local tabButtons = {}
+
+local function selectTab(name)
+    for n, page in pairs(pages) do
+        page.Visible = (n == name)
+    end
+    for n, b in pairs(tabButtons) do
+        local active = (n == name)
+        tween(b, 0.2, {
+            BackgroundTransparency = active and 0 or 1,
+            TextColor3 = active and Color3.fromRGB(8, 18, 12) or MUTED,
+        })
+    end
+end
+
+for idx, name in ipairs(order) do
+    local b = new("TextButton", {
+        Size = UDim2.new(0.25, -3, 1, 0), LayoutOrder = idx,
+        BackgroundColor3 = GREEN, BackgroundTransparency = 1,
+        AutoButtonColor = false, Text = name, TextSize = 12,
+        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
+    }, barInner)
+    corner(b, 16)
+    new("UIGradient", {
+        Rotation = 90,
+        Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 210, 140)),
+        }),
+    }, b)
+    tabButtons[name] = b
+    b.MouseButton1Click:Connect(function() selectTab(name) end)
+end
+
+selectTab(order[1])
+
+--------------------------------------------------------------------
+-- ABRIR / FECHAR MENU (animacoes)
+--------------------------------------------------------------------
+local isOpen = false
+local animating = false
+local shineStart = os.clock()
+
+local function showLogo()
+    Logo.Visible = true
+    logoScale.Scale = 0
+    tweenEx(logoScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+end
+
 local function openMenu()
-    if not isEquipped() then return end
-    menuToken += 1
-    Main.Visible = true
-    local info = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    TweenService:Create(Main, info, { GroupTransparency = 0 }):Play()
-    TweenService:Create(mainScale, info, { Scale = 1 }):Play()
+    if animating or isOpen then return end
+    animating = true
+    isOpen = true
+
+    -- logo encolhe e some
+    tweenEx(logoScale, 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
+
+    task.delay(0.12, function()
+        Logo.Visible = false
+        holderScale.Scale = 0.86
+        Holder.GroupTransparency = 1
+        Hotbar.Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN)
+        Holder.Visible = true
+        shineStart = os.clock()
+
+        tweenEx(Holder, 0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, { GroupTransparency = 0 })
+        tweenEx(holderScale, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
+        tweenEx(Hotbar, 0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0.14,
+            { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y) })
+
+        task.delay(0.7, function() animating = false end)
+    end)
 end
+
 local function closeMenu()
-    menuToken += 1
-    local my = menuToken
-    local info = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    local t = TweenService:Create(Main, info, { GroupTransparency = 1 })
-    TweenService:Create(mainScale, info, { Scale = 0.92 }):Play()
-    t.Completed:Connect(function() if my == menuToken then Main.Visible = false end end)
-    t:Play()
-end
+    if animating or not isOpen then return end
+    animating = true
+    isOpen = false
 
--- =========================================================
--- 7. SELEÇÃO DE JOGADOR + JANELA DE PONTOS
--- =========================================================
-local selecting, selConn, selectedPlayer = false, nil, nil
 
-local Hint = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), AnchorPoint = Vector2.new(0.5, 1),
-    Position = UDim2.new(0.5, 0, 1, -24), Size = UDim2.fromOffset(260, 0), AutomaticSize = Enum.AutomaticSize.Y,
-    Visible = false, ZIndex = 40 }, Gui)
-corner(Hint, 10); stroke(Hint, C.baby, 0.5, 1)
-new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, Hint)
-new("UIListLayout", { Padding = UDim.new(0, 5), HorizontalAlignment = Enum.HorizontalAlignment.Center }, Hint)
-local hintLabel = label(Hint, "Toque/clique em um militar para registrar pontos.", 11)
-hintLabel.TextXAlignment = Enum.TextXAlignment.Center
+    tweenEx(Hotbar, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0,
+        { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN) })
+    tweenEx(Holder, 0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0.08, { GroupTransparency = 1 })
+    tweenEx(holderScale, 0.34, Enum.EasingStyle.Back, Enum.EasingDirection.In, 0, { Scale = 0.86 })
 
-local PointsWin = new("Frame", { BackgroundColor3 = Color3.fromRGB(8, 8, 10), Size = UDim2.fromOffset(250, 0),
-    AutomaticSize = Enum.AutomaticSize.Y, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45),
-    Visible = false, ZIndex = 45 }, Gui)
-corner(PointsWin, 10); stroke(PointsWin, C.baby, 0.5, 1)
-new("UIGradient", { Rotation = 90, Color = ColorSequence.new(Color3.fromRGB(10, 10, 13), Color3.fromRGB(20, 34, 44)) }, PointsWin)
-local pwHandle = new("TextLabel", { BackgroundTransparency = 1, Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.baby,
-    Text = "REGISTRAR PONTOS", Size = UDim2.new(1, 0, 0, 28), ZIndex = 46 }, PointsWin)
-pwHandle.Active = true
-local pwBody = new("Frame", { BackgroundTransparency = 1, Position = UDim2.fromOffset(0, 28), Size = UDim2.new(1, 0, 0, 0),
-    AutomaticSize = Enum.AutomaticSize.Y }, PointsWin)
-new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10) }, pwBody)
-new("UIListLayout", { Padding = UDim.new(0, 5) }, pwBody)
-label(pwBody, "Jogador", 10, false, C.dim)
-local pwName = textBox(pwBody, "", "")
-pwName.TextEditable = false
-label(pwBody, "Quantidade de pontos (1 a " .. MAX_POINTS .. ")", 10, false, C.dim)
-local pwQty = textBox(pwBody, "", "ex.: 3")
-pwQty.ClearTextOnFocus = false
-local pwRow = row(pwBody)
-makeDraggable(pwHandle, PointsWin)
-
-local function endSelection()
-    selecting = false
-    if selConn then selConn:Disconnect(); selConn = nil end
-    Hint.Visible = false
-end
-local function closePointsWin(reopen)
-    PointsWin.Visible = false
-    selectedPlayer = nil
-    if reopen and isEquipped() then openMenu() end
-end
-local function closeAll() -- desequipou / perdeu a ferramenta
-    endSelection()
-    closePointsWin(false)
-    closeMenu()
-end
-
-local function pickPlayerAt(pos)
-    local cam = Workspace.CurrentCamera
-    if not cam then return nil end
-    local ray = cam:ScreenPointToRay(pos.X, pos.Y)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character }
-    local res = Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
-    if not res then return nil end
-    local model = res.Instance:FindFirstAncestorOfClass("Model")
-    while model do
-        local plr = Players:GetPlayerFromCharacter(model)
-        if plr then return plr end
-        model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
-    end
-    return nil
-end
-
-startSelection = function()
-    if not isEquipped() or selecting then return end
-    selecting = true
-    closeMenu()
-    Hint.Visible = true
-    selConn = UIS.InputBegan:Connect(function(input, processed)
-        if processed or not selecting then return end
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
-        local plr = pickPlayerAt(input.Position)
-        if not plr then return end
-        if plr == LocalPlayer then notify("warn", "Seleção inválida", "Selecione outro militar.", 2.5); return end
-        endSelection()
-        selectedPlayer = plr
-        pwName.Text = plr.Name
-        pwQty.Text = ""
-        PointsWin.Visible = true
+    task.delay(0.38, function()
+        Holder.Visible = false
+        showLogo()
+        task.delay(0.4, function() animating = false end)
     end)
 end
 
-local confirmBusy = false
-button(pwRow, "CONFIRMAR", function()
-    if confirmBusy then return end
-    local plr = selectedPlayer
-    if not plr or plr.Parent ~= Players then
-        notify("error", "Jogador inválido", "O militar selecionado saiu do servidor.", 3)
-        closePointsWin(true); return
-    end
-    local n = tonumber(pwQty.Text)
-    if not n or n ~= math.floor(n) or n < 1 or n > MAX_POINTS then
-        notify("error", "Valor inválido", "Informe um número inteiro de 1 a " .. MAX_POINTS .. ".", 3); return
-    end
-    confirmBusy = true
-    local msg = TITLER_TEMPLATE:gsub("{NOME}", function() return plr.Name end)
-    msg = msg:gsub("{PONTOS}", function() return tostring(n) end)
-    local ok = sendChat(msg)
-    if ok then
-        notify("success", "Comando enviado", msg .. " (execução depende do jogo).", 3.5)
-    else
-        copyText(msg, "Comando copiado (envio falhou)")
-        notify("warn", "Envie manualmente", "Não foi possível enviar pelo chat; o texto foi copiado se possível.", 4)
-    end
-    confirmBusy = false
-    closePointsWin(true)
+CloseBtn.MouseButton1Click:Connect(closeMenu)
+
+-- logo: arrasta e, se for so um toque, abre o menu
+makeDrag(Logo, Logo, openMenu,
+    function() if not isOpen then tween(logoScale, 0.1, { Scale = 0.94 }) end end,
+    function() if not isOpen then tween(logoScale, 0.15, { Scale = 1 }) end end)
+
+-- entrada da logo ao executar
+task.delay(0.15, function()
+    tweenEx(logoScale, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
 end)
-button(pwRow, "CANCELAR", function() closePointsWin(true) end)
-button(Hint, "CANCELAR", function() endSelection(); if isEquipped() then openMenu() end end)
 
--- =========================================================
--- 8. GERENCIAMENTO DA PRANCHETA V1 (item + hotbar)
--- =========================================================
-local function countTools()
-    local n = 0
-    local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-    if bp then for _, c in ipairs(bp:GetChildren()) do if c:IsA("Tool") then n += 1 end end end
-    local ch = LocalPlayer.Character
-    if ch then for _, c in ipairs(ch:GetChildren()) do if c:IsA("Tool") then n += 1 end end end
-    return n
-end
+--------------------------------------------------------------------
+-- ANIMACOES CONTINUAS (shimmer, borda, pulso)
+--------------------------------------------------------------------
+local conn = RunService.Heartbeat:Connect(function()
+    local t = os.clock()
+    local rot = (t * 50) % 360
+    mainStrokeGrad.Rotation = rot
+    barStrokeGrad.Rotation = rot
+    logoStrokeGrad.Rotation = rot
+    mainShine.Offset = Vector2.new(math.min(1, -1 + (((t - shineStart) % 6) / 6) * 3), 0)
+    logoShine.Offset = Vector2.new(math.min(1, -1 + ((t % 5) / 5) * 3), 0)
+    logoDot.BackgroundTransparency = 0.35 + 0.35 * math.sin(t * 3)
+end)
+table.insert(connections, conn)
 
-local function unbindTool()
-    for _, c in ipairs(toolConns) do c:Disconnect() end
-    table.clear(toolConns)
-end
-local function bindTool(t)
-    unbindTool()
-    tool = t
-    table.insert(toolConns, t.Equipped:Connect(function() task.defer(openMenu) end))
-    table.insert(toolConns, t.Unequipped:Connect(closeAll))
-    table.insert(toolConns, t.AncestryChanged:Connect(function()
-        local par = t.Parent
-        local bp = LocalPlayer:FindFirstChildOfClass("Backpack")
-        if par == nil or (par ~= bp and par ~= LocalPlayer.Character) then
-            closeAll()
-            if par == nil then tool = nil end
-        end
-    end))
-    if isEquipped() then openMenu() end
-end
-
-local ensuring = false
-local function ensureTool()
-    if ensuring then return end
-    if tool and tool:IsDescendantOf(game) then return end
-    ensuring = true
-    local backpack = LocalPlayer:WaitForChild("Backpack", 10)
-    if not backpack then
-        notify("error", "Prancheta V1", "Backpack não encontrado; item não criado.", 4)
-        ensuring = false; return
+gui.Destroying:Connect(function()
+    pcall(stopMacro)
+    pcall(HitboxMenu.destroy)
+    for _, c in ipairs(connections) do
+        pcall(function() c:Disconnect() end)
     end
-    local existing
-    for _, container in ipairs({ backpack, LocalPlayer.Character }) do
-        if container then
-            for _, c in ipairs(container:GetChildren()) do
-                if c:IsA("Tool") and c:GetAttribute("PranchetaV1") then existing = c end
-            end
-        end
-    end
-    if existing then bindTool(existing); ensuring = false; return end
+end)
 
-    local before = countTools() -- verifica os seis espaços antes de inserir
-    local t = new("Tool", { Name = TOOL_NAME, ToolTip = "Prancheta V1 | Drip Menu", RequiresHandle = false, CanBeDropped = false })
-    t:SetAttribute("PranchetaV1", true)
-    t.Parent = backpack
-    if t.Parent ~= backpack then
-        notify("error", "Prancheta V1", "O jogo impediu a criação do item. Nada foi criado.", 4)
-        t:Destroy(); ensuring = false; return
-    end
-    bindTool(t)
-    if before >= HOTBAR_SIZE then
-        notify("warn", "HOTBAR CHEIA", HOTBAR_MSG, 6.5)
-    end
-    ensuring = false
-end
-
--- =========================================================
--- 9. INICIALIZAÇÃO E LIMPEZA
--- =========================================================
--- restaura anotações do arquivo, se a sessão estiver vazia
-if Session.notes == "" and type(isfile) == "function" and type(readfile) == "function" then
-    pcall(function()
-        if isfile(NOTES_FILE) then Session.notes = readfile(NOTES_FILE) end
-    end)
-end
-
-addTab("GERAL"); addTab("MSG PRONTA"); addTab("PONTOS / NOTAS")
-buildGeral(); buildMsg(); buildNotes()
-setTab(1)
-if Session.category then setCategory(Session.category, true) end
-
-local function destroy()
-    closeAll()
-    unbindTool()
-    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-    table.clear(conns)
-    if tool then pcall(function() tool:Destroy() end); tool = nil end
-    pcall(function() Gui:Destroy() end)
-    ENV.__PranchetaV1 = nil
-end
-ENV.__PranchetaV1 = { Destroy = destroy }
-
-track(LocalPlayer.CharacterAdded:Connect(function(char)
-    closeAll()
-    char:WaitForChild("Humanoid", 10)
-    ensureTool()
-end))
-track(LocalPlayer.ChildAdded:Connect(function(c)
-    if c:IsA("Backpack") then task.defer(ensureTool) end
-end))
-
-task.spawn(ensureTool)
+--------------------------------------------------------------------
+-- DADOS DOS PARKOURS (gravacoes comprimidas) - nao precisa editar
+--------------------------------------------------------------------
+ZPData.states = { "Running", "Jumping", "Freefall", "Landed", "Climbing" }
+ZPData.anims = {
+    {180435571,1}, {125750702,1}, {180436148,1}, {180426354,1}, {180426354,1.6}, {180426354,1.7}, {180426354,0}, {180426354,1.1},
+    {180426354,0.5}, {180426354,0.6}, {180426354,0.4}, {180426354,1.4}, {180426354,1.3}, {180426354,0.3}, {180426354,0.8}, {180426354,1.2},
+    {180436334,0.9}, {180426354,0.7}, {180426354,0.1}, {180435792,1}, {180426354,0.2}, {180426354,1.5}, {180426354,0.9}, {180436334,1},
+    {180436334,1.4}, {180436334,1.2},
+}
+ZPData.macros["civil_rapido"] = [=[
+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
+BAMBBgILEAEVAggDBAYVAgcD
+]=]
+ZPData.macros["civil_semburla"] = [=[
+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
+BIwBTwAgBIIBTwAkBnZPACAIbE8AIAZgTwAiCFRPACIGTE0AIAg+TwAiBjZPACIIKk8AIAgeTwAiBhRPACIICk0AIAgBTwAiCA1PACQIF08AHg
+ghTwAiBitPACIIOU0AIAhBTwAiBk1PACIGWU8AIgZjTwAgBG1PACIEeUkAIgSDAUMAIASPATkAIgSZATMAIgKlASkAIgCvAQsAHgAnAAAmABAA
+AB4ADgAAIgAIAAAiAAQAACAAAgAAIgACAAAgAAAAACIAAAAAIAAAAAAiAAAAACIAAgAARQ0BAQIQAwEEBwEBAhYDAgQBAQECEwMCBBMBAQIWAw
+IEFQEBAhgDAwQZAQECFwMCBBUBAQIfAwIEFAEBAhsDAgQNAQECHwMCBAkBAQIfAwIECwEBAh8DAgQYAQECHwMCBAEBAQIgAwIEAQEBAicDAgQD
+AQECHwMCBAEBAQIeAwIEAQEBAh8DAgQLAUoPARICAwcBDAEFAQYTAgYDEQIGAwkHAQQGBgEMAg0TAgYDAg4QAQIFAQYVAgcDAgYBDwMHCwEHBQ
+IGEwIFAwEGAhANAQUFAgYWAgsDEAcBDgEEAQUDBhYCBgMPARoCBgMHBwEIAwUXAgkDDQcYAggDDAcBCgEMDAYbAgYDGwIJAxkCEgMDBhsCBwMa
+AggDGgIIAwoH
+]=]
+ZPData.macros["torre_civil_1"] = [=[
+pQJg7ogD5hannQfmGTgAAAAAJgAAAABCAAAAADYAAAAAPAAAAABSAAAAAD4/AAYASluqAgoAXJ0BtAMQACgvrAEItwE8CpgBFk44AD4EZkAAVA
+ACMAA4AAI2ADgAAEQNLgAALENICAAyFSoEACoADgAAMgAIAE82AAQAJzYAAAATNAACAAA0AAAAAD4AAAAAOAAAAABKAAAAAEQAAAAAagAAAABW
+AAAAAEQNAAAAQD0AAAA6WQAKAC5bABAAOhUABAA2AAAAAE4AAAAAGgAAAAAkAAAAADAaAAAATGAABABAeAAGAC5CAAQANl4ABgAoQgkCAERepg
+ICAEhiygIEACIkoAEAAEoi3AECAIQBF6YCBgBEQ2gCAERdLAIAOGkCAgA8XSEEACwTJgAAMD1UAgAwQygCAEZ1HAIAIDUEAgA2TwQCADJdAAQA
+ThUAAAAoAAIAADoAAAAALgAAAAA2NAAAADhOAAEAOmoAAgAuUAAAADZQAAAALlAAAgA6UAACADReEwQAQGrUAgIAQEbiAQQAJjTIAQQAKh6WAQ
+QAQBS0AQgAQAWmAQgAOB9sCABOQVQMAERtKgwAOF0FCgA0WyUMACQ1LgYAKkFACAA8WyoKADBbEAoAJjUCBgA4WwQMACZBAAYAJjUABgAuFQAE
+AEAAAgAANgAAAABAFAADAFKGAQANADheAAcALFAABQBEXAADADReAAMAOEIAAQBEeAAHAFSGAaADCQA2WvwBEQAoOKABEQA2PMIBGQAwHowBEw
+BEDHQPADQFaA8AMB1ICwBANyQFADI/BgIANk8RBgA8aT8KADBNSwoAMkFTCAAyFSgEACoAMAAAKAAuAAAuADgAADZLXAwAKk0mDgAwEwwGADgB
+CAAAKAACAAA2AAIAAC4SAAAAPlAABQAkUAAFADZQAAUAJkQJAwAsNBMFACxOMxEARmbOAhsAKkTeARUAKiqoAQ8ANCKwAQ8ANBCYAQ0ANAGAAQ
+sAPBFoBwAqK1oFACwtLAAAKjkaAgAqQQoCAC5PCQYALkMbBAA0QS0EACpPSwQAMhUqAgAoAC4AADYAOAAAKAAwAAAuADgAAGSLAXQMADJbFAgA
+NBUGAgAsAAIAACgAAAAANgAAAAA0AAAAAC4AAAAAQEYAAAAyQgADADReAAMALlAAAwAyQtoBAQAuRu4BBQAsNNYBBQA0Ir4BBQBEEL4BBQBCDc
+IBAwAkEUYBACwhRgAAMjtAAgAuSSYCADBPDAQAOE8JBAAuTzQEAB41HAIAMk0WBAAmQwgEADBPBAQALE8CBAA4FQAAADAAAAAAIgAAAAAsAAAA
+ADoAAAAALAAAAAAwKgAAADJOAAAAKlAAAQAuUAAEACxQAAIAOF4ABgAuQgAEAC5QAAwALEIJCABIas4CEAAuRN4BCgAiJIgBCAAsKLQBCgAqEo
+QBCgAqBnQIADoHdAoAMh9oCgAqJTYIAC4/KgoAMD8QBgA0TQEKADBPGwgANDsmBgAqTVIIADpNLgoAJk8SCAA6XQgKADxBAggAIE0CCgAgFQAC
+ADYAAAAALgAAAAAwAAAAADQAAAAALAAAAAAqBgAAADY+AAAAPl4AAgAsUAACAC5QAAIAKDQAAgBEeAAGAChEAAAAKDQFAAA8XqYCAAAyRuIBAA
+AuLKoBAAAwKtIBAQA0EJgBAAAoAWwBADILXAAANCVkAAAuNToAADA3HgIAMk8OAgAoQQcCACI1EQIAPl1aBgAoTzICADBPFAQAKEEIBAAyTwQE
+ADBPAgIALDMABABaTwAEALABFQAAABYAAAAAHDAAAAAqNgABAC5qAAUALkIAAQAyUAABADZEAAEAJEIAAQAuUAADADRQAAMALkIAAwA8atACBw
+AyRt4BBQAyNMQBBQA6Iq4BAwAqEJQBAwAgAFYBAC4JXAEAMB1WAAAsJTYBACw7KgAAOk0SAgAoTwUAADRBGQAAOl1eAgA+d0IAACxBDAIALk8I
+AAAoQwIAACYzAAAANk8CAAAsFQAAADAAAAAALgAAAAA2AAAAAC4AAAAAJQgBAQIDAwQFHgEBAggDAQUSAQECCgMCBBEBAQINAwQFDQEBAg4DBQ
+UMAQECCwMCBBMBAQIMAwEFFQEBAgwDAQQTAQECDAMBBAsBLQkBBAIFEQIIDQEBEgMIBQEFCAoCCAgDAQcIDQIHCAMBBwgPAgQRAQgCBwMBBggQ
+AgQRAQECCAcBAggPAgUIBgEHCA8CBQgDEwQBCAgOAgcIBAEICA4CCAgCAQ
+]=]
+ZPData.macros["torre_civil_2"] = [=[
+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
+BwAkMyYHACo9FAUALEMCAwAmMwkBAB41LAEAJkE4AwAoQx4BACZBDgEAME8IAwAcJwIAACxBAAEAIEECAQAmFQAAACYAAAAAJAAAAAAoAAAAAC
+QAAAAAIAAAAAAoAAAAACQAAAAAJBgAAgAoTAAIACQ2AAYAIkIABgAkNAAGACY2AAYAJkIACAAuUAAKACAoAAYAJEAACgAqNq4BCAAkOswBCgAk
+JpgBCgBWQOYCFAAYBlQGAB4CTAYAJgV0BgCwAWX+ARYAKEcyCAAcMxQEADhPCgoAJEEqBgAmNRwGADJbGAoAJjUGBAAcMwQGACxBAggAJEEABg
+AqFQACACQAAAAAKAAAAAAmAAAAACQAAAAAJgAAAAAqAAAAACAUAAIAJjwAAgAkNgACACpQAAQAIjYAAgAuUAAEACA0AAIAJjYAAgAoQgACACpC
+2gECACY8yAEEACYmlAECACYmqgECACoYmAEEACQKbgIAKAJ6AgAmCWoEACoPSAIALilWBgAiIywEACQtIgYAKj8cBgAmQQgIACQ1AwgAKEEqCA
+AsTygIAColCgYAHk8MCgAoQQQIDihBAAgAKjUCCAAkEwACACgBAAAAKgAAAAAgAAAAACYAAAAALAAAAAAiAAAAACYAAAAAJAAAAAAoJgAAACRA
+AAAAJEQAAQAoQgABACQ0AAAAKkQAAQAoQgABACxCAAEAKkQAAwAmNAAFACRC2gEHACgwoAEHACYyvAEJACYkqgEJACYYmAEJAC4MiAEJACgAYA
+UAIglqBwAmEUYDACwfTAMAKC04AwAkNygAAChBGAIAKjUGAgAmQQUGADBPNAQAPmksCAA0TwwIAC5PBgYARnUCDAAqQwAIABwRAAIAIAEAAABC
+AAAAAE4AAAAAMgAAAAA+UAAAAEBaAAIARGwAAgA+agACACY2AAAAJEIAAgAmNgAAAChCAAwAJjQFCgAoQNgBDAAmOsgBDAAqLrgBDAAqIqYBDA
+AmFJYBCgAoCGwIACgBdgoAKgtmCgAiFUQIACYjSAgAKC82CgAmLx4IAChBGAwAJkEGCgAqPygMACpBIgwAJkEQDAAoQQgMECg/BA4AIjUCChAq
+PwAOACRBAA4AKhMABBAoAAACACgAAAAAJAAAAAAmAAAAADAAAAAAIgAAAAAiGgADACxOAAcAKEIABQAmNgADACZCAAcAKEIABQAmQgAHACo2AA
+cAJEAACQAoNq4BCQAoOsgBCwAoLrgBCwAmIqYBDQAmEngJADAKiAEJACYBjAELACILUAUAKBFGBQAqI0YDACo5PgMAJjEeAAAoQRICACZBBAIA
+LkM6AgAkMygCACxPIAIAJkMMAgAoQQQEACZBBAIAKjUAAgAoQQACACRBAgIAKEMAAgAqMwACADwKAQECFwMCBBEBAQIRAwEFGgEBAhADAgQYAQ
+ECEAMCBBcBAQIQAwIEFwEBAg8DAgQWAQECDwMCBBcBAQIHAwcFAQECAwIEDwEBAg8DAgQYAQECCgMCBBUBAQIOAwIEGAEBAg4DAQQTAQECDQMC
+BBYBAQINAwIECQFFDQEaAgUHAQ8LCBICBwgEEwcUCQgRAgYIBBMGAQoIEgIFCAQTCAEHCBMCBQgDEwYBCAgRAgUIAxMHAQgIEAIHCAMTBgEJCA
+gCCREBAwIIAhMIAQUIEgIFCAMTBwEJCAwCBQgDBwYBCAgSAgMIAwcIAQkIEAIECAIOBAEJCA8CBggDEwYBCAgOAgkI
+]=]
+ZPData.macros["torre_1"] = [=[
+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
+AAIAACoAAAAAKAAAAAAmAAAAACgAAAAAJgAAAAAqAAAAACQAAAAAKAQAHwAoCAAvACgGAEEALAgAQQAmBgA1ACgGAEEAJAYAQQAsBqwBNQAgBs
+oBQQAkBpQBNQAiBIgBMwAqBpwBOwAmBIwBLQAkBGIbADIEgAEbACgCWAkAHAIuAgAcAjIGADQCNhoAIAIWHAAqAg4sABoCACIAKAQPQAAiBBU2
+ACYCLUIAJAQvNgAqBCI6ACQAJA4AIAAmAAAoBFo8ACYELkQAKAISFAAgAAoCACYABgAAJgACAAAmAAIAACQAAAAAKgAAAAAiAAAAACYBACUAMg
+AAPwAmAABDAB4BADMAJAIJQwAcAA0nACoAJUEAJgMpNQAoA9YBQQAgB6ABMQAwD9oBPQAeB2QXACQLmAEfACQHbg8AKgl6BwAmB1YCACgHWg4A
+IAM+FAAoBTwkACYDJCYAKgUeOgAqAw5CACQDA0IALgMVRAA0Ay1QACYDGjAAKAA4DgAkACQAACwAMAAAJgFUPgAgASI0ACQBFDYAJAEKNgAmAA
+ZCABwABDYAIAAAFAAoAAICACYAAAAALAAAAAAeAAAAADIAAAAAFgAAAAAqAAAVACICAC0AJAQAQQAiBgBBACwGAEMAKgYAQQAeBgAzACYEBTUA
+KAauATMAIgLMAUMAIgCWAS8AKAKuATEAIAB+HQAyAKoBHQAgAEoJACYAcAMAJABgCAAqAD4QACgCQB4AIgAoIAAqAiZAACgADDQAKgQARAAgAg
+00ACICFTYAKAI2QgAoBCo2ACYEIlAAIgIMNAAiBAZEACwEBEIAKAQCQgAkAgAWACYAAAAAJAAAAAAqAAAAACAAAAAAMAAAAAAcAAAAACIAAAUA
+LAEAMQAkAQAzACgBAE8AIgAANQAgAQA1ACoAAE8AJAEAJwAoAwBBACAFADUALAkNTQAeBQ8nAC4H1gFBACIJxAE7ACAJkgElACYJhgEdADoR0g
+EhADANgAEJACAHXAIAIgtiDAAeAzIOAC4HSCAAMAU+OAAuASZIADIADlAAIAADNAAsAhVEACgAJjoAKgJIQgAkAig0ACIEFjYAIgIMNgAqAggW
+ACQABAAAJgACAAAmAAAAACwAAAAAKgAAAAAmAQAJADYHADMAKg0ASwAmBwAzACAFADUAKAkATQAmBwU1ACAJETMALgvaAUEAKBHIAT8AIhWUAS
+sAJB2qAS0AKB2YASEPLBuIARUAIBNgBwAeDUABACYVYAgALA9OEgAoCTIYACgLNjIAKAMWKgAiAA5AADIEATQALAQRQgAqBiFEACoEM0IAMAIs
+FgAyADgAADYKUkoAMggiUAAwDAxQADQKBk4AKAgCQgAoCgBEACYIAkIAKAQAFAAgAAAAADkIAQECFwMCBAwBAQIRAwIEFAEBAhEDAgUUAQECEQ
+MCBBcBAQISAwIEFQEBAhADAQUYAQECDwMCBBYBAQIQAwEFEAEBAhADAQUWAQECEgMDBRIBAQIQAwQFFQEBAhADAgQYAQECDgMBBRIBAQIRAwIF
+CQFECwEYAgEBARUMCBQCAQgDEwgBBwgUAgQIBBMHFAYIEwIECAQTBwEJCBUCAggDEwgBBwgUAgMIBAcLAQQIEQIFCAMHBQEKCBICAwgDEwQBBg
+gTAgQIAwcIAQYIFwICEwgBBwgRAgURBAgDDgYBBwgSAgUIAxMGAQsIEQICCAMHBQEHCBQCBggBBw
+]=]
+ZPData.macros["torre_2"] = [=[
+sAQevqID4hb/3AnJMCAAAAAAIgAAAAAgAAAAACQAAAAAHgAAAAAiAQAKACQJABwAIAsCMgAkC64BMgAgB6QBNgAeBZoBNAAkA44BNgAgA4QBNA
+AiA3g2ACABbjYAJAFkNAAgA1g2ACIBTDQAIAFENgAiATY2ACABLjQAJAAgNgAgARg2ACABDDQAIgEANgAiAQk2ACABEzQAJAAfMAAgASsqACIA
+MyATIgFBGBMgAEkQACIAVwITIABTAgAoAAIAABwACAAAHgAGAAAkAAIAACoAAgAAKAECHQAYAAAzACIAACcAkAEAADUAGgQA0wEAGgMANQAmBw
+BBADIbAEsALhfYAT0AIhOiASsAHhWYASMAIBOMAR0AIhOAARMAIBF2DQAiEWwDACIPYAIAIA9WCgAiDUoUACAJQBoAJAk0IAAgBSoqACIDHjAA
+IAAUNAAkAAo2AB4CATYAJAIgNAAgACA2ACYEGEIAHgIKNgAkAgQ2AB4EBDQAIAIANgAiAgIUACIAAAIAIAAAAAAiAAAAACIAAAAAIAAAAAAiAA
+AAACAAAAAAJAAABQAiAAAlACAAADMAIAIAQwAiAgAzACACADUAIgQAMwAiBAA1ACIEADUAIgQAMwAgBAU1ACQEETMAIgSuATUAHgKmAS8AIgGY
+ASkAIgGQASEAIAOEARkAIgN4EQAiA24JACIDYgEAIANYBgAiA04OACABQhYAIgE4HgAiASwmACICIiwAIAIWNAAgAgw2ACQEAjQAIAQJNgAkAi
+Y2AB4EKjQAJgQeRAAcAgw0ACIECDYAIgIENAAiBAI2ACACADYAIgQANAAgAgIWACQAAAAAIAAAAAAgAAAAACAAAAAAJAAAAAAgAAAAACIAAAAA
+IAIAGwAkBgA/ACAEADUAIgQAMwAgBAA1ACQEADMAHgQANQAiAgA1ACIAADMAIAEANQAiAQA1ACQBrgEzAB4DpAEvACIBmgEnACABjgEhACIAhA
+EXACIBeg8AJgBuCQAcAGIAACQCWAgAIgJODgAgAkIYACIEOB4AIAYsJgAgBiIwACIIFjQAIggMNAAkCgA0ACAIIjYAIggiNAAiChhCAB4ICjQA
+JAgGNgAgCAQ0ACIEABYAIAACAAAiAAAAACAAAAAAIAAAAAAkAAAAACAAAAAAIgAABQAiAAAbACIEADEAIgQANQAgBgAzACAGAEEAIggANQAiBg
+AzACAIADUAJAgFMwAiCK4BNQAgBqQBLQAgBpoBJwAiBo4BHwAgBoQBFwAiBnoRACIEbgcAJARiAAAeBFgIACICThAAIgJCGAAiBDgeACACLCgA
+JAIiMAAeAhY0ACICDDYAIAQANAAkAiI2AB4CIjYAJgQYQgAcAgo0ACQCBjYAIAQCNgAiAgI0ACACAhYAJAAAAAAiAAAAACAAAAAAIAAAAAAiAA
+AAACAAAAAAJAAAAAAgAAAAACIAABUAIgQALwAiBABBACAEADUAIAYANQAiBAAzACIGADUAIAQAMwAiBAA1ACIEBTMAJASsATUAIACiATMAIAWW
+AS8AIgeMAScAIgmCASEAIAl2FwAiB2oPACIJYAkAIAdWAAAgB0oIACIHQA4AIgM0FgAiBSogACIBICYAIAAULgAkAAg0AB4AATYAIAILNgAkAh
+c0ACIANDYAIAI4NgAkAipCAB4AEjYAIAIKNAAiAgY2ACIAAhYAIgACAAAgAAAAACIAAAAAIgACAAAgAAAAACQAAAAAHgAAAAAkAAAAACACABMA
+IgIALQAiBAA1ACIGAEEAIAYAMwAgCAA1ACIGADMAJAYANQAeCAczACIGETUAJAiwATMAIgikATMAHgqaATEAIgyOAScAIgyEASEAIgp4GQAgDG
+4RACAKZAkAIgpYAAAiCEwGACIIQg4AIAg4FgAiBiweACQGIiQAHgYYLgAgBAw0ACIGADYAIgQJNAAgBhM2ACIEHzYAJAIaFAAkBkw2ABwGKDQA
+IgYYNgAgBAw0ACIGBjYAIgIEFAAgAAIAACIAAgAAIgAAAAAiAAAAACAAAAAAJAAAAAAgAAIAACIAAAkAIAIAJwAoAAAzABwEAEMAJgIAMwAcAg
+A1ACACADUAJASsATMAIAKiATUAJACWATUAHgOMAS8AIgWAASkAIAV4IQAiB2oXACAHYBEAIgdWCQAgB0oBACIFQAYAIgc0DgAiBSoWACIFIBwA
+IAMUJgAiAwguACQDATQAHgELNgAiAxc0ACIBHDIAJAFKQAAeASo2ACIBFjYAIgEMNAAeAAg2ACIAAhYAIgACAAAkAAIAAB4AAAAAIgAAAAAiAA
+AAACAAAgAAJAAAAAAeAAAAACYAAAUAIgIAJwAeBABBACICADMAIAQANQAgAgA1ACQCADMAJAKsATUAHgOiATMAIgeWAS8AIAmMAScAIguCAR8A
+Igt2FwAiCWoPACALYAcAIAlWAAAiC0oIACAHQBAAJAk0GAAiByogACIFICYAHgMUMAAiAQg0ACABATYAJgEsNgAeASw0ACQAIEQAHgEMNAAiAA
+g2ACQBBDYAJAACNAAgAAAWACQAAgAAJAAAAAAkAAAAACQAAAAAIgAAAAAoAAAAACIAAAAAIgQAGwAoCAAtACYIADMAIAwATwAoCgAzACYMAEEA
+HggAMwAmCK4BNQAgBKYBMwAgApgBLwAmApABKQAiAqIBJQAeAFoRACYCbg8AIAB6CQAmAlYCACICSggAIgBAEgAcAjQYACYCKiIAIAIeKAAkBB
+QyACQECkIAIAIBKAAgBCA2ACIEJkIAIgQSNAAiBApEACIABCgAIgIEFAAiAAICACgAAAAAJAAAAAAkAAAAACIAAAAAJgAAAAAaAAAAAB4AAAAA
+MggAOQBACABBACwUAHUAJAwAQQAWBgAZABoIADUAJAoFMwAgChEzACYKrAEzACAKogEvACIKmAEnACIIjAEdACIIgAEXACAIdg8AJgiEAQkAJg
+ReAgAeBlIKACIESBIAIgI+GgAmAjIiAB4CJioAKAAiPgAgAAwoACACBkIAHgAHNgAoABE2AB4CHhQAJgA8JgAcADA2ACgCHDQAHgIQFgAiAAgA
+ACIABgAAIgACAAAgAAAAACoAAgAAHAAAAAAiAAAAACgAAAAAIgAAAAAiAAATACACADEAIgAAQwAgAgAzACIAADUAIgEFNQAmANgBQQAcBaIBMw
+AmDZYBLwAiDYwBKQAgEYIBIQAmD3YXACQPbBEAHA9gCQAkDVQBACINTAYAIAs+DgAiC0AcACQHKCAALgUcKAAeBRIuACIBBjQAIgEDNgAkAQ82
+AB4AGTQALAE4RAAeAC40ABwBGjYAHgAQNgAkAQg0AB4ABjYAJgECFAAeAAACACgAAgAAGgAAAAAoAAAAAB4AAAAAIgAAAAAkAAAAACgGACcAIg
+YAMQAgCAA1ACAIADMAHggAMwAcCAA1ACQIhAElACAIpAE1ACgMvgE/AB4IjAEvAEwQ9gFHAB4IbBcAJgh2EQAeBFQFALABENwBNgA4BjBYACQE
+BEAAHgIJNgAgBBU0ACoEPkQAIgQwNAAkBB42ACIEEDQAJAQKRAAkBAQ0ACgCAhYAGgACAAAgAAAAACIAAAAAIgAAAAAiAAAAACIAAAAAJgAAAA
+AkAAAAACIGACsAJAYANQAgCAAzAB4GADMAIAgANQAiBgAzACYIADUAHAYAMwAoCtoBQQAeBHonACQCmgEvACIEjgEpACQCogElACIAdhcAIABs
+DQAmAGAFACAAVgAAJABKCgAeAEAQACgAQCIAIAIoIgAiAhwqACQEEDQAJAYGNAAiBgM2ACYGKkIAIgYeNAAgCBRCACIGCjYAHggENAA5CQEBAh
+cDAgQNAQECEAMCBBkBAQIRAwIEGgEBAhADAgQVAQECEAMCBBgBAQISAwIEFwEBAhMDAQUUAQECEgMBBRUBAQIQAwIEFAEBAhADAgQUAQECEQMB
+BRMBAQISAwIEEgEBAgwDAgQVAQECEAMCBAMBQQsBGwIGAQYIEwIECAQTBxQLCBQCBQgEEwcBCggSAgMIBBMGAQkIEgIECAQTCAEJCBUCAggEEw
+gBCQgWAgIIBBMHAQYIEwIECAQTCAEGCBECBQgDEwcBBwgRAgMIAwcHAQkIEwIBCAMTCgEECBcCAQgDEwgBBAgQAgIIBAcIAQcIEwI
+]=]
+ZPData.macros["parkour1_rapido"] = [=[
+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
+BAUPAgMDBAYCDgMBAhYBBQIWEAIHAw
+]=]
+ZPData.macros["parkour1_semburla"] = [=[
+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
+EgBOAEIYzgJoADoggAJWACYkpAE0ADg2rAEyADJKrAEoADxUiAESAC5MXAMAOExCEwA8VDAnADJQDC8ASEoROQBETj9FAEJWe1UAQEibAU0AQj
+KRAT0ANkLnAVMALjLLAT0ALCi7ATUAMijLATMiSA6fAREqNgAcAEoqAAgACioABAAAQgACAAAoAAAAAEICAkgAMAIATgAyBgBEADAKAE4AMBIA
+TgBAIABYADomzgJkADYm3gFEADY65AE+ADI+qAEmAD5EkgEWAEJuqgECAE5ydCMAKkYuJQAsNhQnADg8ADMAMDgVNwA8QDlDAEJEa1EAOjiBAU
+sALC6HAUEAOiqjAUEAMCq5AUMAKCKtATkALh6/ATMAJhz7AS0AIgRNBQAkAAoAACgAEAAAJgAOAAAqAAYAADoAAgAALAAAAAA6AKgCAAAuAOIB
+AAAyCMoBAwA4GrABCwA8PMYBGQAuNGYXADBWciEAPEA8FQAoTDIXACQKDg2HASoEARNoLgYRD48BOA4bIZUBKAzcARNmJhLSAROmAUIwjAIbNj
+5WhgIbBDxaxAEVADJOjAEPAD5olAERADZQVAkATHhOAwBAeBgIAFJqGQwAZKwBhQEYAERcdw4AUJIB/wEUAC5CjwEKAHK6AesDEABQXKkCAQBK
+lAGTBAMAHDTVAQEALESbAgEAOwoBAQIUAwEEAQEBAhQDAgQBAQECGgMBBAMBAQIXAwEEAgEBAhgDAQQBAQECGQMBBAEBAQIWAwEEDgEBAgsDAQ
+QOAQECEQMCBBABAQISAwIEDgEBAhMDAgQIAQECEgMBBAsBAQITAwIEBQEBAgoDAQQBAQECEwMtDAFBAgoDAQEaAgEPFwIEAxcCBQMTAgcDCwEC
+CAgCBgMLBwESAQgOAgYDCQcBFQESAQgBBAQIDwIFAwgBBQgSAgQDBgEDCA8CBAMGBwEXBQgPAgcDBQEZAgcD
+]=]
+ZPData.macros["parkour3_rapido"] = [=[
+0wIk+pAF4ha54AnyGDQAAAAAIgAAAAB0AAAAADoAAAAAMgAAAAA8AAAAADYAAAAANDMACwA+eQANADyfAQALADiLAawCCQA6d+YBCwA0iQHuAQ
+0APp8B5gEPACZPZAUAKGNsCQAgTUoFABpPQAUAHjsoAwAgTywFACJPIgMAIk8WBQAgTwwDACJPAgMAIk8JAwAgTxUDACpjJwEAJk8tAQAWOykB
+ACBPPwAAJE9LAQAkT1UBACJJXwEAJlnYAQEAIE2iAQAAJk+WAQEAHk+MAQEAKmOgAQEAJE90AQAkY4ABAQAsY3ABADZ3cAMAOosBZAEANIsBQA
+MAKGMcAQA0YwoAAECdARMEACZjIwQAMnc/BgA4iwFpCgAsY18KAChhbwwAGjtLDAAiTW0OABxNeRIAHjlRDgAeTQMUACRNEBQAIEuuARYAIk2i
+ARYAIE2WARQAIkuMARYAIkuAARYOIk12Fg4gS2wYDiJLYBgOIktWGA4gS0oYDiRNQBgOHks0GAAkSyoWDCJNHhYAIEsUFAAiTQoUACBNARIAIE
+0LEAAiTxcQACRNIRIAHk0tEAAkTTcOACBNQxAAJE9NDAAiT1cMACBNYwgAKGOLAQYAIk99AgAkT4UBAAAkY7kBAQAuY8cBAQAsY9sBAwAmYxkD
+AChPFAMAPIsBrAIDAEKLAYoCBQAmiwHoAQMALGOSAQEAJE9oAAAiT14CACBPVAIAHE9GAgAkTz4CACBPMgQAJE8mBAAeTxwEABo7DgQAFjsIBA
+AgOQIEACBPBQYAIk8TBgAgTxsIACJPJwYAIE8zBgAiTzsIACBNSQgAJE9TBgAgT10IACRPZwgAIE91CAAiTX0KACBPiQEIACRJlQEKAB5DnwEI
+ACQ5qQEGACAztQEGACIPFAIAIgBIAAAgADoAAE4AKAAAGgAGAAAcAAQAACAAAgAAJAAAAAAgAAIAACAAAAAAJAAAAAAiAKwBAAAiAKIBAAAgA5
+gBAQAkC4wBBQAuHbwBDQAkHXIPABwZTA0AGCdeFQkeIz4VESIzTB0PIDk+IxciPzYpGyBBKikdJEMeKx8gQRQrHSRBCisdID0BKR0gNw0lHiQx
+FSEwIjMtIUYeGSERKDQjRxcAKBdZEQkeD2kJACQDRwEAMAChAQAANA3bAQAAMhmxAQAAMF21AQ4ARpsBHCQAWq0B9gIqADKxAbwCHgAuY5oBDA
+AsYYgBCgAoY3YIACpjZgQAPHdiAgA8nwFgAQAydyoFADqLARIDACBjBwMAGDsLAQAaOxEBACRPIwMAGk8rAQAgOykDACZjUQEAHDs5AQAcT1UD
+ACJPYQEAHDtPAwAmY5EBAQAeO18DACJPiQEBACBPlQEDACJPnwEBACJPqQEBACJPSwMAJE8WAQAgT6wBAQAiT6IBAQAgT5gBAQAgT4oBAAAiT4
+IBAAAgT3YAACZjhAEAACpPXgAAHk9SAAAiT0gCACBPPgAAJmM8AgAiTyQAACRPGgIAKmMQAgAeTwIAAC5jDwIALmMdAgA0iwFHAgAsY0cCACph
+WQIAOosBmQEGACJPZQQAJGOPAQgAHDtdBAAkT4cBBgAcT5EBCAAcO3MGACBPpQEIACJNrwEIACBPuwEIACRPMAgAHk9mCgAoTUIIAB5PrAEKAC
+JPogEKACBNlgEKACJPjAEKACBPggEKACJNdgoAIE9qDAAkT2IKACBNVAwAIE9MDAAkTT4MACBPNg4AIk0qDAAgTx4OACJNFAwAIE8KDAAiTQEO
+ACJPDQwAIk0XDgAiTyEMACJNLQwAHk83DgAkTUEMACBPTQ4AJE1ZDAAeT2MMACJNbQ4AIE95DAAkTYMBDAAgT48BDAAiTZkBCgAiT6UBCAAiT0
+8GACJPDAYAIk+sAQQAHk+iAQQAIk+WAQQAIE+MAQQAIk+CAQQAIE92BAAiT2oEACJJYgQAIENUAgAkOUwEACAzPgIAIik2AgAgIyoCACAbHgIA
+JBEUAAAeCwoAADYDAwAAGgAPAAAWABMAACADIQAAJhE5AQAcDysBACIbQQMAIiVNBQAiK1kDACIzYwUAIDttBwAgQ3kFACZLgwEFAB5PjwEFAC
+JPmQEFACBPpQEFACRPeQUAHk0xBQAkSz0DACRHrgEFACBLpgEDACBPmAEFACJPkAEDACJPggEDAB5PegUAJE9uAwAgT2IDAChjbAUAIjs6AwAe
+TUIDAB5POAMAIk8sAwAeTyIDACRPFgUAIE8MAwAiTwIDACJPCQMAIE8VAwAiTx8FACJPKQMAIE81AwAiTz8DACBPSwMAIk9VBQAiT2EDACJPaw
+MAIk11AwAgT4EBAwAgT40BBQAiT5UBAwAiT6MBAwAqS6sBAwDsAUG5AQMAIL0BzQYJABYZ7QEBADwdvQMBACgArQIAABoABwAAHgAmAAAcABgA
+ACkLAQECEwMCBAEBAQIUAwMEAQEBAh4DAgQBAQECHwMCBAkBAQIbAwEEAQEBAhkDAgQBAQECHgMCBAEBAQIeAwIEAQEBAh8DAgQBAQECJAMCBA
+IBEgoUAgZHAgoDGQIKAwsHFwIDAwEFNgIKAxwCBgMcAgcDGwINAw
+]=]
+ZPData.macros["parkour3_semburla"] = [=[
+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
+AAACAzGAEAJDUMAQAgNQAAACIzCQEAIDUTAQAiNR8AACIzKwIAIDUzAAAiL0EAACAnSQIAIh9VAAAiGWEAACIPawAAIAd3AAAiAYEBAAAgAIsB
+AAAiA5cBAgAiC6EBAAAmNcUBBAAgNQsCACA1DgIAIjOsAQIAIDWiAQIAHjWYAQAAJDOKAQAAIDWCAQAAIjV2AAAiM2wBACA1YAEAIDNUAwAiNU
+wBACI1PgMAIjM2AQAiNSoDACA1HgMAIDMUAQAiNQoDACIzAQEAJEMRAwAeJxEBACIzIwEAIjUrAQAiNTkBACAzQQEAIjVNAQAgNVkBACIzYwAA
+IjVtAQAgNXkBACIzgwEAACI1jwEBACI1mQEAACAzpQEBACRDowEAACAzBgAAIjUSAAAgNQwBACIzBgAAIDUEAAAiNQMBACIzDQAAIDUZAAAiNS
+MAACIzLwEAIDU5AAAmQVcAAB4nPQAAIjVbAAAiL2UAACAnbwAAPg0BAQIVAwIEBAEBAh0DAgQBAQECGgMCBAcBAQIWAwIEBAEBAhgDAgQBAQEC
+GAMDBAcBAQIeAwMEAwEBAh0DAgQNAQECKgMCBCIBAQIfAwIEAQEBAh8DAgQCAQECHwMDBAEBAQIfAwIEAQEBAh8DAgQBAQECHwMCBAoBBQMrBQ
+EKCBgCAgEZAgkDFQIIAwcBFQIEAwQBEgIJAwEXEgIKAwgBGQIIAwMUIQIIFAUIFwIWAwwBAwgEBw8BGAIKAxkCCwMXAg0DHAIHAxoCCQMZAgkD
+Dgg
+]=]
+ZPData.macros["parkour4_rapido"] = [=[
+3wMY4ooF5hb5lwrOGSAAAAAAIgAAAAAgAAAAACQAAAAAIAAAAAAiAAAAACAAAAAAIgAAAAAiDQADACIvAwkAIE0ADwAkTbABDwAgTaQBDQAeT5
+oBCwAiTY4BCwAkT4QBCwAeT3gJACRNbgkAIE9kCQAiT1gJACBNTAcAIk9CBwAiSzgHACBBLAUAIjkiBQAgMxYDACYpDAUAHiMCAQAgGwkDACIR
+FQEAIgsfAAAgAykAACIANQAAIgM/AQAiKUsAACJBVQEAJkFfAAAiO64BAQAeQaQBAQAiS5oBAwAeTY4BAwAmT4QBBQAeT3gFAChPbgcAGE9kBQ
+AiT1gHAChNTgUAHk9CBwAeTzYFACZPLgUAHk8gBQAgTxgFACBPDAUAIk8ABQAiTQkFACBPEwUAJE8fBQAgTykHACJPNQWoASBPQQFSIk9JBIoB
+IE9VCDwkSWEIRh5Bawg2JDt3BngiFX8CigEgATsAPCIAFAAoIgAOAFAgAAgAKCIABABQIAACABYiAAIAOiAAAgAOIgAAAAAgAAAAACYAAAC9AR
+4AAAAAIAAAAAAiAAAAACIfAAcAJEcAEQAkTawBEQAiTaIBDQAcT5YBCwAgTYwBCwAmT4IBCQAeT3YJACJNbAcAIE9gBQAiT1QFACBPTAUAIk8+
+AwAiTzYDACBPKgMAJE8eAwAgTxQBACBPCgAAJEkBAgAeQw0AACI7FwAAIjEhAAAiKysAACIhOQAAIBtBAgAiE00AACALWQAAIgFjAAAgAG0AAC
+IAeQAAIgCDAQAAIgWPAQAAIAuZAQEAIhWlAQAAIjeZAQEAIE8JAAAkTxIAACBPrgEAACBPpAEAACJPmgEBACBPjgEAACRPhAEDACBNegEAIk9u
+AwAiT2IBACJPWAMAHk9OBQAkT0IDAB5POAMAJE8sAwAiTyIFACRPFgcAHk8MBQAiTwAHAB5NCQUAJE8TBwAgTx8HACRPKQkAIE81BwAgTT8JAC
+JPSwcAIk9VCQAiTWEJACBPawkAIk91CwAiTYEBCwAgT40BDQAiTZcBDQAgTaEBDQAiTa0BDwAkT7cBDwAeTVEPACRNFg0AIE0YDwAsSwoLQyAH
+AgQNHAQIAjIgAAYAICAAAgAAIAACAAAgAAAAACIAAAAAIgACABQgAAAAUCIAAAAQIAIAADwkAAAABCAAAAAAJAAAAAAeAAAAACIAAAAAIgAAAA
+AiAAAAACACAA8AJgQAIQEeBABBASIAAE8CIAUATQAiDQBNAiAVAE0AJhWsAUsAIBmiAUsAIiGWAUUAHieMAUMAJC2CAT0AIDN2NwAgN2oxACQ9
+YCkAJD9WIwAcQ0obACJFQBUAIEk0DQAiSSoFACBLIAIAJk0UCgB6TQgSACCdAj1aAB43HxQAFjUjGgAmRTsmAB5DRSwAHC87IgAePVcyACRLfU
+AkHCtTKnIiM3k8TiIthQFCaiInjQFEJiAfmwFKLiIBmQEwzQEiEJEBHhEiDhlAfCQCEEoGHgAMSgggAAgmXiAABAAeIgACAAAiAAIAACIAAAAA
+IAACAAAiAAAAACIAAAAAIAAAAAAiAAAAACAAAAAbIAAAAAAkAAAAACAAAAAAIgAAAAAkAAAHBSIAACNDIAAAPzEiAABBCCAAAUEAIhUARxEgIQ
+JHDSAjB0cBIiERRwAkIbABRwAgJ6QBRQAgLZoBPwAiMY4BOwAgOYQBNQAiO3gvACJBbicAJENkHwAgRVgZACRFTBEAHkdEBwAiRzYBACBHLgYA
+IkUgDgAgQxgWACI/DBwAJD0AJgAgOwksACA1EzIAIjEfOAAgLStAACQnM0QAHiFBSAAkH0lKACAdV0oAIBdfTAAiE2tOACIRd044Ig2BAU4YJg
+uLAUoiHAuXAUIGIAmhAToUIgOtARgAJgBNAgAeAB4AACAAFAAAIgAKAAAkAAYAAB4ABAAjIgACADsiAAAAJR4AAAA3JAACAAAgAAAAACIAAAAA
+JBkABAAgPQAKACJNAA4AHk8AEgAiTQAQACJNABIAJE2sARAAIE2iARAAIE2WARAAIk2MARAAIk2CARAAIE92EgAiTWoQACJNYBIAIE1WEgAiTU
+oSACJNQBIAIEs0FAAiTSoWACJNIBQAIEsUFgAiSwgYACBNARYAIksLGAAiSxcYACBLIRgAIkstGAAiTTcWACBLQRYAIk1PEgAiTVcUACJNYxAA
+IE1tEgAgTXkQACRPhQEOACBNjQEQADhNmwEQACwxRQoAIgASAAAgAAwAACAABAAAIAAEAAAiAAIAACQAAAAAKgACAAAkAK4BAAAkAKQBAAAwCe
+IBAwBEIeoBBwA8Q+ABDwAsR4wBDQAoR2INACxTUg8AKF9AFQAoYTAVACBNGBMAJE0QEQAkTQIRACJLBREAKlsXEwIkPR8PACJDNw8AIi03CQAg
+J0MJACQdTQUAIhVXBQAiD2MDACAFbwEAIgF3AAAkAIUBAAAuANkBAAAiAJ8BAAAkAKsBAAAqL6sBAgAoYQQIACxjEAQALGPWAQYAKmPGAQIALH
+fWAQMAKmGgAQcALGOOAQkAMHeUAQ0AKmNqBwAqY1gHACZhRgMAJE8sAwAkTyIDABhjGgMAFjsIAwAiSwIBACJBCQMAIjsVAQAiMR8DACArKQEA
+IiM1AAAgGT8BACITSwEAIAtVAAAkA18AACIAawAAHgB3AAAgAIEBAAAiAIsBAAAkAJcBAAAiAKEBAAAiAK0BAAAiAB8AACIAHAAAHAAQAAAmAK
+4BAAAeAKYBAAAiA5gBAAAgDZABAAAiE4QBABUiG3gAISIlbgIrJCtiAjUgM1oCOx47TAJFJENCAE0eSzgBUyJPLAddJE0iC2UgTRYPYyBNDBNj
+IksCF2MgSwkZYyRJFR1jIEcfIWEiRyklYyJDNSlhIkE/LSIgQUsrYCI9VSswIDVfJa4BIjFtHzwgKXUdUCIjgQEXDiIbiwETQiIVlwEPSiARow
+EJKCQBqwEBHB4ATQAAJAAaAAAgABIAACAVDAwAIjkEHgAiRwQkACBFAiYAJEWuASYAIEekASQAIEeaASQAJEeOASIAIEeEASAAIEt6HgAiS24Y
+ACJLYhgAIE1YEgAiTU4OACJPQg4AIk04CgAiTywKACBPIggAIE8WCAAiTwwEACJPAAYAIE0JAgAiTxMEACJPHwIAIE8pAgAiTzUEACBPPwIAIk
+9LBAAiT1UCACJPYQIAIE9rBAAiT3UEACJPgQEEACJPjQEGACBPlQEIACBPowEIACJNrQEKACJPtwEKACBPwQEKAiJNzQEMACJP2QEKACBN4wEM
+ACJP7QEOACJN+QEMACJP5QEOACJNDQwAIikgCAAgARIAACAACgAAIgAGAAAtDAEBAhYDAgQBAQECGwMCBA8BAQIfAwIEAQEBAiADAgQcAQECHQ
+MCBBoBAQIfAwIEEQEBAh0DAgQHAQECGwMCBAEBAQIcAwIEAgEBAh8DAgQGAQECJwMCBAQBLA4UNwINBwEIAwUbAgYDHAIHAwIGBAsSAQEFBQYT
+AgsDAhYDFQ8BAgwDBQMGGwIFAwsHARIEBQMGGAIHAwcBFAIKAxoCBwMaAggDBAEBBQIGGQIRAwEOAQE
+]=]
+ZPData.macros["parkour4_semburla"] = [=[
+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
+MQAiEgAxACIOADMAIAoAMwAgBgczACQKF0EAIAYVJwAiCK4BNQAgAqYBMQAiA5gBLwAiC5ABKwAgD4QBJQAiFXgfACAbbhkAJB9iEwAgI1oLAC
+IjTAUAICdCAgAiKTgMACIpLBIAICciGgAkJxYiACQnDCQAJC0ALgAcGwceACYtGzAAIhkZHgAcIykoACAjNSgUICE3BHomIT8AOx4lSQcTJCNV
+AA4gI18KBCIrhwEUAB4ZWRQeIB+BASAJIiGLASYAIh2XASYAIhehASAAIgWVAQgAIAADAAAiABQAAB4AEAAAJAAIAAAgAAYAFCQAAgAAHgACAA
+AiAAAAACIAAAAAJAACAAAeAAAAACIAAAAAIAAAAAAkAAAFACIDABkAIAcALwAgCQczACQHETMAHgkbNQAoC9YBPwAeCXglACATmAEvACAXjAEr
+ACIfgAEjACIhdh0AJCVsFwAgJ2ANACInVgcAIidKAgAgJ0AIACQnNBAAICMqGAAgIR4gACIfFCgAIhkKLAAgGQEwACAVCzAAIhUXMAAgEyMyAC
+IfKSQLJB01KAogG0EqAiAhSygAIBlXKgAkFV8wNyAPbTInIhF3MiUgEYEBNAUiD40BLDsiC5cBJiEiC6MBIHcmAZUBBnEaAAAAKyQAGAA1IgAS
+AFkeAAoANSQABAA7IAAEABciAAIAJSIAAAAfIgAAAAAkAAIAACAAAAAAHgAAAAAgAwACACIZAAgAJi8AEAAeMQASACIvABQAIjGsARQAIDGiAR
+QAIC+WARYAIjGMARYAIi+CARYAIi92FgAgL2oWACIxYBYAIC1WGAAiL0oYACQvQBoAIC00GgAgLSoaACItIBwAIisUHAAgLQgeACArAR4AIikL
+IAAiKxcgACIlIRwAIB8tGAAgGTcUACQTQQ4AIA1PCgAiBVcGACABYwAAIgBtAAAoAHkAACIAhQEAACAAjQEAACIAmwEAACYTSQcAJCUMDQAqL9
+YBDwAmN8QBDwAgMZIBCQAkNYYBBQAgNXwDACQzcAEAIDVmAQAqQXAAACZBYAIAIjU+BAAiNTYEACAzKgQAIjUeBAAkMxQGACA1CgYAKkEDCgAm
+QRUIACIzGwoAIDMnCAAiNTMKACIzPQoAIjNHDAAgM1MMACAzXQwAHCVNCgAaJ1MKACIzeQwAIDODAQwAIDGPAQwAIi+ZAQwAIielAQgAIgl5Ag
+AiAAIAACIADgAAIAAKAAAgAAYAACIABAAAIgCsAQAAIgOiAQIAIAuWAQIAIhWMAQQAIhuCAQQAIiN2BgAqN4QBCAAkM14CACpDZgQAIDNEAAAk
+Q0gAACYzLAAAHjUiAQAkNRYAABwzDAEAGicCAAASJwMBABonCwAAIDUXAQAiNSEBWiAzKwIsJDU5AiggNUEEUCpBYwYWGCdDBAIiM2MGACI1bQ
+YAIC95BgAiJ4MBBgAkH48BAgAeF5kBBAAgD6UBAgAmAa8BAAAeACcAACQADAAAHgAOAAAgAAYAACIFBAEAJCcECwAgMwANACQxrgENACIzoAEL
+ACAzmAELACAzjAEJACI1gAEHACAzdgcAJDVsBQAgM2ADACI1VgMAIDNKAQAiNUAAACI1NAAAIjMqAAAiNR4AACI1FAIAHjMKAgAiNQECACA1Cw
+IAIjMXAgAgNSEAACI1LQQAIDM3AgAmNUMCAB4vTQIAIidZAAAgH2ECACIZbwIAIA95AAAkB4MBAAAgAY8BAAAiAJkBAAAgAKUBAAAiAJkBAAAi
+EQcEACIrEgQAIDUMCAAiMwgGACA1BAQAJDOwAQYAIDWkAQQAIDWaAQQAIjOOAQQAIjWEAQQAIDN4AgAiNW4EACI1ZAIAIjNYBgAgNUwEACIzRA
+QAJENCBgAeJyAEACIzIgQAIjUYBgAgMwwEACI1AAQAJEENBAAeJw8EACA1HwIAJDMrBAAgNTUEACIzPwIAIDVJAgAiNVcEACIzXwQAIC9rAgAg
+KXcEACQfgQECACAXiwECACIPlwECACAJoQEAACIArQEAACIAUQAAJAAQAAAeABIAACIACgAAIhEGAQAgJwQFACIzAgMAIDMAAwAkNQIDACIzrg
+EFACI1pAEBACIzmgEDACA1jgEDACA1hAEBACAzeAMAIjVuAwAiNWQBACIzWAEAIjVOAAAgNUIBACIzNgAAIjUuAAAgNSACACIzGAAAIDUMAgAg
+NQAAACIzCQIAIjUTBAAiMx8CACA1KwQAIjUzBAAiM0EEACA1SQQAJDNVBgAgNWEGOyAzawQ3IjV3AjciNYEBAjcgM4sBADckNZcBATceNaEBAz
+ckM60BBTceNVEFOSgvEwc5HiuwAQUxIi+kAQktIDOaAQ0zIjGOAQ87IDOEAQ89IC94EzskMW4TPSAvZBU7Ii9YFz0gL0wXPSItQhk7IC04Gz0k
+KywdOyAtIhs9IisWGzcgLQwdNSArAh01JCsJHTEgKxUdLyIrHx0tICspHSsiKTUfKSAnPxspJB9LFyUgGVUTHSQTXw0VHg1rCREkBXcDAB4BgQ
+EBACQAiwEAACAAlwEAACIAoQEAACAArQEAACQAtwEAAB4AwwEAACQAzQEAACAA2QEAACIA4wEAACIA7QEAACAA+QEAACIAsQEAACAACgAAJAAc
+AAAgABIAACIACgAAIAAGAAAkAAIAAB4AAgAAJAAAAAAiAAIAAB4AAAAAJAAAAAAgAAAAACIAAAAAIgAAAAAgAAAAACIAAAAAIAAAAAAiAAAAAC
+IAAAAAIAAAAAAiAAAAAEURAQECFgMCBAQBAQIdAwIEAQEBAh0DAgQCAQECIAMCBAcBAQIgAwIEEAEBAiADAgQKAQECHwMCBBMBAQIfAwIEDwEB
+AiADAgQSAQECHwMCBBABAQIdAwIEAQEBAh4DAgQEAQECHwMCBAYBAQIfAwIEBAEBAh8DAgQIAQECHwMCBAEBAQInAwIEFAE5EwEaAgMBGAIIAx
+kCBwMCCBkCDAMCAQEEAwgXAgsDAhMNAQIIGgIKAwoIGgIGAw4UBwgaAgYDCRQICBgCCQMPAQQIHAIFAw4BAwgbAgUDGgIHAwUBFQIMAwYBHgIF
+AwQIGAIJAwUBBAgcAgYDGwIRAxEB
+]=]
+ZPData.macros["parkour5_rapido"] = [=[
+mwseqqcC7hadtQupGCYAAAAAJg4AAgAgJgAEAB40AgQAIDYDAgAgNgACACI0AgIAIjYFAAAgNgkCACI0AAEAIDYCAAAmNAIAACA2AAEAHjYAAQ
+AiQgABACQ2rgEBACA0pgEBACA2mAEBACI2kAEBACQ0hAEBAB42eAEAIDZuAAAqQnoBABwoQgAAIDZMAAAiNEIAACI2OAIAIDYsAAAiNCIAACA2
+FgIAIjYMAAAiNAIAACY2CQIAHDYVAAAkNB8AACA2KQIAJDY1AAAgND8AACA2SwAAJjAUAQAgKCYAACQiJgAAGhgkAAAgCCQAHSYBJAAgHgAmAA
+AmACYAAR4AJAAAIgAmAAAiACYAACIAJAAAIAAmAAAoAC4AABwAHAAAJgAmAAAoAC4AACAAJgAAIAAmAAA0ADgAAB4AJAAAJAAmAAAsAC4AACwA
+MAAALAA4AAAoAC4AACgAJgAAJAAuAAAgACYAABoAHAAAIgAkAAAiACYAAB4AJgAAIAAkAAAiACYAACIAJgAAIgAkAAAqACYAACIALgAALgAwAA
+A4ADgAADIAQAAAUABUAAA6AEIAACYALgAALgA4AAAoADAAACgAJAAAJAAmAAAuAC4AACoAOAAANAA4AAAsADAAACIALgAAKgAmAAAmAC4AACAA
+JgAAIAAkAAA0MCgBAC5QEgMAKjQGAQAiUAQDADZQAgEAKEQAAwAoQgEBAC5CAAMANFACAwAuUAEBADxQAAMANGoABQAwXgEDABgoAAAAIjYAAw
+AgNAIBACY2AAEAIDSsAQEAJjaiAQEAHjaWAQEAIjSMAQMAIjaCAQEAJDZ2AQAeNGoBACpEeAMAIjRSAQAiNkgBACA2PAEAHigmAQAcNCoBAB42
+IAEAIDAUAQAiKAgBACAgAQEAJBoLAQAgEBcAACAIIQAAJAItAAAgADcAACQAQwAAIABNAAAkBlcAACIMYwAAIhRtAAAoJpkBAAAgJocBAAAsPL
+cBAgAmNp8BAgAeNKsBAgAiNk8EAChCFAIANlCCAgQAKkLEAQQALlDWAQQAKkSgAQQAGjR0AgAgKE4CAB42YgIAIDZUBAAgNEoCACA2QAIAIjQ2
+AgAiNioEACI2HgIAIDQUAgAiNggCACA2AAQAIjQNAgAgNhcCACQ2IQIAIDQtBAAiNjcCACI0QQIAIDZNAgAgNlkEACI0YwIAIjZtAgAiNnkCAC
+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
+QAAAAAIAACAAAmAAAAACIAAAAAJAsAAAAiJQAAACI1AAAAIjUAAAAkMwAAAChDAAAAIDMAAQAkNQACACA1BQAAJDMRAAAkNa4BAgAiO8wBAgAk
+JZYBBAAgHYwBAgAoG6ABBgAgC3QCACQFaAQAJAReBAAkClICACQaWAQAIBw6AAAmJjACACgsJAAAHkAeAAAkNgwBACA2AAEAJjQJAAAgNiYBAC
+ZCMAMAJEQaAQAiNAoBACY2BgMAHjQCAwAmFgIBACIAAgAAJAAAAAAkAAAAACIAAAAAJAAAAAAiAAAAACQAAAAAIgAAAAAkJQAAACQzAAEAIjMA
+AAAkNQACACJPAAAAJjUAAAAgMwAAACQ1BQAAIkEXAAAmNR8AACg1rAEAACQvogEBACAxvAEAACIdiAEAACQVfgEAJA90AAAiBYABAQAmBFwBAB
+4KUAEAKBpUAwAkHDgBADA6PgMAIDIcAwAkNBIDACQ2BgEAIjYDAwAmQhUDACQwHgMAJBAkAAAiJD4BACJCOgMAIjQYAwAkNgwDACQ0CAMAJGAE
+BQAkUAIDACJOAgUAJlAAAwAkZAAFACBQAAUAJlAAAwAiZAAHACJQAAMAKlAABQAgUAADACZkAAUAIlAABQAmYgAFACJQAAUAJFAAAwAoZAAFAC
+RQAAUAKFAAAwAoZAAHACRQAAMAKGQABQAueAAHAB5QAAUAIk4AAwAcPAADACJkAAcAKFAABQAaUAADACZQAAUAJmQABwAgUAAFAChQAAUAJE4A
+BQAiZAAFACZQAAUAKmQABwAcUAUFACZQEQUAIlAbBQAmZDMHACJOMwUAKGRRCQAkUE0HACZQVwcAJGR9BwAkTnEHACJQewcAKGSpAQkAJlCTAQ
+UAIGTJAQkAJk6rAQcAKFC3AQcAImT1AQcAJlDPAQcAImSTAgkAJE7pAQcAKlDxAQkAIGTBAgsAJE6LAgsAJEyVAgkAJFDtAgkAKDqvAgcAIjC5
+AgUAKDKXAwcALCyBBAMAGhCJAgMAJAzrAgAAJgb1AgEAHgCBAwAAKADvAwAAIgCZAwAAJAClAwAAJACvAwAAOgCNBgAAFADZAgAAHADdAgAAJA
+DdAwAAGgDpAwAAXgD1CQAAIACVBQAAGACTAwAAKgCvBQAAHgClAwAAEgCpAwAAHACxAwAAGgC1AwAAJADpBQAAIADHAwAAIgCFBgAAIgD1BAAA
+IADfAwAAIgCvBgAAIgCVBQAAIgCjBQAAIAD/AwAAIgDTAwAAIgBaAAAeAFIAACQAMgAAIAAWAAAiABQAACIACAAAIAAEAAAiAAQAACAAAAAAIg
+ACAAAiAAAAACIAAAAAIAAAAAAgAAAAACQAAAAAIAAAAAAiAAAAACIAAAAAIAAAAAAiAAAAACIAAAAAJAAAAAAgAAAAACQAAAAAHgAAAAAiAAAA
+ACQAAAAAHgAAAAAgAAAAACIAAAAAIAAAAAAiAAAAACAAAAAAIgAAAAB4EAEBAhcDOgURAQECHgMCBAEBAQIeAwIEAQEBAh8DAgQBAQECHwMCBA
+EBAQIfAwIEAQEBAh8DAgQBAQECHwMCBAoBAQIgAwIEAQEBAi4DAgQBAQECHwMCBCMBAQIfAwIEFQEBAiEDAgQQAQECIAMDBAkBAQItAwIEGQEB
+AhYDAgQUAQECEgMBBRUBAQIQAwIEFQEBAhIDAgQUAQECEgMCBBUBAQIRAwMEEgEBAg8DAgQSAQECEQMCBBYBAQIQAwIEFQEBAhEDAgQXAQECEA
+MCBBgBAQIRAwIEEwEBAhADAgQXAQECEAMCBS8BNQMCBCIBfwYBDQgXAjoREggXAggDHgIDAx4CBwMZAgoDGQIKAxgCCwMeAgMDAQIJBQMGGAIK
+AxcCGwMbAgcDFwcBCAoFAwYXAgkDCwcBDgEIAw0BBQEWAgwDFhcCCwMGAQINAQwCDQQFAwYXAgsDARAJBhgCGAMaCBkCCAEMCBMCBAgEEwcBBw
+gRAgUIBBMHAQcIEwIECAQTCQEECBUCAwgEEwYBCQgVAgEIAxMIAQYIEgICCAMHBQEICBICBAgEDggBCAgRAgQIAxMIAQgIFAIDCAQTBQELCBMC
+AwgDEwYBDAgUAgEIAxMFFAkIEgIECAMHCQEICBICAQQECCkFCAYyAx8B
+]=]
+ZPData.macros["parkour5_semburla"] = [=[
+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
+EwAiJiAdACAiGCEAIhwMKQAgFgAtACISCTMAIBITMQAiEB8xAEIaUVkAPhA9MQAaGoUBWQAYDEMlHhgKSScKIA5rMR4iDnczACIKgQEvACIKiw
+ElACAIlwEfACIGoQEXCSICrQEBACAAUQAAIgAUAAAgAA4AACAACAAAJAAGDgAiAAIgACADAjIAIAEANgAkAQA0ACAAAjYAIAQANAAkBK4BNgAi
+CKQBNAAeDpoBNAAiFI4BMgAiGoQBLgAgIHgqACIkbiYAJCpkHgAgLlgYACQwTBAAHjBECAAgMjYCACIwLgcAIi4gDwAgLBgVACQqDB8AICgAIw
+AiJAklACAiEycAIiIfKQAgICspACQgMysAICBBKQAgHkkrACIgVSsAIh5hKwAgHmsrACIadycAIBiBASEAIhKLARkAIA6XARMAJAihAQ0AIgKt
+AQEAIABRAAAiABQAACYADgAAIAIICgBSFAhcACoQAj4AMB4ATAAaFgIwABgQACQAGBIAJAAcEoIBJAAgGKQBMAAaFnQiACAekgEsACAihgEoAC
+QmfCQAICpwIAAiMGYaACAwWhIAIjRQCgAiMkYCACAyOgUAIjAuCwAiLCYVACAoGBkAIiQQIwAiIAInACAaBS0AIhYRLwAiFh0vACYWJzEAHBQx
+LwAgFD0xACISRzEAIhRTMQAiFF0xFCASaTEUIBRzMRAkEH8rBCAOiQElECQMkwEdDh4InwEXACYAqwEBABwATwAAJAASAAAeAA4AACIACgAAJA
+AEAAkgBgIeACQGAjQAIAgANgAgCAA0ACYKAjQAHggANgAgCgA0ACIMADQAIgoANAAgDAA0ACAMADQAJA4ANAAgFgA+ACQQrgE0ACAWpAEwACAc
+mgEsACIijgEoACIohAEkACAueBwAIi5uFAAiMmQMACAwWAQAJDJOAQAgMEILACAsNhEAJCwuGQAeJiAfACQkGCcAHiIMKQAiIAApACIgCSkAIi
+ATKwAgHh8rACQcKysAIh4zLQAiHEErACAcSS0AIBpVLQAiHGEtACAcay0AIBp3LQAiGn8nACIUjQEjACISlwEbACAMoQETACICrQEDACAAUQAA
+JAAUAAAgAA4AACICCAYAIAQGHgAkBgI0ACAEAjQAIAQANgAiBAA2ACIGAjQAIggANAAgCgA2ACAQADIAKA6sATQAHhKiATIAIBqWAS4AIiKMAS
+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
+ZiSw0AKFBHCwAmYmkNACpkeQ8AKE5tCwAkZJkBDQAqYqkBDwAoZLsBDQAqYssBDQAmUK8BCwAmYukBDwAoZPsBDQAqYo0CDQAoYp0CDwAkUO8B
+CwAoYr0CDQAqXM0CDwAqUN0CCwAmNqUCBwAmOvsCBwAmLI8DBwAmGskCAwAkGK0DAwAkCuMCAAAoAu0CAAAiANkDAAAmAOkDAAAmAJMDAAAmAJ
+8DAAAkAJUEAAAoALcDAAAgAMMDAAAmAMEEAAAiANsDAAAkAOEEAAAiAPMDAAAiAP0DAAAiAIkEAAAiAJUEAAAkAJ8EAAAeAKkEAAAkALUEAAAe
+AL8EAAAeALUDAACFATsBAQIHA0UFHQEBAh8DAgQBAQECIAMCBAEBAQIfAwIEAQEBAh8DAgQBAQECHQMCBAEBAQIgAwIEAQEBAh8DAgQYAQECKQ
+MCBAEBAQIeAwIEAQEBAh8DAgQqAQECIAMCBBQBAQIfAwIECgEBAh4DAgQKAQECHwMCBAkBAQIfAwIEEQEBAh8DAgQMAQECHwMCBBUBEwMCBCkB
+AQIEAwMFHQEBAhADAgQXAQECEAMCBBkBAQIOAwEFFwEBAg0DAwQbAQECEQMCBBgBAQISAwIFEwEBAhIDAQUWAQECDAMBBRgBAQIPAwIEFQEBAh
+ADAgQXAQECEwMGBQ4BAQIRAwMFFQEBAhADAQUtASsDjAEaASMICQJCGAMRCwgEEwsBAggZAgkDFgIOAxsCCAMaAgkDFQILAxwCCQMaAgkDBwEP
+BQMGGgIRAxkCCQMWAgwDGgcBCREIGAIJAwoBDAgYAgoDCggTAgwDBQEHCBcCCQMCAQEVARcHCBoCBgMGFA0IGwIFAwQBCggWAgwDAgEZBg0DBQ
+gEEw0BFQgEAgEYAhEICAQTCAEKCBMCAQgDEwsBCAgSAgQIBBMHAQkIEQIHCAMTBgEGCBMCAwgEEwkBCwgUAgMIBAcHAQoIFQICCAQOCAEECBUC
+BAgDEwkBBggNAgYIAxMIAQcIEwICCAMTCAEHCBICAwgDEwcBCwgVAgURCAEGCBYCBQgDBwcUBQgTAgcIIwUHBiQD
+]=]
+ZPData.macros["parkour6_rapido"] = [=[
+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
+JCCwcAJjYyBQAoQjwHACA0HAcAJjYQAwAmNggFACJCBgUAJBQCAQAkAgIAACQAAAAAJAAAAAAiAAAAACYAAAAAIgAAAAAiAAAAACQVAAEAJDsA
+AQAoMwAAACI1AAAAIk8AAQAiNQABACQzAAAAJjUAAQAeNQUBACZBFwMAIjWuAQEAJC+kAQMAJDG+AQcAKB+MAQcAIhWCAQcAJBOSAQkAIgNoBw
+AoAl4FACAKUgcAJBhYBwAiHDoDACQkMAUAJiwkAwAiQh4FACY0DAUAJkIABQAgNg0DACQ0KAUAJDYsAwAoQiAFACQ2DAMAIjQIBQAkEAYAACQA
+AAAAIgACAAAoAAAAACIAAAAAKAAAAAAmAAAAACQAAAAAJAAAAAAgGQAAACYxAAQAIkMABAAiMwACACY1AAQAHjMABgAmQQAKACIzBQoAJEEXDA
+AiMx8KACI1KQoAME2CAg4AGCN4CgAiKZgBDAAmIYwBDAAiGYABDgAmFZIBEgAiB2gOACQAXg4AIghUDAAoFFgQACIaOgoAJCo4CgAmLCIGACIw
+FgIAJEQOAAAkNAEBACQ2CwEAIjYXAQAoQi0DACA2LwMAJhQYAAAeACYAACQAJgAAJgBCAAAkIkQDACJMMAMAIk4cBQAoZBIFACJQBgUAIlAEBQ
+AqZAQHACBQAAMAJmQABQAoUAAFACJkAgUAJFAAAwAmTgADACRkAAMAJlAAAwAoZAADACRQAAMAJmQABQAmZAADACZQAAMALmQABQAiZAADACZQ
+AAMAKmQAAwAkZAAFAChkAAMAJlAAAwAqZAADAChkAAUAKGQAAwAmUAADACxiAAUAJmQAAwAmZAADACpkAAUALmQAAwAqZAAFACpkAAMAJmQAAw
+AoZAkFACpQFQMASmQnAwAYoAFlBwAWKB8BACZkWwMAKlBTAwAoZHsFACp4qQEFACxinwEDAChQiwEDACp45QEFACZQpwEDACZk3wEDAChk8QEF
+AC5kgwIDACRQ2QEDAG0IAQECBgMBBQECDwMSBRcBAQI3AwIEAQEBAh8DAgQzAQECHwMCBA0BAQIfAwIEEgEBAiADAgQBAQECHwMCBAUBAQIhAw
+IEMAEBAiIDAgQNAQECHQMCBAkBAQIgAwIEEQEBAisDAgQ/AQECFgMCBCYBAQIVAwUFFgEBAhQDBAUVAQECDAMBBR0BAQIQAwIEGgEBAhADAgQa
+AQECEgMCBBIBAQIPAwIEFgEBAhADAQUTAQECEAMCBBMBAQIPAwIEFgEBAg8DAgQWAQECEAMCBBcBAQITAwQFLAEMA34IBQMGGAIBGQEaEBkXBh
+oCHwMXAgsDCQYEDg4BBAUDCQwBBAUDBhYCCwMNARsCBgMTARYCDQMYAgoDBAUCBhkCCgMCBgMSEQEGBQMODgECBQIGGgIKAw8BFAILAwoBFwIK
+AxMBGQIUAwETGgEHBQQTCQERCBgCJAECCBcCBBESFAQIFgIEEQMIBBMJAQQIDgIICAQTCAEKCBICBQgEEwkBCQgRAgUIBBMKAQkIFAICCAMTCA
+EGCBACAwgDEwgBCQgSAgIIAxMIFAYIEgIECAMTBQEJCBACBQgDEwcBCAgQAgUIBBMGAQkIFAIDCAkBCggVAgERAxkpBQcGBQM
+]=]
