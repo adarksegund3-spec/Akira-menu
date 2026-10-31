@@ -20,26 +20,16 @@ local JJS_URL = "https://pastebin.com/raw/HQwt3Vs1"
 --------------------------------------------------------------------
 local ZPData = { macros = {}, states = {}, anims = {} }
 
--- Blocos da aba Parkour: { titulo, { {nome da opcao, id}, ... } }
--- id = nil significa "ainda nao tem" (aparece como "em breve")
-local TOWER_BLOCKS = {
-    { "Torre Civil", {
-        { "Torre civil 1", "torre_civil_1" },
-        { "Torre civil 2", "torre_civil_2" },
-    } },
-    { "Torre", {
-        { "Torre 1", "torre_1" },
-        { "Torre 2", "torre_2" },
-    } },
-}
-
+-- Blocos da aba Parkour (na ordem em que aparecem):
+-- { titulo, { {nome da opcao, id}, ... } }   | id = nil -> "em breve"
 local RAPIDO = "R\u{00E1}pido"
 local SEMBURLA = "Sem burla"
 
 local PARKOUR_BLOCKS = {
     { "Parkour Civil", { { RAPIDO, "civil_rapido" },    { SEMBURLA, "civil_semburla" } } },
+    { "Torre Civil",   { { "Torre 1", "torre_civil_1" }, { "Torre 2", "torre_civil_2" } } },
     { "Parkour 1",     { { RAPIDO, "parkour1_rapido" }, { SEMBURLA, "parkour1_semburla" } } },
-    { "Parkour 2",     { { RAPIDO, nil },                    { SEMBURLA, nil } } },
+    { "Parkour 2",     { { "Torre 1", "torre_1" },      { "Torre 2", "torre_2" } } },
     { "Parkour 3",     { { RAPIDO, "parkour3_rapido" }, { SEMBURLA, "parkour3_semburla" } } },
     { "Parkour 4",     { { RAPIDO, "parkour4_rapido" }, { SEMBURLA, "parkour4_semburla" } } },
     { "Parkour 5",     { { RAPIDO, "parkour5_rapido" }, { SEMBURLA, "parkour5_semburla" } } },
@@ -794,14 +784,8 @@ local function makeBlock(order, titleText, options, prefix)
 end
 
 do
-    local order = 1
-    sectionLabel(order, "TORRES"); order += 1
-    for _, blk in ipairs(TOWER_BLOCKS) do
-        makeBlock(order, blk[1], blk[2], nil); order += 1
-    end
-    sectionLabel(order, "PARKOURS"); order += 1
-    for _, blk in ipairs(PARKOUR_BLOCKS) do
-        makeBlock(order, blk[1], blk[2], blk[1]); order += 1
+    for i, blk in ipairs(PARKOUR_BLOCKS) do
+        makeBlock(i, blk[1], blk[2], blk[1])
     end
 end
 
