@@ -1,1573 +1,1719 @@
---[[
-    EB DO ZPE SCRIPT
-    Criador: Neylad (discord)
-    Abas: Parkour | Combate | JJs | Creditos
-]]
-
+local function __AtividadesFisicasMain()
+if not game:IsLoaded() then game.Loaded:Wait() end
 local Players = game:GetService("Players")
-local UIS = game:GetService("UserInputService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
+local player = Players.LocalPlayer
+while not player do
+    task.wait()
+    player = Players.LocalPlayer
+end
 
---------------------------------------------------------------------
--- CONFIG
---------------------------------------------------------------------
-local JJS_URL = "https://pastebin.com/raw/HQwt3Vs1"
+-- plataforma: MOBILE (so toque), CONSOLE (so controle) ou PC (teclado/mouse, inclui notebook com tela touch)
+local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
+local IS_CONSOLE = UserInputService.GamepadEnabled and not UserInputService.TouchEnabled
+    and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
+local IS_PC = (not IS_MOBILE) and (not IS_CONSOLE)
 
---------------------------------------------------------------------
--- PARKOURS (os dados ficam no pastebin)
---------------------------------------------------------------------
-local ZPData = { macros = {}, states = {}, anims = {} }
+local MIN_DELAY = 0.6      -- valor mostrado: minimo
+local DEFAULT_DELAY = 0.7  -- valor mostrado: padrao ao abrir
+local SPEED_OFFSET = 0     -- velocidade real = valor mostrado (intervalo entre cliques, como no AUTO JJs antigo)
+local REACT_DELAY = 0      -- clica assim que a bolha aparece (respeitando o intervalo desde o ultimo clique)
+local SAFE_WAIT = 0.3      -- bolha esperando mais que isso (s) e clicada mesmo antes do Delay terminar (nunca deixa passar)
+local URGENT_GAP = 0.25    -- nesse caso, intervalo minimo (s) desde o clique anterior
+local RECLICK_AFTER = 0.5  -- clique que nao foi contado: a mesma bolha pode ser clicada de novo depois disso (s)
+local FULL_H = 226
 
--- Link RAW do pastebin com os DADOS (eb_do_zp_dados)
-local DATA_URL = "https://pastebin.com/raw/8snNbeHV"
+local NAVY_1     = Color3.fromRGB(6, 12, 32)
+local NAVY_2     = Color3.fromRGB(12, 30, 80)
+local NAVY_3     = Color3.fromRGB(8, 20, 56)
+local BLUE_DEEP  = Color3.fromRGB(29, 78, 216)
+local BLUE       = Color3.fromRGB(37, 99, 235)
+local BLUE_LIGHT = Color3.fromRGB(96, 165, 250)
+local SKY        = Color3.fromRGB(56, 189, 248)
+local ICE        = Color3.fromRGB(191, 219, 254)
+local WHITE      = Color3.fromRGB(240, 246, 255)
+local MUTED      = Color3.fromRGB(140, 170, 225)
+local FIELD      = Color3.fromRGB(10, 22, 58)
 
--- Blocos da aba Parkour (na ordem em que aparecem):
--- { titulo, { {nome da opcao, id}, ... } }   | id = nil -> "em breve"
-local RAPIDO = "R\u{00E1}pido"
-local SEMBURLA = "Sem burla"
-
-local PARKOUR_BLOCKS = {
-    { "Parkour Civil", { { RAPIDO, "civil_rapido" },    { SEMBURLA, "civil_semburla" } } },
-    { "Torre Civil",   { { "Torre 1", "torre_civil_1" }, { "Torre 2", "torre_civil_2" } } },
-    { "Parkour 1",     { { RAPIDO, "parkour1_rapido" }, { SEMBURLA, "parkour1_semburla" } } },
-    { "Parkour 2",     { { "Torre 1", "torre_1" },      { "Torre 2", "torre_2" } } },
-    { "Parkour 3",     { { RAPIDO, "parkour3_rapido" }, { SEMBURLA, "parkour3_semburla" } } },
-    { "Parkour 4",     { { RAPIDO, "parkour4_rapido" }, { SEMBURLA, "parkour4_semburla" } } },
-    { "Parkour 5",     { { RAPIDO, "parkour5_rapido" }, { SEMBURLA, "parkour5_semburla" } } },
-    { "Parkour 6",     { { RAPIDO, "parkour6_rapido" }, { SEMBURLA, "parkour6_semburla" } } },
+-- no PC aceita tambem outros textos comuns de bolha; no mobile fica so "tap" (como era)
+local mode = {
+    target = "tap", targets = IS_PC and {"tap", "toque", "clique", "click"} or {"tap"},
+    exact = true, enabled = false, delay = DEFAULT_DELAY, limit = nil,
 }
+local count = 0
 
-local GREEN = Color3.fromRGB(120, 255, 180)
-local TEXT = Color3.fromRGB(235, 245, 240)
-local MUTED = Color3.fromRGB(140, 160, 150)
-local CARD = Color3.fromRGB(14, 17, 15)
-local TRACK = Color3.fromRGB(30, 38, 34)
+local env = (getgenv and getgenv()) or _G
 
---------------------------------------------------------------------
--- HELPERS
---------------------------------------------------------------------
-local function new(class, props, parent)
-    local o = Instance.new(class)
-    for k, v in pairs(props) do o[k] = v end
-    if parent then o.Parent = parent end
-    return o
+if env.__AtividadesFisicasStop then
+    pcall(env.__AtividadesFisicasStop)
+    env.__AtividadesFisicasStop = nil
 end
 
-local function corner(inst, r)
-    return new("UICorner", { CornerRadius = UDim.new(0, r) }, inst)
-end
-
-local function stroke(inst, color, thick, transp)
-    return new("UIStroke", {
-        Color = color, Thickness = thick, Transparency = transp,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-    }, inst)
-end
-
-local function label(parent, text, size, font, color)
-    return new("TextLabel", {
-        BackgroundTransparency = 1, BorderSizePixel = 0,
-        Text = text, TextSize = size, Font = font, TextColor3 = color,
-        TextXAlignment = Enum.TextXAlignment.Left,
-    }, parent)
-end
-
-local function tween(inst, t, props)
-    local tw = TweenService:Create(inst, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props)
-    tw:Play()
-    return tw
-end
-
-local function tweenEx(inst, t, style, dir, delay, props)
-    local tw = TweenService:Create(inst, TweenInfo.new(t, style, dir, 0, false, delay or 0), props)
-    tw:Play()
-    return tw
-end
-
-local function strokeGradient(stk)
-    return new("UIGradient", {
-        Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 45, 35)),
-            ColorSequenceKeypoint.new(0.5, GREEN),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 45, 35)),
-        }),
-    }, stk)
-end
-
-local function addShine(parent)
-    local f = new("Frame", {
-        Name = "Shine", Size = UDim2.new(1, 0, 1, 0), ZIndex = 0,
-        BackgroundColor3 = Color3.fromRGB(200, 255, 225), BorderSizePixel = 0,
-    }, parent)
-    return new("UIGradient", {
-        Rotation = 25, Offset = Vector2.new(-1, 0),
-        Transparency = NumberSequence.new({
-            NumberSequenceKeypoint.new(0, 1),
-            NumberSequenceKeypoint.new(0.4, 1),
-            NumberSequenceKeypoint.new(0.5, 0.93),
-            NumberSequenceKeypoint.new(0.6, 1),
-            NumberSequenceKeypoint.new(1, 1),
-        }),
-    }, f)
-end
-
---------------------------------------------------------------------
--- GUI ROOT
---------------------------------------------------------------------
-local GUI_NAME = "NeyladMenuGui"
-
-pcall(function()
-    local old = LocalPlayer:FindFirstChild("PlayerGui"):FindFirstChild(GUI_NAME)
-    if old then old:Destroy() end
-end)
-pcall(function()
-    local old = game:GetService("CoreGui"):FindFirstChild(GUI_NAME)
-    if old then old:Destroy() end
-end)
-pcall(function()
+-- ===================== ONDE COLOCAR A GUI (PC / MOBILE / CONSOLE) =====================
+-- Ordem de tentativa (padrao usado em scripts abertos): gethui -> CoreGui -> PlayerGui
+local function getContainers()
+    local list = {}
     if gethui then
-        local old = gethui():FindFirstChild(GUI_NAME)
-        if old then old:Destroy() end
+        local ok, g = pcall(gethui)
+        if ok and g then table.insert(list, g) end
     end
-end)
+    local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok2 and cg then table.insert(list, cg) end
+    local pg = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
+    if pg then table.insert(list, pg) end
+    return list
+end
 
-for _, getRoot in ipairs({
-    function() return LocalPlayer:FindFirstChild("PlayerGui") end,
-    function() return game:GetService("CoreGui") end,
-    function() return gethui and gethui() end,
-}) do
+local containers = getContainers()
+for _, c in ipairs(containers) do
     pcall(function()
-        local root = getRoot()
-        local old = root and root:FindFirstChild("NeyladHitboxGui")
-        if old then old:Destroy() end
+        for _, n in ipairs({"LarpJJsGui", "AtividadesFisicasGui"}) do
+            local old = c:FindFirstChild(n)
+            if old then old:Destroy() end
+        end
     end)
 end
 
-local gui = new("ScreenGui", {
-    Name = GUI_NAME, ResetOnSpawn = false, IgnoreGuiInset = true,
-    ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999,
-})
+local function make(class, props, parent)
+    local obj = Instance.new(class)
+    for k, v in pairs(props) do obj[k] = v end
+    obj.Parent = parent
+    return obj
+end
 
-local function attach()
-    local targets = {}
-    if gethui then table.insert(targets, function() return gethui() end) end
-    table.insert(targets, function() return game:GetService("CoreGui") end)
-    table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
-    for _, get in ipairs(targets) do
-        local ok, target = pcall(get)
-        if ok and target then
-            local ok2 = pcall(function() gui.Parent = target end)
-            if ok2 and gui.Parent == target then return end
+local function corner(obj, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r)
+    c.Parent = obj
+end
+
+local function seq(colors)
+    local keys = {}
+    for i, c in ipairs(colors) do
+        keys[i] = ColorSequenceKeypoint.new((i - 1) / (#colors - 1), c)
+    end
+    return ColorSequence.new(keys)
+end
+
+local function grad(obj, colors, rot)
+    local g = Instance.new("UIGradient")
+    g.Color = seq(colors)
+    g.Rotation = rot or 0
+    g.Parent = obj
+    return g
+end
+
+local gui = make("ScreenGui", {
+    Name = "AtividadesFisicasGui", ResetOnSpawn = false,
+    IgnoreGuiInset = true, DisplayOrder = 999,
+}, nil)
+pcall(function()
+    if syn and syn.protect_gui then
+        syn.protect_gui(gui)
+    elseif protect_gui then
+        protect_gui(gui)
+    elseif protectgui then
+        protectgui(gui)
+    end
+end)
+do
+    local placed = false
+    for _, c in ipairs(containers) do
+        local ok = pcall(function() gui.Parent = c end)
+        if ok and gui.Parent == c then
+            placed = true
+            break
         end
     end
+    if not placed then
+        error("nao consegui colocar a GUI na tela")
+    end
 end
-attach()
+
+local frame = make("Frame", {
+    Size = UDim2.new(0, 300, 0, FULL_H), Position = UDim2.new(0.5, -150, 0.5, -FULL_H / 2),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0, Active = true,
+    ClipsDescendants = true,
+}, gui)
+corner(frame, 12)
+grad(frame, {NAVY_1, NAVY_2, NAVY_3}, 135)
+
+local frameStroke = make("UIStroke", {Color = Color3.new(1, 1, 1), Thickness = 1.5}, frame)
+grad(frameStroke, {BLUE_LIGHT, BLUE_DEEP, SKY}, 45)
+
+local top = make("Frame", {
+    Size = UDim2.new(1, 0, 0, 34), BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, frame)
+corner(top, 12)
+grad(top, {BLUE_DEEP, BLUE, BLUE_DEEP}, 0)
+local topFill = make("Frame", {
+    Position = UDim2.new(0, 0, 1, -10), Size = UDim2.new(1, 0, 0, 10),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, top)
+grad(topFill, {BLUE_DEEP, BLUE, BLUE_DEEP}, 0)
+local topLine = make("Frame", {
+    Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, top)
+grad(topLine, {SKY, ICE, SKY}, 0)
+
+make("TextLabel", {
+    BackgroundTransparency = 1, Position = UDim2.new(0, 12, 0, 0), Size = UDim2.new(1, -76, 1, -1),
+    RichText = true,
+    Text = 'Atividades f\195\173sicas  <font size="8" color="rgb(170,200,245)">by: Angel</font>',
+    TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, top)
+
+local minBtn = make("TextButton", {
+    Position = UDim2.new(1, -58, 0, 6), Size = UDim2.new(0, 22, 0, 22), BackgroundColor3 = NAVY_2,
+    BackgroundTransparency = 0.35,
+    Text = "\226\136\146", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 16,
+    BorderSizePixel = 0, AutoButtonColor = false,
+}, top)
+corner(minBtn, 6)
+minBtn.MouseEnter:Connect(function()
+    TweenService:Create(minBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
+end)
+minBtn.MouseLeave:Connect(function()
+    TweenService:Create(minBtn, TweenInfo.new(0.15), {BackgroundTransparency = 0.35}):Play()
+end)
+
+local close = make("TextButton", {
+    Position = UDim2.new(1, -30, 0, 6), Size = UDim2.new(0, 22, 0, 22), BackgroundColor3 = NAVY_2,
+    BackgroundTransparency = 0.35,
+    Text = "\195\151", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 16,
+    BorderSizePixel = 0, AutoButtonColor = false,
+}, top)
+corner(close, 6)
+close.MouseEnter:Connect(function()
+    TweenService:Create(close, TweenInfo.new(0.15), {BackgroundTransparency = 0}):Play()
+end)
+close.MouseLeave:Connect(function()
+    TweenService:Create(close, TweenInfo.new(0.15), {BackgroundTransparency = 0.35}):Play()
+end)
+
+local descLabel = make("TextLabel", {
+    Position = UDim2.new(0, 12, 0, 42), Size = UDim2.new(1, -24, 0, 40), BackgroundTransparency = 1,
+    Text = "Compat\195\173vel com qual quer tipo de atividades f\195\173sicas. Toque em Iniciar e abra o exerc\195\173cio que desejar: o resto \195\169 autom\195\161tico.",
+    TextColor3 = MUTED, Font = Enum.Font.Gotham, TextSize = 11,
+    TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+}, frame)
+
+local ON_SEQ  = seq({SKY, BLUE, SKY})
+local OFF_SEQ = seq({BLUE_DEEP, BLUE, BLUE_DEEP})
+
+local toggleBg = make("Frame", {
+    Position = UDim2.new(0, 12, 0, 88), Size = UDim2.new(1, -24, 0, 32),
+    BackgroundColor3 = Color3.new(1, 1, 1), BorderSizePixel = 0,
+}, frame)
+corner(toggleBg, 8)
+local toggleGrad = grad(toggleBg, {BLUE_DEEP, BLUE, BLUE_DEEP}, 0)
+local toggleStroke = make("UIStroke", {Color = BLUE_LIGHT, Thickness = 1.2}, toggleBg)
+
+local toggle = make("TextButton", {
+    Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+    Text = "INICIAR", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 13,
+    BorderSizePixel = 0, AutoButtonColor = false,
+}, toggleBg)
+
+local delayLabel = make("TextLabel", {
+    Position = UDim2.new(0, 12, 0, 129), Size = UDim2.new(0, 80, 0, 26), BackgroundTransparency = 1,
+    Text = "Delay (s):", TextColor3 = ICE, Font = Enum.Font.Gotham, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, frame)
+local speedBox = make("TextBox", {
+    Position = UDim2.new(1, -82, 0, 130), Size = UDim2.new(0, 70, 0, 24), BackgroundColor3 = FIELD,
+    Text = tostring(DEFAULT_DELAY), TextColor3 = WHITE, Font = Enum.Font.Gotham, TextSize = 12,
+    ClearTextOnFocus = false, BorderSizePixel = 0,
+}, frame)
+corner(speedBox, 6)
+make("UIStroke", {Color = BLUE_DEEP, Thickness = 1.2}, speedBox)
+
+local qtyLabel = make("TextLabel", {
+    Position = UDim2.new(0, 12, 0, 159), Size = UDim2.new(0, 80, 0, 26), BackgroundTransparency = 1,
+    Text = "Quantidade:", TextColor3 = ICE, Font = Enum.Font.Gotham, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, frame)
+local qtyBox = make("TextBox", {
+    Position = UDim2.new(1, -82, 0, 160), Size = UDim2.new(0, 70, 0, 24), BackgroundColor3 = FIELD,
+    Text = "", PlaceholderText = "infinito", PlaceholderColor3 = MUTED,
+    TextColor3 = WHITE, Font = Enum.Font.Gotham, TextSize = 12,
+    ClearTextOnFocus = false, BorderSizePixel = 0,
+}, frame)
+corner(qtyBox, 6)
+make("UIStroke", {Color = BLUE_DEEP, Thickness = 1.2}, qtyBox)
+
+-- BOTAO TEMPORARIO: copia o log das bolhas perdidas
+local logBtn = make("TextButton", {
+    Position = UDim2.new(0, 12, 0, 192), Size = UDim2.new(1, -24, 0, 26), BackgroundColor3 = FIELD,
+    Text = "COPIAR LOG", TextColor3 = SKY, Font = Enum.Font.GothamBold, TextSize = 12,
+    BorderSizePixel = 0, AutoButtonColor = false,
+}, frame)
+corner(logBtn, 6)
+make("UIStroke", {Color = SKY, Thickness = 1.2}, logBtn)
+
+local shimmer = make("Frame", {
+    Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.new(1, 1, 1),
+    BorderSizePixel = 0, ZIndex = 20, Active = false,
+}, frame)
+corner(shimmer, 12)
+pcall(function() shimmer.Interactable = false end)
+local shimmerGrad = Instance.new("UIGradient")
+shimmerGrad.Rotation = 20
+shimmerGrad.Transparency = NumberSequence.new({
+    NumberSequenceKeypoint.new(0, 1),
+    NumberSequenceKeypoint.new(0.40, 1),
+    NumberSequenceKeypoint.new(0.50, 0.91),
+    NumberSequenceKeypoint.new(0.60, 1),
+    NumberSequenceKeypoint.new(1, 1),
+})
+shimmerGrad.Offset = Vector2.new(-1, 0)
+shimmerGrad.Parent = shimmer
+local shimmerTween = TweenService:Create(
+    shimmerGrad,
+    TweenInfo.new(2.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, false, 1.4),
+    {Offset = Vector2.new(1, 0)}
+)
+shimmerTween:Play()
+
+-- ===================== ARRASTAR / TAMANHO (PC / MOBILE / CONSOLE) =====================
 
 local connections = {}
+local scale = make("UIScale", {Scale = 1}, frame)
 
---------------------------------------------------------------------
--- ARRASTAR (generico) - com suporte a "toque" (clique sem arrastar)
---------------------------------------------------------------------
-local function makeDrag(handle, target, onTap, onPress, onRelease, bucket)
-    local dragging, dragStart, startPos, moved = false, nil, nil, false
+-- no PC a janela cresce um pouco em telas grandes; no mobile/console fica no tamanho original
+local function applyScale()
+    if not IS_PC then
+        scale.Scale = 1
+        return
+    end
+    local vp = gui.AbsoluteSize
+    if vp.Y > 0 then
+        scale.Scale = math.clamp(vp.Y / 800, 1, 1.35)
+    end
+end
 
-    handle.InputBegan:Connect(function(input)
+table.insert(connections, gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+    applyScale()
+end))
+applyScale()
+
+do
+    local dragging, dragStart, startPos
+    table.insert(connections, top.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
+        or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
-            moved = false
             dragStart = input.Position
-            startPos = target.Position
-            if onPress then onPress() end
+            startPos = frame.Position
             input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                    if onRelease then onRelease() end
-                    if onTap and not moved then onTap() end
-                end
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
             end)
         end
-    end)
-
-    table.insert(bucket or connections, UIS.InputChanged:Connect(function(input)
+    end))
+    table.insert(connections, UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-            or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            if d.Magnitude > 6 then moved = true end
-            if moved or not onTap then
-                target.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + d.X,
-                    startPos.Y.Scale, startPos.Y.Offset + d.Y
-                )
-            end
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = (input.Position - dragStart) / scale.Scale
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                       startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end
     end))
 end
 
---------------------------------------------------------------------
--- LOGO (retangulo arredondado deitado)
---------------------------------------------------------------------
-local Logo = new("Frame", {
-    Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0, 56),
-    Size = UDim2.fromOffset(150, 44),
-    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-    BorderSizePixel = 0, ClipsDescendants = true, Active = true,
-}, gui)
-corner(Logo, 14)
-new("UIGradient", {
-    Rotation = 20,
-    Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
-        ColorSequenceKeypoint.new(0.6, Color3.fromRGB(10, 14, 12)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
-    }),
-}, Logo)
-local logoStroke = stroke(Logo, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
-local logoStrokeGrad = strokeGradient(logoStroke)
-local logoShine = addShine(Logo)
-local logoScale = new("UIScale", { Scale = 0 }, Logo)
+-- ===================== BUSCA DO BOTAO (COM CACHE, SEM LAG) =====================
 
-local logoDot = new("Frame", {
-    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
-    BackgroundColor3 = GREEN, BorderSizePixel = 0,
-}, Logo)
-corner(logoDot, 4)
+local accents = {
+    {"\195\163", "a"}, {"\195\161", "a"}, {"\195\160", "a"}, {"\195\162", "a"}, {"\195\131", "a"}, {"\195\129", "a"}, {"\195\128", "a"}, {"\195\130", "a"},
+    {"\195\169", "e"}, {"\195\170", "e"}, {"\195\137", "e"}, {"\195\138", "e"},
+    {"\195\173", "i"}, {"\195\141", "i"},
+    {"\195\179", "o"}, {"\195\180", "o"}, {"\195\181", "o"}, {"\195\147", "o"}, {"\195\148", "o"}, {"\195\149", "o"},
+    {"\195\186", "u"}, {"\195\154", "u"},
+    {"\195\167", "c"}, {"\195\135", "c"},
+}
 
-local logoTitle = label(Logo, "EB DO ZPE", 15, Enum.Font.GothamBold, TEXT)
-logoTitle.Position = UDim2.new(0, 34, 0, 6)
-logoTitle.Size = UDim2.new(1, -44, 0, 18)
+local normCache = {}
+local normCacheSize = 0
 
-local logoSub = label(Logo, "SCRIPT", 10, Enum.Font.GothamMedium, GREEN)
-logoSub.Position = UDim2.new(0, 34, 0, 24)
-logoSub.Size = UDim2.new(1, -44, 0, 14)
-
---------------------------------------------------------------------
--- HOLDER (CanvasGroup: permite fade + escala na animacao)
---------------------------------------------------------------------
-local MAIN_W, MAIN_H = 340, 270
-local BAR_H, GAP, PAD = 44, 8, 8
-local TOTAL_H = MAIN_H + GAP + BAR_H
-
-local Holder = new("CanvasGroup", {
-    Name = "Holder", BackgroundTransparency = 1,
-    AnchorPoint = Vector2.new(0.5, 0.5),
-    Position = UDim2.new(0.5, 0, 0.5, 0),
-    Size = UDim2.fromOffset(MAIN_W + PAD * 2, TOTAL_H + PAD * 2),
-    GroupTransparency = 1, Visible = false,
-}, gui)
-local holderScale = new("UIScale", { Scale = 0.88 }, Holder)
-
-local Inner = new("Frame", {
-    Name = "Inner", BackgroundTransparency = 1,
-    Position = UDim2.fromOffset(PAD, PAD),
-    Size = UDim2.fromOffset(MAIN_W, TOTAL_H),
-}, Holder)
-
---------------------------------------------------------------------
--- MENU PRINCIPAL
---------------------------------------------------------------------
-local Main = new("Frame", {
-    Name = "Main", Size = UDim2.new(1, 0, 0, MAIN_H),
-    BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-    BorderSizePixel = 0, ClipsDescendants = true,
-}, Inner)
-corner(Main, 18)
-new("UIGradient", {
-    Rotation = 65,
-    Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
-        ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
-    }),
-}, Main)
-local mainStroke = stroke(Main, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
-local mainStrokeGrad = strokeGradient(mainStroke)
-local mainShine = addShine(Main)
-
-local TitleBar = new("Frame", {
-    Name = "TitleBar", Size = UDim2.new(1, 0, 0, 44),
-    BackgroundTransparency = 1,
-}, Main)
-
-local dot = new("Frame", {
-    Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
-    BackgroundColor3 = GREEN, BorderSizePixel = 0,
-}, TitleBar)
-corner(dot, 4)
-
-local title = label(TitleBar, "EB DO ZPE SCRIPT", 15, Enum.Font.GothamBold, TEXT)
-title.Position = UDim2.new(0, 32, 0, 0)
-title.Size = UDim2.new(1, -90, 1, 0)
-
-local CloseBtn = new("TextButton", {
-    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
-    BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
-    Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
-}, TitleBar)
-corner(CloseBtn, 14)
-stroke(CloseBtn, GREEN, 1, 0.8)
-CloseBtn.MouseEnter:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = GREEN }) end)
-CloseBtn.MouseLeave:Connect(function() tween(CloseBtn, 0.15, { TextColor3 = MUTED }) end)
-
-new("Frame", {
-    Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
-    BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
-}, Main)
-
-local Content = new("Frame", {
-    Name = "Content", BackgroundTransparency = 1,
-    Position = UDim2.new(0, 12, 0, 52), Size = UDim2.new(1, -24, 1, -62),
-}, Main)
-
---------------------------------------------------------------------
--- HOTBAR (separada do menu, mas dentro do mesmo grupo)
---------------------------------------------------------------------
-local HOTBAR_Y = MAIN_H + GAP
-local HOTBAR_Y_HIDDEN = MAIN_H - 24
-
-local Hotbar = new("Frame", {
-    Name = "Hotbar", AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, HOTBAR_Y),
-    Size = UDim2.fromOffset(324, BAR_H),
-    BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
-}, Inner)
-corner(Hotbar, 22)
-new("UIGradient", {
-    Rotation = 0,
-    Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(24, 58, 42)),
-    }),
-}, Hotbar)
-local barStroke = stroke(Hotbar, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
-local barStrokeGrad = strokeGradient(barStroke)
-
-local barInner = new("Frame", {
-    Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
-}, Hotbar)
-new("UIPadding", {
-    PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6),
-    PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6),
-}, barInner)
-new("UIListLayout", {
-    FillDirection = Enum.FillDirection.Horizontal,
-    HorizontalAlignment = Enum.HorizontalAlignment.Center,
-    VerticalAlignment = Enum.VerticalAlignment.Center,
-    Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
-}, barInner)
-
--- menu e hotbar arrastam juntos (arrastando o Holder)
-makeDrag(TitleBar, Holder)
-makeDrag(Hotbar, Holder)
-
---------------------------------------------------------------------
--- COMPONENTES
---------------------------------------------------------------------
-local function makeCard(parent)
-    local c = new("Frame", {
-        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-    }, parent)
-    corner(c, 12)
-    stroke(c, GREEN, 1, 0.82)
-    return c
-end
-
-local function makePage()
-    local p = new("ScrollingFrame", {
-        BackgroundTransparency = 1, BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0),
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        ScrollBarThickness = 3, ScrollBarImageColor3 = GREEN,
-        Visible = false,
-    }, Content)
-    new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, p)
-    new("UIPadding", { PaddingRight = UDim.new(0, 4) }, p)
-    return p
-end
-
--- card simples de "abrir algo" (titulo + descricao + botao redondo >)
-local function makeOpenCard(page, titleText, descText, onClick)
-    local c = new("Frame", {
-        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, 76),
-    }, page)
-    corner(c, 12)
-    stroke(c, GREEN, 1, 0.82)
-
-    local t = label(c, titleText, 16, Enum.Font.GothamBold, TEXT)
-    t.Position = UDim2.new(0, 16, 0, 16)
-    t.Size = UDim2.new(1, -90, 0, 20)
-
-    local d = label(c, descText, 12, Enum.Font.Gotham, MUTED)
-    d.Position = UDim2.new(0, 16, 0, 38)
-    d.Size = UDim2.new(1, -90, 0, 18)
-
-    local btn = new("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -14, 0.5, 0),
-        Size = UDim2.fromOffset(46, 46), BackgroundColor3 = GREEN,
-        AutoButtonColor = false, Text = ">", TextSize = 22,
-        Font = Enum.Font.GothamBold, TextColor3 = Color3.fromRGB(8, 18, 12),
-    }, c)
-    corner(btn, 23)
-    new("UIGradient", {
-        Rotation = 90,
-        Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(70, 200, 130)),
-        }),
-    }, btn)
-
-    btn.MouseButton1Down:Connect(function() tween(btn, 0.08, { Size = UDim2.fromOffset(40, 40) }) end)
-    btn.MouseButton1Up:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
-    btn.MouseLeave:Connect(function() tween(btn, 0.12, { Size = UDim2.fromOffset(46, 46) }) end)
-    btn.MouseButton1Click:Connect(function() onClick(d) end)
-
-    return c, d
-end
-
---------------------------------------------------------------------
--- MOTOR DOS PARKOURS (decodifica e toca as gravacoes)
---------------------------------------------------------------------
-local macroCache = {}
-local Macro = { cleanup = nil, token = 0 }
-local setStatus = function() end -- trocado quando a pagina for criada
-
-local B64 = {}
-do
-    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    for i = 1, #chars do B64[string.byte(chars, i)] = i - 1 end
-end
-
-local function b64decode(s)
-    s = s:gsub("%s+", "")
-    local out, n = {}, 0
-    for i = 1, #s, 4 do
-        local a, b, c, d = string.byte(s, i, i + 3)
-        a, b = B64[a], B64[b]
-        c = c and B64[c]
-        d = d and B64[d]
-        n += 1; out[n] = a * 4 + math.floor(b / 16)
-        if c then n += 1; out[n] = (b % 16) * 16 + math.floor(c / 4) end
-        if d then n += 1; out[n] = (c % 4) * 64 + d end
-    end
-    return out
-end
-
-local function getFrames(id)
-    if macroCache[id] then return macroCache[id] end
-    if not next(ZPData.macros) then
-        local ok, d = pcall(function() return loadstring(game:HttpGet(DATA_URL))() end)
-        if not ok or type(d) ~= "table" or type(d.macros) ~= "table" then
-            return nil, "falha ao baixar os dados"
-        end
-        ZPData.macros, ZPData.states, ZPData.anims = d.macros, d.states, d.anims
-    end
-    local text = ZPData.macros[id]
-    if not text then return nil, "sem dados" end
-
-    local bytes = b64decode(text)
-    local pos = 1
-    local function rv()
-        local r, shift = 0, 1
-        while true do
-            local b = bytes[pos]
-            pos += 1
-            if b < 128 then return r + b * shift end
-            r += (b - 128) * shift
-            shift *= 128
+local function norm(s)
+    s = tostring(s or "")
+    local cached = normCache[s]
+    if cached ~= nil then return cached end
+    local raw = s
+    if string.find(s, "[\128-\255]") then
+        for _, p in ipairs(accents) do
+            s = string.gsub(s, p[1], p[2])
         end
     end
-    local function rz()
-        local v = rv()
-        if v % 2 == 0 then return v / 2 else return -(v + 1) / 2 end
+    s = string.lower(s)
+    s = string.gsub(s, "[%s%p]", "")
+    if normCacheSize > 2000 then
+        normCache = {}
+        normCacheSize = 0
     end
-
-    local ok, frames = pcall(function()
-        local n = rv()
-        local fr = {}
-        local t, x, y, z, yaw = 0, 0, 0, 0, 0
-        for i = 1, n do
-            t += rz(); x += rz(); y += rz(); z += rz(); yaw += rz()
-            local px, py, pz = x / 100, y / 100, z / 100
-            fr[i] = {
-                t = t / 1000,
-                pos = Vector3.new(px, py, pz),
-                cf = CFrame.new(px, py, pz) * CFrame.Angles(0, yaw / 1000, 0),
-            }
-            if i % 500 == 0 then task.wait() end
-        end
-
-        local k = 1
-        for _ = 1, rv() do -- estados (Running, Jumping, ...)
-            local len, si = rv(), rv()
-            local name = ZPData.states[si]
-            for _ = 1, len do
-                if fr[k] then fr[k].state = name end
-                k += 1
-            end
-        end
-
-        k = 1
-        for _ = 1, rv() do -- animacao dominante
-            local len, ai = rv(), rv()
-            local anim = ai > 0 and ZPData.anims[ai] or nil
-            for _ = 1, len do
-                if fr[k] then fr[k].anim = anim end
-                k += 1
-            end
-        end
-
-        -- velocidade derivada das posicoes
-        for i = 1, n - 1 do
-            local a, b = fr[i], fr[i + 1]
-            local dt = b.t - a.t
-            local d = b.pos - a.pos
-            if dt > 0.004 and d.Magnitude < 8 then a.vel = d / dt else a.vel = Vector3.zero end
-        end
-        fr[n].vel = Vector3.zero
-        return fr
-    end)
-
-    if not ok or type(frames) ~= "table" or #frames < 2 then
-        return nil, "dados inv\u{00E1}lidos"
-    end
-    macroCache[id] = frames
-    return frames
+    normCache[raw] = s
+    normCacheSize = normCacheSize + 1
+    return s
 end
 
-local function stopMacro(msg)
-    Macro.token += 1
-    local c = Macro.cleanup
-    Macro.cleanup = nil
-    if c then pcall(c) end
-    setStatus(msg or "Parado", false)
+local function isVisible(obj)
+    if obj.AbsoluteSize.X <= 0 or obj.AbsoluteSize.Y <= 0 then return false end
+    local cur = obj
+    while cur and cur ~= game do
+        if cur:IsA("GuiObject") and not cur.Visible then return false end
+        if cur:IsA("ScreenGui") and not cur.Enabled then return false end
+        cur = cur.Parent
+    end
+    return true
 end
 
-local function playMacro(frames, name)
-    stopMacro()
-
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp or hum.Health <= 0 then
-        setStatus("Personagem indispon\u{00ED}vel", false)
-        return
-    end
-
-    Macro.token += 1
-    local token = Macro.token
-    local animator = hum:FindFirstChildOfClass("Animator")
-    local animate = char:FindFirstChild("Animate")
-    local animateWasDisabled = animate and animate.Disabled
-    local tracks, currentAnim, lastState = {}, nil, nil
-    local n, idx = #frames, 1
-    local conn
-
-    -- desliga o Animate padrao enquanto roda (para nao misturar animacoes)
-    if animate and animator then
-        pcall(function() animate.Disabled = true end)
-        pcall(function()
-            for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do tr:Stop(0) end
-        end)
-    end
-
-    local function setAnim(f)
-        local a = f.anim
-        if a == currentAnim then return end
-        currentAnim = a
-        if not animator then return end
-        local key = a and tostring(a[1]) or nil
-        for k, tr in pairs(tracks) do
-            if k ~= key and tr.IsPlaying then pcall(function() tr:Stop(0.1) end) end
-        end
-        if not a then return end
-        local tr = tracks[key]
-        if not tr then
-            local ok, t = pcall(function()
-                local anim = Instance.new("Animation")
-                anim.AnimationId = "rbxassetid://" .. key
-                return animator:LoadAnimation(anim)
-            end)
-            if ok and t then
-                tr = t
-                tracks[key] = tr
-                pcall(function() tr.Priority = Enum.AnimationPriority.Core end)
-            end
-        end
-        if tr then
-            pcall(function()
-                if tr.IsPlaying then
-                    tr:AdjustSpeed(a[2])
+-- varre o PlayerGui devagar (cede o frame a cada X objetos) para nao travar o jogo
+local function findButton(m)
+    local pg = player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+    local target = norm(m.target)
+    if target == "" then return nil end
+    local list = pg:GetDescendants()
+    for i, obj in ipairs(list) do
+        if i % 250 == 0 then task.wait() end
+        if obj.Parent and (obj:IsA("TextButton") or obj:IsA("TextLabel")) and not obj:IsDescendantOf(gui) then
+            local txt = norm(obj.Text)
+            local match
+            if m.exact then
+                if m.targets then
+                    for _, t in ipairs(m.targets) do
+                        if txt == t then match = true break end
+                    end
                 else
-                    tr:Play(0.1, 1, a[2])
+                    match = (txt == target)
+                end
+            else
+                match = (txt ~= "" and string.find(txt, target, 1, true) ~= nil)
+            end
+            if match then
+                local btn = obj
+                if not obj:IsA("GuiButton") then
+                    btn = obj:FindFirstAncestorWhichIsA("GuiButton")
+                    -- PC: se a bolha nao e botao (o jogo pode ler o mouse direto), usa o proprio texto
+                    if not btn and IS_PC then btn = obj end
+                end
+                if btn and isVisible(btn) then
+                    return btn
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local cachedBtn = nil
+local lastScan = 0
+local fallbackBtn = nil
+
+-- Bolhas candidatas (texto bate com "tap"), mantidas por EVENTO: quando o jogo cria/troca o texto
+-- de uma bolha ela entra aqui na hora. Assim nao precisa varrer o PlayerGui nem esperar um
+-- intervalo (antes, ficava "cego" por 0.12s~0.5s e pulava bolinhas).
+local tracked = {}
+
+local function trackLabel(obj)
+    if not (obj:IsA("TextLabel") or obj:IsA("TextButton")) then return end
+    if obj:IsDescendantOf(gui) then return end
+    local function check()
+        if not gui.Parent then return end
+        local raw = obj.Text
+        local hit = false
+        if #raw <= 16 then
+            local txt = norm(raw)
+            for _, t in ipairs(mode.targets) do
+                if txt == t then hit = true break end
+            end
+        end
+        tracked[obj] = hit or nil
+    end
+    check()
+    obj:GetPropertyChangedSignal("Text"):Connect(check)
+end
+
+-- ===================== DETECTOR OCULTO + DIAGNOSTICO =====================
+-- Sem tela e sem mensagem. Registra TODA bolha (ImageButton em Polichinelos.Screen) no instante em
+-- que ela nasce, mesmo minuscula, invisivel ou ainda sem texto, e escolhe sempre a mais antiga que
+-- ainda nao foi clicada (nenhuma fica pra tras). Guarda estatisticas: quantas viu, quantas clicou,
+-- quantas sumiram sem clique e o atraso real entre "podia clicar" e o clique.
+local bubbleInfo = setmetatable({}, {__mode = "k"})
+local learnedDanger = SAFE_WAIT -- idade (s) a partir da qual uma bolha pendente vira URGENTE (aprendida das que sumiram)
+local diag = {seen = 0, clicked = 0, missed = 0, retries = 0, urgent = 0, lateSum = 0, lateMax = 0, lifeMin = nil}
+env.__AtividadesDiag = diag
+
+local lastClick = 0 -- instante do ultimo clique (declarado aqui para o log das perdas)
+-- estado do log (botao COPIAR LOG): travadas de frame, pendentes na tela, eventos de perda
+local diagState = {t0 = os.clock(), pending = 0, hasHead = false, stall = nil, stalls = 0, stallMax = 0, notCounted = 0, paths = {}, lastPath = nil}
+local events = {}
+
+local function logEvent(s)
+    table.insert(events, s)
+    if #events > 40 then table.remove(events, 1) end
+end
+
+local function diagReset()
+    diag.seen, diag.clicked, diag.missed, diag.retries, diag.urgent = 0, 0, 0, 0, 0
+    diag.lateSum, diag.lateMax, diag.lifeMin = 0, 0, nil
+    diagState.t0 = os.clock()
+    diagState.pending, diagState.stall = 0, nil
+    diagState.stalls, diagState.stallMax, diagState.notCounted = 0, 0, 0
+    events = {}
+end
+
+-- so copia pra area de transferencia (em silencio) se alguma bolha passou sem clique
+local function diagFinish()
+    if diag.seen <= 0 or (diag.missed <= 0 and diag.retries <= 0) then return end
+    pcall(function()
+        local avg = diag.clicked > 0 and diag.lateSum / diag.clicked or 0
+        local text = string.format(
+            "AtividadesDiag | vistas=%d clicadas=%d perdidas=%d retestes=%d urgentes=%d | atraso medio=%.0fms maximo=%.0fms | vida minima da bolha=%s | delay=%.2f",
+            diag.seen, diag.clicked, diag.missed, diag.retries, diag.urgent, avg * 1000, diag.lateMax * 1000,
+            diag.lifeMin and string.format("%.2fs", diag.lifeMin) or "-", mode.delay)
+        if setclipboard then
+            setclipboard(text)
+        elseif toclipboard then
+            toclipboard(text)
+        end
+    end)
+end
+
+-- texto de uma perda: mostra POR QUE a bolha passou (vida, ritmo, travada de frame, etc.)
+local function lossText(kind, info)
+    local now = os.clock()
+    local waiting = "nao"
+    if info.waitDue then
+        waiting = string.format("%s faltava %.2fs (urgente=%s)", tostring(info.waitWhy or "?"),
+            info.waitDue, tostring(info.waitUrgent))
+    end
+    local st = diagState.stall
+    local stallTxt = "-"
+    if st then stallTxt = string.format("%.2fs (%.1fs atras)", st.len, now - st.at) end
+    return string.format(
+        "%s t=%.1fs vida=%.2fs desde_ult_clique=%.2fs delay=%.2f valida=%s escolhida=%s esperando=%s pendentes=%d cliques=%d contada=%s travada=%s",
+        kind, now - diagState.t0, now - info.seenAt, now - lastClick, mode.delay,
+        tostring(info.validAt ~= nil), tostring(info.chosen == true), waiting,
+        diagState.pending, info.clicks, tostring(info.counted), stallTxt)
+end
+
+local function registerBubble(b)
+    local info = bubbleInfo[b]
+    if info then return info end
+    info = {seenAt = os.clock(), clicks = 0, clickedAt = 0, clicked = false, gone = false, counted = false}
+    bubbleInfo[b] = info
+    diag.seen = diag.seen + 1
+    pcall(function()
+        b.AncestryChanged:Connect(function()
+            if b:IsDescendantOf(game) or info.gone or not mode.enabled then return end
+            if not info.clicked then
+                info.gone = true
+                diag.missed = diag.missed + 1
+                local life = os.clock() - info.seenAt
+                if not diag.lifeMin or life < diag.lifeMin then diag.lifeMin = life end
+                if life >= 0.25 then
+                    local d = math.max(0.12, life * 0.5)
+                    if not learnedDanger or d < learnedDanger then learnedDanger = d end
+                end
+                logEvent(lossText("PERDIDA", info))
+            elseif not info.counted and diagState.hasHead then
+                info.gone = true
+                diagState.notCounted = diagState.notCounted + 1
+                logEvent(lossText("CLICADA_SEM_CONTAR(pode ser so atraso do contador)", info))
+            end
+        end)
+    end)
+    return info
+end
+
+-- bolha ja clicada: so fica "travada" se o jogo contou o clique (contador da cabeca subiu) ou se o clique
+-- e recente. Se passou RECLICK_AFTER e a bolha continua valida na tela, o clique nao pegou: clica de novo.
+local function wasClicked(b)
+    local info = bubbleInfo[b]
+    if not info or info.clicks <= 0 then return false end
+    if info.counted then return true end
+    return (os.clock() - info.clickedAt) < RECLICK_AFTER
+end
+
+local NOT_BUBBLE = {Close = true, Pause = true, Minimize = true, Infos = true}
+local scanSecond = nil -- 2a bolha pendente mais antiga (se houver duas ou mais na tela ao mesmo tempo)
+
+-- URGENCIA: a bolha sobe e encolhe ate sumir. Medimos o encolhimento a cada frame e prevemos quando
+-- ela some. Se ela sumiria antes do proximo clique permitido, o clique sai ja (respeitando o piso
+-- minimo de 0.6s entre cliques). Tambem vale a idade aprendida das bolhas que ja passaram.
+local function bubbleUrgent(b, dueIn)
+    local info = bubbleInfo[b]
+    if not info then return false end
+    local now = os.clock()
+    if learnedDanger and (now - info.seenAt) >= learnedDanger then return true end
+    local smax, size = info.sizeMax, info.size
+    if smax and size and smax > 0 and size < smax * 0.98 then
+        local dt = now - (info.tMax or now)
+        if dt > 0.05 then
+            local rate = (smax - size) / dt
+            if rate > 0 then
+                local remaining = size / rate
+                if remaining < dueIn + 0.08 then return true end
+            end
+        end
+    end
+    return false
+end
+
+local function scanScreen()
+    scanSecond = nil
+    local pg = player:FindFirstChild("PlayerGui")
+    local pol = pg and pg:FindFirstChild("Polichinelos")
+    local scr = pol and pol:FindFirstChild("Screen")
+    if not scr then
+        diagState.pending = 0
+        return nil
+    end
+    local best, bestAt, second, secondAt
+    local pend = 0
+    for _, b in ipairs(scr:GetChildren()) do
+        if b:IsA("ImageButton") and not NOT_BUBBLE[b.Name] then
+            local info = registerBubble(b)
+            -- texto procurado tambem dentro de filhos (bolha com o texto mais fundo nao fica de fora)
+            local lbl = b:FindFirstChildWhichIsA("TextLabel", true)
+            local valid = b.Visible and not b:GetAttribute("Completed") and lbl ~= nil and lbl.Text ~= ""
+            if not valid then
+                -- saiu de cena: se voltar a aparecer, conta como bolha nova
+                info.clicks = 0
+                info.counted = false
+            else
+                if not info.validAt then info.validAt = os.clock() end
+                -- bolha reaproveitada pelo jogo (mesmo objeto, texto novo): comeca vida nova, nao herda o "ja clicada"
+                local txtNow = lbl.Text
+                if info.clicks > 0 and info.lastText and info.lastText ~= txtNow then
+                    info.clicks = 0
+                    info.counted = false
+                    info.clicked = false
+                    info.gone = false
+                    info.seenAt = os.clock()
+                    info.sizeMax, info.tMax, info.size = nil, nil, nil
+                    info.chosen, info.waitDue, info.validAt = nil, nil, os.clock()
+                    diag.seen = diag.seen + 1
+                end
+                info.lastText = txtNow
+                -- amostra o tamanho (para prever quando a bolha some)
+                local sz = b.AbsoluteSize.X
+                if sz >= (info.sizeMax or 0) then
+                    info.sizeMax = sz
+                    info.tMax = os.clock()
+                end
+                info.size = sz
+                if not wasClicked(b) then
+                    local ok = IS_MOBILE
+                    if not ok then
+                        local txt = norm(lbl.Text)
+                        for _, tg in ipairs(mode.targets) do
+                            if txt == tg then ok = true break end
+                        end
+                    end
+                    if ok then
+                        pend = pend + 1
+                        if not best or info.seenAt < bestAt then
+                            second, secondAt = best, bestAt
+                            best, bestAt = b, info.seenAt
+                        elseif not second or info.seenAt < secondAt then
+                            second, secondAt = b, info.seenAt
+                        end
+                    end
+                end
+            end
+        end
+    end
+    diagState.pending = pend
+    scanSecond = second
+    return best
+end
+
+-- ===================== CALIBRACAO AUTOMATICA (arquivo no celular) =====================
+-- Nas 3 primeiras bolinhas de cada partida o script mede quanto tempo a bolha vive e de quanto em
+-- quanto tempo elas nascem, salva isso num arquivo e passa a usar (tambem na proxima vez que abrir).
+-- Tudo em pcall: se o executor nao tiver writefile/readfile, simplesmente segue sem arquivo.
+local CALIB_FILE = "AtividadesFisicas_calib.txt"
+local calibLife, calibCadence = nil, nil
+local calib = {n = 0, lifes = {}, births = {}, done = false}
+
+local function calibApply()
+    if calibLife then
+        local d = math.max(0.2, calibLife * 0.5)
+        if not learnedDanger or d < learnedDanger then learnedDanger = d end
+    end
+end
+
+local function calibSave()
+    pcall(function()
+        if writefile then
+            writefile(CALIB_FILE, string.format("life=%.3f\ncadence=%.3f\n", calibLife or 0, calibCadence or 0))
+        end
+    end)
+end
+
+pcall(function()
+    if isfile and readfile and isfile(CALIB_FILE) then
+        local txt = readfile(CALIB_FILE)
+        local l = tonumber(string.match(txt, "life=([%d%.]+)"))
+        local c = tonumber(string.match(txt, "cadence=([%d%.]+)"))
+        if l and l >= 0.2 and l <= 6 then calibLife = l end
+        if c and c >= 0.3 and c <= 3 then calibCadence = c end
+        calibApply()
+    end
+end)
+
+local function calibReset()
+    calib = {n = 0, lifes = {}, births = {}, done = false}
+end
+
+local function median(list)
+    table.sort(list)
+    return list[math.floor((#list + 1) / 2)]
+end
+
+local function calibNote(info, tClick)
+    if calib.done then return end
+    calib.n = calib.n + 1
+    table.insert(calib.births, info.seenAt)
+    local smax, size = info.sizeMax, info.size
+    if smax and size and smax > 0 and size < smax * 0.98 and info.tMax then
+        local dt = tClick - info.tMax
+        if dt > 0.08 then
+            local rate = (smax - size) / dt
+            if rate > 0 then
+                local life = (info.tMax - info.seenAt) + smax / rate
+                if life >= 0.2 and life <= 6 then table.insert(calib.lifes, life) end
+            end
+        end
+    end
+    if calib.n >= 3 then
+        calib.done = true
+        table.sort(calib.births)
+        local gaps = {}
+        for i = 2, #calib.births do
+            local g = calib.births[i] - calib.births[i - 1]
+            if g >= 0.2 and g <= 3 then table.insert(gaps, g) end
+        end
+        if #calib.lifes > 0 then calibLife = median(calib.lifes) end
+        if #gaps > 0 then calibCadence = median(gaps) end
+        calibApply()
+        calibSave()
+    end
+end
+
+local function getButton()
+    -- 0) bolha direta do Polichinelos (mais confiavel, sem depender do texto "tap")
+    local direct = scanScreen()
+    if direct then
+        cachedBtn = direct
+        diagState.lastPath = "direta"
+        return direct
+    end
+
+    -- 1) candidatas rastreadas por evento: registra TODAS e escolhe sempre a mais antiga ainda nao
+    --    clicada (assim o ritmo, o urgente e o log funcionam tambem fora do caminho "direta")
+    local best, bestAt, second, secondAt
+    for obj in pairs(tracked) do
+        if not obj.Parent then
+            tracked[obj] = nil
+        else
+            local btn = obj
+            if not obj:IsA("GuiButton") then
+                btn = obj:FindFirstAncestorWhichIsA("GuiButton")
+                if not btn and IS_PC then btn = obj end
+            end
+            if btn and isVisible(btn) and not btn:GetAttribute("Completed") then
+                local info = registerBubble(btn)
+                if not wasClicked(btn) then
+                    if not best or info.seenAt < bestAt then
+                        second, secondAt = best, bestAt
+                        best, bestAt = btn, info.seenAt
+                    elseif btn ~= best and (not second or info.seenAt < secondAt) then
+                        second, secondAt = btn, info.seenAt
+                    end
+                end
+            end
+        end
+    end
+    if best then
+        scanSecond = second
+        cachedBtn = best
+        diagState.lastPath = "rastreada"
+        return best
+    end
+
+    -- 2) botao em cache ainda visivel
+    if cachedBtn and cachedBtn.Parent and isVisible(cachedBtn) and not cachedBtn:GetAttribute("Completed")
+    and not wasClicked(cachedBtn) then
+        diagState.lastPath = "cache"
+        return cachedBtn
+    end
+    cachedBtn = nil
+
+    -- 3) reserva: a varredura completa roda em segundo plano (nao trava o detector rapido)
+    if fallbackBtn and fallbackBtn.Parent and isVisible(fallbackBtn) and not wasClicked(fallbackBtn) then
+        cachedBtn = fallbackBtn
+        diagState.lastPath = "varredura"
+        return fallbackBtn
+    end
+    fallbackBtn = nil
+    return nil
+end
+
+-- ===================== BOLHA DE TECLA (PC) =====================
+-- No PC o jogo mostra uma letra (Q, E...) na bolha em vez de "tap": e pra APERTAR A TECLA.
+-- (mesmo metodo do script DRIP MENU AUTO JJs: acha o botao com a letra e manda a tecla)
+
+local function keyFromText(t)
+    t = string.upper((string.gsub(tostring(t or ""), "%s+", "")))
+    if #t == 1 and string.match(t, "%a") and t ~= "X" then
+        local ok, kc = pcall(function() return Enum.KeyCode[t] end)
+        if ok then return kc end
+    end
+    return nil
+end
+
+local SKIP_NAMES = {Close = true, Pause = true, Minimize = true}
+
+local function findKeyBubble()
+    local pg = player:FindFirstChild("PlayerGui")
+    if not pg then return nil end
+    local roots = {}
+    local pol = pg:FindFirstChild("Polichinelos")
+    if pol then table.insert(roots, pol:FindFirstChild("Screen") or pol) end
+    local af = pg:FindFirstChild("AtividadesFisicas")
+    if af then table.insert(roots, af) end
+    for _, root in ipairs(roots) do
+        for i, obj in ipairs(root:GetDescendants()) do
+            if i % 250 == 0 then task.wait() end
+            if obj.Parent and (obj:IsA("TextLabel") or obj:IsA("TextButton")) and keyFromText(obj.Text) then
+                local btn = obj:IsA("GuiButton") and obj or obj:FindFirstAncestorWhichIsA("GuiButton")
+                if btn and not SKIP_NAMES[btn.Name] and not btn:FindFirstAncestor("Infos")
+                and not btn:GetAttribute("Completed") and isVisible(btn) then
+                    return btn, obj
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local cachedKeyBtn, cachedKeyLabel = nil, nil
+local lastKeyScan = 0
+
+local function getKeyBubble()
+    if cachedKeyBtn and cachedKeyBtn.Parent and cachedKeyLabel and cachedKeyLabel.Parent
+    and isVisible(cachedKeyBtn) then
+        local k = keyFromText(cachedKeyLabel.Text)
+        if k then return cachedKeyBtn, k end
+    end
+    local now = os.clock()
+    if now - lastKeyScan < 0.04 then return nil end
+    lastKeyScan = now
+    local btn, lbl = findKeyBubble()
+    if btn then
+        cachedKeyBtn, cachedKeyLabel = btn, lbl
+        return btn, keyFromText(lbl.Text)
+    end
+    cachedKeyBtn, cachedKeyLabel = nil, nil
+    return nil
+end
+
+-- ===================== CLIQUE =====================
+-- MOBILE: um metodo so (dispara os eventos do botao via getconnections/firesignal). Nao move
+-- mouse, nao manda tecla nem toque, entao o jogo nao troca pra "modo PC" e a bolha nao some.
+-- PC / CONSOLE: cadeia de metodos. Usa o que funciona e, se o contador da cabeca nao subir,
+-- passa pro proximo metodo (sem nunca disparar dois metodos no mesmo clique).
+
+-- inset: se a ScreenGui do botao ignora o inset, nao soma (senao o clique erra ~36px)
+local function insetFor(btn)
+    local sg = btn:FindFirstAncestorWhichIsA("ScreenGui")
+    if sg and sg.IgnoreGuiInset then return Vector2.new(0, 0) end
+    return GuiService:GetGuiInset()
+end
+
+local function centerOf(btn, flip)
+    local p = btn.AbsolutePosition + btn.AbsoluteSize / 2
+    local inset = insetFor(btn)
+    if flip then
+        if inset.X == 0 and inset.Y == 0 then
+            inset = GuiService:GetGuiInset()
+        else
+            inset = Vector2.new(0, 0)
+        end
+    end
+    return p + inset
+end
+
+local function fireEvents(btn, age)
+    if not btn:IsA("GuiButton") then return false end
+    local fired = false
+    if getconnections then
+        for _, ev in ipairs({btn.MouseButton1Click, btn.Activated, btn.MouseButton1Down, btn.MouseButton1Up}) do
+            pcall(function()
+                for _, c in ipairs(getconnections(ev)) do
+                    c:Fire()
+                    fired = true
                 end
             end)
         end
     end
+    if fired then return true end
+    -- bolha recem-nascida: o jogo ainda nao ligou o clique nela. Disparar agora nao pega em nada e a
+    -- bolha passaria. Devolve false e o ciclo tenta de novo no proximo frame (ate 0.1s de vida).
+    if getconnections and age and age < 0.1 then return false end
 
-    Macro.cleanup = function()
-        if conn then conn:Disconnect() end
-        for _, tr in pairs(tracks) do
-            pcall(function() tr:Stop(0.1) end)
-        end
-        if animate and animate.Parent and not animateWasDisabled then
-            pcall(function() animate.Disabled = false end)
-        end
-        pcall(function() hrp.AssemblyLinearVelocity = Vector3.zero end)
+    if firesignal then
+        local ok = pcall(function()
+            firesignal(btn.MouseButton1Click)
+            firesignal(btn.Activated)
+        end)
+        if ok then return true end
     end
-
-    hrp.CFrame = frames[1].cf
-    local t0 = os.clock()
-    setStatus("Rodando: " .. name, true)
-
-    conn = RunService.Heartbeat:Connect(function()
-        if Macro.token ~= token then return end
-        if not hrp.Parent or hum.Health <= 0 or LocalPlayer.Character ~= char then
-            stopMacro("Interrompido")
-            return
-        end
-
-        local el = os.clock() - t0
-        while idx < n and frames[idx + 1].t <= el do idx += 1 end
-        local a = frames[idx]
-
-        if idx >= n then
-            hrp.CFrame = a.cf
-            stopMacro("Conclu\u{00ED}do: " .. name)
-            return
-        end
-
-        local b = frames[idx + 1]
-        local cf = a.cf
-        local span = b.t - a.t
-        -- suaviza entre pontos; se houver "salto" grande na gravacao, nao interpola
-        if span > 0 and (b.pos - a.pos).Magnitude < 8 then
-            cf = a.cf:Lerp(b.cf, math.clamp((el - a.t) / span, 0, 1))
-        end
-
-        hrp.CFrame = cf
-        hrp.AssemblyLinearVelocity = a.vel
-
-        if a.state ~= lastState then
-            lastState = a.state
-            pcall(function() hum:ChangeState(Enum.HumanoidStateType[a.state]) end)
-        end
-        setAnim(a)
-    end)
+    return false
 end
 
-local requestId = 0
-local function runMacroFile(id, name)
-    if not id then
-        setStatus("Ainda sem arquivo: " .. name, false)
-        return
-    end
-    requestId += 1
-    local mine = requestId
-    task.spawn(function()
-        setStatus("Carregando: " .. name .. "...", false)
-        local frames, err = getFrames(id)
-        if mine ~= requestId then return end -- outro clique aconteceu enquanto carregava
-        if not frames then
-            setStatus("Falha (" .. tostring(err) .. "): " .. name, false)
-            return
-        end
-        playMacro(frames, name)
-    end)
-end
-
---------------------------------------------------------------------
--- PAGINA: PARKOUR (blocos)
---------------------------------------------------------------------
-local PageParkour = makePage()
-
--- status + botao de parar
-do
-    local c = new("Frame", {
-        LayoutOrder = 0, Size = UDim2.new(1, 0, 0, 52),
-        BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
-    }, PageParkour)
-    corner(c, 12)
-    stroke(c, GREEN, 1, 0.82)
-
-    local st = label(c, "", 12, Enum.Font.GothamMedium, MUTED)
-    st.Position = UDim2.new(0, 14, 0, 0)
-    st.Size = UDim2.new(1, -96, 1, 0)
-    st.TextWrapped = true
-
-    local stop = new("TextButton", {
-        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
-        Size = UDim2.fromOffset(62, 30), BackgroundColor3 = Color3.fromRGB(24, 31, 27),
-        AutoButtonColor = false, Text = "Parar", TextSize = 12,
-        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
-    }, c)
-    corner(stop, 15)
-    stroke(stop, GREEN, 1, 0.8)
-    stop.MouseButton1Click:Connect(function() stopMacro("Parado") end)
-
-    setStatus = function(text, running)
-        st.Text = text
-        st.TextColor3 = running and GREEN or MUTED
-        tween(stop, 0.15, {
-            TextColor3 = running and GREEN or MUTED,
-            BackgroundColor3 = running and Color3.fromRGB(32, 48, 40) or Color3.fromRGB(24, 31, 27),
-        })
-    end
-    setStatus("Nenhum parkour rodando", false)
-end
-
-local function sectionLabel(order, text)
-    local l = label(PageParkour, text, 11, Enum.Font.GothamBold, GREEN)
-    l.LayoutOrder = order
-    l.Size = UDim2.new(1, 0, 0, 18)
-    new("UIPadding", { PaddingLeft = UDim.new(0, 4) }, l)
-    return l
-end
-
--- bloco recolhivel: titulo ^ + opcoes
--- prefix: se informado, aparece no nome do status ("Parkour 3 \u{00B7} R\u{00E1}pido")
-local function makeBlock(order, titleText, options, prefix)
-    local card = makeCard(PageParkour)
-    card.LayoutOrder = order
-    new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, card)
-
-    local header = new("TextButton", {
-        Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1,
-        Text = "", AutoButtonColor = false, LayoutOrder = 1,
-    }, card)
-
-    local ht = label(header, titleText, 14, Enum.Font.GothamBold, TEXT)
-    ht.Position = UDim2.new(0, 14, 0, 0)
-    ht.Size = UDim2.new(1, -50, 1, 0)
-
-    local arrow = label(header, "v", 16, Enum.Font.GothamBold, GREEN)
-    arrow.TextXAlignment = Enum.TextXAlignment.Center
-    arrow.Position = UDim2.new(1, -36, 0, 0)
-    arrow.Size = UDim2.fromOffset(24, 42)
-
-    local body = new("Frame", {
-        BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2,
-        Visible = false,
-    }, card)
-    new("UIPadding", {
-        PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10),
-        PaddingBottom = UDim.new(0, 10),
-    }, body)
-    new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, body)
-
-    header.MouseButton1Click:Connect(function()
-        body.Visible = not body.Visible
-        arrow.Text = body.Visible and "^" or "v"
-    end)
-
-    for n, opt in ipairs(options) do
-        local optName, file = opt[1], opt[2]
-        local has = file ~= nil
-        local ob = new("TextButton", {
-            Size = UDim2.new(1, 0, 0, 34), LayoutOrder = n,
-            BackgroundColor3 = Color3.fromRGB(24, 31, 27), AutoButtonColor = false,
-            Text = has and optName or (optName .. "  \u{00B7}  em breve"),
-            TextSize = 13, Font = Enum.Font.GothamMedium,
-            TextColor3 = has and TEXT or MUTED, TextXAlignment = Enum.TextXAlignment.Left,
-        }, body)
-        corner(ob, 9)
-        new("UIPadding", { PaddingLeft = UDim.new(0, 28) }, ob)
-        local od = new("Frame", {
-            Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, -16, 0.5, -3),
-            BackgroundColor3 = has and GREEN or MUTED, BorderSizePixel = 0,
-        }, ob)
-        corner(od, 3)
-
-        ob.MouseEnter:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(32, 48, 40) }) end)
-        ob.MouseLeave:Connect(function() tween(ob, 0.15, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) }) end)
-        ob.MouseButton1Click:Connect(function()
-            ob.BackgroundColor3 = Color3.fromRGB(50, 110, 80)
-            tween(ob, 0.35, { BackgroundColor3 = Color3.fromRGB(24, 31, 27) })
-            runMacroFile(file, prefix and (prefix .. " \u{00B7} " .. optName) or optName)
+-- reserva do reteste: chama direto a funcao ligada ao botao (sem passar pelo sinal)
+local function directCall(btn)
+    if not getconnections or not btn:IsA("GuiButton") then return false end
+    local called = false
+    for _, ev in ipairs({btn.MouseButton1Click, btn.Activated, btn.MouseButton1Down, btn.MouseButton1Up}) do
+        pcall(function()
+            for _, c in ipairs(getconnections(ev)) do
+                if c.Function then
+                    task.spawn(c.Function)
+                    called = true
+                end
+            end
         end)
     end
+    return called
 end
 
-do
-    for i, blk in ipairs(PARKOUR_BLOCKS) do
-        makeBlock(i, blk[1], blk[2], blk[1])
+local function vimClick(btn, flip, rep)
+    local vim = game:GetService("VirtualInputManager")
+    local pos = centerOf(btn, flip)
+    vim:SendMouseMoveEvent(pos.X, pos.Y, game)
+    vim:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, rep or 1)
+    task.wait()
+    vim:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, rep or 1)
+end
+
+-- usado no mobile e pra pausar/fechar
+local function clickButton(btn)
+    if fireEvents(btn) then return end
+    if IS_PC then
+        pcall(vimClick, btn, false)
     end
 end
 
---------------------------------------------------------------------
--- HITBOX (modulo INDEPENDENTE: ScreenGui proprio, loop proprio,
--- tudo protegido com pcall. Se algo falhar, o menu principal segue ok)
---------------------------------------------------------------------
-local HitboxMenu = { onStatus = nil }
-
-do
-    local cfg = {
-        Enabled = false, Size = 6, Transparency = 0.6, Color = GREEN,
-        Range = 45,       -- so estende quem esta perto de voce (grande ganho de desempenho)
-        NoTouch = false,  -- desliga eventos de toque da hitbox (modo extra leve)
-    }
-    local MIN_SIZE, MAX_SIZE = 2, 25
-    local states = {}     -- [hrp] = { original..., on = bool, sig = string }
-    local conns = {}
-    local hbGui, panel, hitScale
-    local alive = false
-    local opened = false
-
-    local lastChange = 0
-    local SETTLE = 0.2        -- espera o slider assentar
-    local BUDGET = 0.0005     -- ~0,5 ms de CPU por frame no maximo para a hitbox
-    local cursor = 0          -- ponteiro round-robin entre os jogadores
-    local plist, lastList = {}, 0
-
-    local function touch() lastChange = os.clock() end
-
-    local function signature()
-        local c = cfg.Color
-        return string.format("%d|%.2f|%d,%d,%d|%s", cfg.Size, cfg.Transparency,
-            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5),
-            cfg.NoTouch and "n" or "t")
-    end
-
-    local function restoreOne(hrp, st)
-        if st.on and hrp.Parent then
+-- Metodos de clique do PC. Cada um: {nome, funcao, disponivel?}.
+-- Ordem = do melhor pro pior: os 3 primeiros sao os mais compativeis e NAO mexem no cursor real
+-- do usuario; os que movem o mouse de verdade ficam por ultimo. Se um metodo nao fizer o
+-- contador subir em 1s (SWITCH_AFTER), o script passa sozinho pro proximo (sem travar nada).
+local chain = {
+    -- 1) mouse virtual (VirtualInputManager): input "de verdade" no ponto certo, cursor real intacto
+    {"Mouse virtual", function(btn) vimClick(btn, false, 1) end},
+    -- 2) dispara os eventos do botao (MouseButton1Click/Activated/Down/Up) via getconnections/firesignal
+    {"Eventos", function(btn) fireEvents(btn) end,
+        function() return getconnections ~= nil or firesignal ~= nil end},
+    -- 3) mouse virtual com o inset da GUI invertido (corrige clique ~36px fora do botao)
+    {"Mouse virtual alt", function(btn) vimClick(btn, true, 1) end},
+    -- reservas
+    {"Mouse virtual B", function(btn) vimClick(btn, false, 0) end}, -- repeatCount 0 (usado em varios scripts abertos)
+    {"Funcao direta", function(btn)
+        -- chama direto a funcao conectada (conn.Function), sem passar pelo sinal
+        if not getconnections or not btn:IsA("GuiButton") then return end
+        for _, ev in ipairs({btn.MouseButton1Click, btn.Activated, btn.MouseButton1Down, btn.MouseButton1Up}) do
             pcall(function()
-                hrp.Size = st.Size
-                hrp.Transparency = st.Transparency
-                hrp.Color = st.Color
-                hrp.CanCollide = st.CanCollide
-                hrp.Massless = st.Massless
-                hrp.CastShadow = st.CastShadow
-                hrp.CanTouch = st.CanTouch
+                for _, c in ipairs(getconnections(ev)) do
+                    if c.Function then task.spawn(c.Function) end
+                end
             end)
         end
-        st.on = false
-        st.sig = ""
-    end
-
-    -- restaura em lotes (sem pico de lag ao desligar). immediate = tudo de uma vez (ao destruir)
-    local function restoreAll(immediate)
-        local snap = {}
-        for hrp, st in pairs(states) do
-            if st.on then snap[hrp] = st end
+    end, function() return getconnections ~= nil end},
+    {"Input falso", function(btn)
+        -- jogos que leem InputBegan/InputEnded do botao em vez de Click
+        local c0 = btn.AbsolutePosition + btn.AbsoluteSize / 2
+        local function fake(state)
+            return {
+                UserInputType = Enum.UserInputType.MouseButton1, UserInputState = state,
+                Position = Vector3.new(c0.X, c0.Y, 0), KeyCode = Enum.KeyCode.Unknown,
+            }
         end
-        local function run()
-            local n = 0
-            for hrp, st in pairs(snap) do
-                if cfg.Enabled and not immediate then return end -- religou no meio: aborta
-                restoreOne(hrp, st)
-                n += 1
-                if not immediate and n % 3 == 0 then task.wait() end
-            end
+        for _, c in ipairs(getconnections(btn.InputBegan)) do
+            pcall(function() c:Fire(fake(Enum.UserInputState.Begin)) end)
         end
-        if immediate then run() else task.spawn(run) end
+        for _, c in ipairs(getconnections(btn.InputEnded)) do
+            pcall(function() c:Fire(fake(Enum.UserInputState.End)) end)
+        end
+    end, function() return getconnections ~= nil end},
+    {"Toque virtual", function(btn)
+        local vim = game:GetService("VirtualInputManager")
+        local p = centerOf(btn, false)
+        vim:SendTouchEvent(1, 0, p.X, p.Y)
+        task.wait()
+        vim:SendTouchEvent(1, 2, p.X, p.Y)
+    end},
+    {"Controle/Enter", function(btn)
+        local vim = game:GetService("VirtualInputManager")
+        local old = GuiService.SelectedObject
+        GuiService.SelectedObject = btn
+        vim:SendKeyEvent(true, Enum.KeyCode.ButtonA, false, game)
+        vim:SendKeyEvent(false, Enum.KeyCode.ButtonA, false, game)
+        vim:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+        vim:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+        GuiService.SelectedObject = old
+    end},
+    {"VirtualUser", function(btn)
+        local vu = game:GetService("VirtualUser")
+        local p = centerOf(btn, false)
+        vu:CaptureController()
+        vu:ClickButton1(Vector2.new(p.X, p.Y))
+    end},
+    -- por ultimo: move o cursor REAL do usuario
+    {"Mouse executor", function(btn)
+        local p = centerOf(btn, false)
+        mousemoveabs(p.X, p.Y)
+        mouse1click()
+    end, function() return mouse1click ~= nil and mousemoveabs ~= nil end},
+}
+
+-- tira da lista os metodos que este executor nao tem (nao gasta 1s testando algo impossivel)
+do
+    local usable = {}
+    for _, m in ipairs(chain) do
+        if m[3] == nil or m[3]() then table.insert(usable, m) end
     end
+    chain = usable
+end
 
-    -- decide o estado de UM jogador (barato: so escreve o que realmente difere)
-    local function process(plr, sig, target, myPos)
-        if plr == LocalPlayer then return end
-        local char = plr.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp or not hrp:IsA("BasePart") then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        local alive_ = hum and hum.Health > 0
-
-        local st = states[hrp]
-        local dist = (hrp.Position - myPos).Magnitude
-        local limit = (st and st.on) and (cfg.Range * 1.15) or cfg.Range -- histerese
-        local want = alive_ and dist <= limit
-
-        if want then
-            if not st then
-                st = {
-                    Size = hrp.Size, Transparency = hrp.Transparency, Color = hrp.Color,
-                    CanCollide = hrp.CanCollide, Massless = hrp.Massless,
-                    CastShadow = hrp.CastShadow, CanTouch = hrp.CanTouch,
-                    on = false, sig = "",
-                }
-                states[hrp] = st
-            end
-            if st.on and st.sig == sig and hrp.Size == target then return end
-            st.on = true
-            st.sig = sig
-            if not hrp.Massless then hrp.Massless = true end
-            if hrp.CanCollide then hrp.CanCollide = false end
-            if hrp.CastShadow then hrp.CastShadow = false end
-            if hrp.CanTouch == cfg.NoTouch then hrp.CanTouch = not cfg.NoTouch end
-            if hrp.Size ~= target then hrp.Size = target end
-            if hrp.Transparency ~= cfg.Transparency then hrp.Transparency = cfg.Transparency end
-            if hrp.Color ~= cfg.Color then hrp.Color = cfg.Color end
-        elseif st and st.on then
-            restoreOne(hrp, st)
+-- no console o metodo de controle vem logo depois dos eventos
+if IS_CONSOLE then
+    for idx, m in ipairs(chain) do
+        if m[1] == "Controle/Enter" then
+            table.insert(chain, 2, table.remove(chain, idx))
+            break
         end
     end
+end
 
-    -- motor: 1 conexao so, trabalha dentro de um orcamento de tempo por frame.
-    -- Ao ativar, os jogadores sao aplicados aos poucos (sem congelar a tela).
-    local function startEngine()
-        table.insert(conns, RunService.Heartbeat:Connect(function()
-            if not alive or not cfg.Enabled then return end
-            local t0 = os.clock()
-            if t0 - lastChange < SETTLE then return end
-
-            if t0 - lastList > 1 then
-                lastList = t0
-                plist = Players:GetPlayers()
-                for hrp in pairs(states) do
-                    if not hrp.Parent then states[hrp] = nil end
-                end
-            end
-            local n = #plist
-            if n == 0 then return end
-
-            local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not me then return end
-            local myPos = me.Position
-            local sig = signature()
-            local s = cfg.Size
-            local target = Vector3.new(s, s, s)
-
-            local done = 0
-            while done < n do
-                cursor = cursor % n + 1
-                pcall(process, plist[cursor], sig, target, myPos)
-                done += 1
-                if os.clock() - t0 > BUDGET then break end
-            end
-        end))
+local keyChain = {
+    {"Tecla virtual", function(key)
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(true, key, false, game)
+        task.wait()
+        vim:SendKeyEvent(false, key, false, game)
+    end},
+    {"Tecla virtual B", function(key)
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(true, key, false, nil)
+        task.wait()
+        vim:SendKeyEvent(false, key, false, nil)
+    end},
+    {"Tecla executor", function(key)
+        local code = string.byte(key.Name)
+        keypress(code)
+        task.wait()
+        keyrelease(code)
+    end, function() return keypress ~= nil and keyrelease ~= nil end},
+}
+do
+    local usable = {}
+    for _, m in ipairs(keyChain) do
+        if m[3] == nil or m[3]() then table.insert(usable, m) end
     end
+    keyChain = usable
+end
 
-    ----------------------------------------------------------------
-    -- interface
-    ----------------------------------------------------------------
-    local function parentGui(g)
-        local targets = {}
-        if gethui then table.insert(targets, function() return gethui() end) end
-        table.insert(targets, function() return game:GetService("CoreGui") end)
-        table.insert(targets, function() return LocalPlayer:WaitForChild("PlayerGui") end)
-        for _, get in ipairs(targets) do
-            local ok, target = pcall(get)
-            if ok and target then
-                local ok2 = pcall(function() g.Parent = target end)
-                if ok2 and g.Parent == target then return true end
-            end
+-- ===================== CONTADOR DA CABECA =====================
+-- Le o numero que aparece em Character.Head.Overhead.AtividadeFisica.Container.Value
+
+local headObj = nil
+
+local function findHeadLabel()
+    if headObj and headObj.Parent then return headObj end
+    headObj = nil
+    local ch = player.Character
+    if not ch then return nil end
+    local af = ch:FindFirstChild("AtividadeFisica", true)
+    if not af then return nil end
+    local cont = af:FindFirstChild("Container") or af
+    local v = cont:FindFirstChild("Value", true)
+    if v and (v:IsA("TextLabel") or v:IsA("TextBox") or v:IsA("TextButton")) then
+        headObj = v
+    end
+    return headObj
+end
+
+local function parseNumber(text)
+    local t = string.gsub(tostring(text or ""), "<[^>]->", "")
+    local tok = string.match(t, "%d[%d%.,]*")
+    if not tok then return nil end
+    return tonumber((string.gsub(tok, "[%.,]", "")))
+end
+
+local function readHead()
+    local o = findHeadLabel()
+    if not o then return nil end
+    local n = parseNumber(o.Text)
+    if n and n > 5000 then return nil end
+    return n
+end
+
+local function beginRun()
+    count = 0
+end
+
+local function progress()
+    local v = readHead()
+    if v then return v, true end
+    return count, false
+end
+
+-- ===================== CLIQUE DO CICLO =====================
+
+local lastWorked = nil
+local lastMode = "tap"
+local noBubbleSince = nil
+local dumped = false
+local keyIdx = 1
+local seenObj = nil -- bolha atual e o instante em que apareceu (tempo de reacao igual p/ todas)
+local seenAt = 0
+local clickedSeen = false -- ja clicou nessa bolha? (so repete se ela continuar na tela)
+local lastClicked = nil -- ultimo clique: se o contador da cabeca subir, a bolha fica marcada como "contada"
+local awaiting = nil -- clique feito, esperando o contador da cabeca atualizar
+local chainIdx = 1
+
+-- Troca automatica de metodo (PC/console), sem bloquear nada:
+-- o clique sai na hora; a cada tick judgeMethod() confere se o contador da cabeca subiu
+-- (ou, sem contador, se a bolha sumiu). Se passar SWITCH_AFTER (1s) tentando e nada
+-- acontecer, passa pro proximo metodo. Qualquer sucesso zera a contagem, entao um metodo
+-- que funciona nunca e trocado.
+local SWITCH_AFTER = 1.0
+local attempts = 0
+local trialStart = 0
+local attemptKind = "tap"
+local clickedObj = nil
+local lastHeadSeen = nil
+
+local function noteAttempt(kind, obj)
+    if attempts == 0 then trialStart = os.clock() end
+    attempts = attempts + 1
+    attemptKind = kind
+    clickedObj = obj
+end
+
+local function clickSmart(btn)
+    local binf = bubbleInfo[btn]
+    -- reclique: a mesma bolha ja foi clicada e o jogo nao contou. Nao soma no contador interno.
+    local isRetry = binf ~= nil and binf.clicks > 0
+
+    -- mobile: metodo unico, sem esperas. Se nao disparou (botao ainda sem eventos), devolve false
+    -- e o ciclo tenta de novo no proximo frame, sem perder a bolha.
+    if IS_MOBILE then
+        local age = binf and (os.clock() - binf.seenAt) or nil
+        local ok = false
+        -- no reclique alterna o jeito de disparar (chamada direta da funcao) para nao repetir o que falhou
+        if isRetry and binf.clicks % 2 == 1 then ok = directCall(btn) end
+        if not ok then ok = fireEvents(btn, age) end
+        if ok then
+            if not isRetry then count = count + 1 end
+            return true
         end
         return false
     end
+    if not isRetry then count = count + 1 end
 
-    local function bindSlide(hit, track, setRel)
-        local dragging = false
-        local function fromInput(input)
-            setRel((input.Position.X - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1))
+    -- PC / console: usa o metodo atual da cadeia
+    noteAttempt("tap", btn)
+    lastWorked = chainIdx
+    pcall(chain[chainIdx][2], btn)
+    return true
+end
+
+-- PC: aperta a tecla da bolha (Q/E...). Mesma logica de troca.
+local function pressSmart(key, obj)
+    count = count + 1
+    noteAttempt("key", obj)
+    lastWorked = keyIdx
+    pcall(keyChain[keyIdx][2], key)
+end
+
+local function judgeMethod()
+    local h = readHead()
+    local ok = false
+    if h ~= nil then
+        if lastHeadSeen ~= nil and h ~= lastHeadSeen then ok = true end
+        lastHeadSeen = h
+    elseif attempts > 0 and clickedObj
+    and (not clickedObj.Parent or not isVisible(clickedObj)) then
+        ok = true -- sem contador: bolha sumiu depois do clique
+    end
+    if attempts == 0 then return end
+    if ok then
+        attempts = 0
+    elseif os.clock() - trialStart >= SWITCH_AFTER then
+        attempts = 0
+        if attemptKind == "key" then
+            keyIdx = keyIdx % #keyChain + 1
+        else
+            chainIdx = chainIdx % #chain + 1
         end
-        hit.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1
-                or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                fromInput(input)
-                input.Changed:Connect(function()
-                    if input.UserInputState == Enum.UserInputState.End then dragging = false end
-                end)
+    end
+end
+
+-- usado pra pausar/fechar
+local function clickAll(btn)
+    clickButton(btn)
+end
+
+-- ===================== INTERFACE =====================
+
+local function refresh()
+    if mode.enabled then
+        local p = progress()
+        local tag = ""
+        if type(lastWorked) == "number" then
+            tag = "  \194\183  M" .. lastWorked
+        end
+        toggle.Text = (mode.limit and ("PARAR  " .. p .. "/" .. mode.limit) or "PARAR") .. tag
+        toggleGrad.Color = ON_SEQ
+        toggleStroke.Color = ICE
+    else
+        toggle.Text = "INICIAR"
+        toggleGrad.Color = OFF_SEQ
+        toggleStroke.Color = BLUE_LIGHT
+    end
+    if not speedBox:IsFocused() then
+        speedBox.Text = tostring(mode.delay)
+    end
+end
+
+-- ===================== BOTAO COPIAR LOG (temporario) =====================
+
+local function buildReport()
+    local avg = diag.clicked > 0 and diag.lateSum / diag.clicked or 0
+    local lines = {}
+    table.insert(lines, string.format("AtividadesLOG | plat=%s | delay=%.2f limite=%s cabeca=%s metodo=M%d",
+        IS_MOBILE and "MOBILE" or (IS_CONSOLE and "CONSOLE" or "PC"), mode.delay,
+        tostring(mode.limit), tostring(findHeadLabel() ~= nil), chainIdx))
+    table.insert(lines, string.format(
+        "vistas=%d clicadas=%d perdidas=%d clicadas_sem_contar=%d retestes=%d urgentes=%d | atraso medio=%.0fms max=%.0fms | vida minima=%s",
+        diag.seen, diag.clicked, diag.missed, diagState.notCounted, diag.retries, diag.urgent,
+        avg * 1000, diag.lateMax * 1000, diag.lifeMin and string.format("%.2fs", diag.lifeMin) or "-"))
+    table.insert(lines, string.format("travadas de frame >0.25s: %d (maior %.2fs) | calibVida=%s calibCadencia=%s perigo=%s",
+        diagState.stalls, diagState.stallMax,
+        calibLife and string.format("%.2f", calibLife) or "-",
+        calibCadence and string.format("%.2f", calibCadence) or "-",
+        learnedDanger and string.format("%.2f", learnedDanger) or "-"))
+    do
+        local parts = {}
+        for k, v in pairs(diagState.paths) do table.insert(parts, k .. "=" .. v) end
+        table.sort(parts)
+        table.insert(lines, "cliques por caminho: " .. (#parts > 0 and table.concat(parts, " ") or "nenhum"))
+    end
+    if #events == 0 then
+        table.insert(lines, "(nenhuma bolha perdida registrada)")
+    else
+        for _, e in ipairs(events) do table.insert(lines, e) end
+    end
+    return table.concat(lines, "\n")
+end
+
+local function copyText(text)
+    local done = false
+    pcall(function() if setclipboard then setclipboard(text) done = true end end)
+    if not done then pcall(function() if toclipboard then toclipboard(text) done = true end end) end
+    if not done then pcall(function() if set_clipboard then set_clipboard(text) done = true end end) end
+    if not done then pcall(function() if Clipboard and Clipboard.set then Clipboard.set(text) done = true end end) end
+    return done
+end
+
+-- se o executor nao tiver clipboard, mostra o texto numa caixa para copiar na mao
+local logFrame = nil
+local function showLogBox(text)
+    if logFrame then pcall(function() logFrame:Destroy() end) end
+    logFrame = make("Frame", {
+        Size = UDim2.new(0, 320, 0, 220), Position = UDim2.new(0.5, -160, 0.5, -110),
+        BackgroundColor3 = NAVY_1, BorderSizePixel = 0, ZIndex = 50, Active = true,
+    }, gui)
+    corner(logFrame, 10)
+    make("UIStroke", {Color = SKY, Thickness = 1.5}, logFrame)
+    make("TextLabel", {
+        Position = UDim2.new(0, 10, 0, 4), Size = UDim2.new(1, -60, 0, 22), BackgroundTransparency = 1,
+        Text = "Segure no texto > Selecionar tudo > Copiar", TextColor3 = ICE,
+        Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 51,
+    }, logFrame)
+    local closeLog = make("TextButton", {
+        Position = UDim2.new(1, -40, 0, 4), Size = UDim2.new(0, 30, 0, 22), BackgroundColor3 = NAVY_2,
+        Text = "X", TextColor3 = WHITE, Font = Enum.Font.GothamBold, TextSize = 12,
+        BorderSizePixel = 0, AutoButtonColor = false, ZIndex = 51,
+    }, logFrame)
+    corner(closeLog, 6)
+    closeLog.MouseButton1Click:Connect(function()
+        pcall(function() logFrame:Destroy() end)
+        logFrame = nil
+    end)
+    local box = make("TextBox", {
+        Position = UDim2.new(0, 10, 0, 30), Size = UDim2.new(1, -20, 1, -40), BackgroundColor3 = FIELD,
+        Text = text, TextColor3 = WHITE, Font = Enum.Font.Code, TextSize = 10,
+        TextWrapped = true, MultiLine = true, ClearTextOnFocus = false, TextEditable = true,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        BorderSizePixel = 0, ZIndex = 51,
+    }, logFrame)
+    corner(box, 6)
+end
+
+local logBtnBusy = false
+logBtn.MouseButton1Click:Connect(function()
+    if logBtnBusy then return end
+    logBtnBusy = true
+    local okb, text = pcall(buildReport)
+    if not okb then text = "erro ao montar o log: " .. tostring(text) end
+    pcall(print, text)
+    local copied = copyText(text)
+    if copied then
+        logBtn.Text = "COPIADO!"
+    else
+        logBtn.Text = "SEM CLIPBOARD - copie da caixa"
+        showLogBox(text)
+    end
+    task.delay(2, function()
+        logBtn.Text = "COPIAR LOG"
+        logBtnBusy = false
+    end)
+end)
+
+toggle.MouseButton1Click:Connect(function()
+    mode.enabled = not mode.enabled
+    awaiting = nil
+    attempts = 0
+    lastHeadSeen = nil
+    lastClick = 0
+    noBubbleSince = nil
+    dumped = false
+    if mode.enabled then
+        beginRun()
+        calibReset()
+        lastClicked = nil
+    else
+        diagFinish()
+    end
+    refresh()
+end)
+
+qtyBox.FocusLost:Connect(function()
+    local n = tonumber(qtyBox.Text)
+    if n then
+        n = math.clamp(math.floor(n), 1, 500)
+        mode.limit = n
+        qtyBox.Text = tostring(n)
+    else
+        mode.limit = nil
+        qtyBox.Text = ""
+    end
+    refresh()
+end)
+
+speedBox.FocusLost:Connect(function()
+    local n = tonumber((string.gsub(speedBox.Text, ",", ".")))
+    if not n or n < MIN_DELAY then n = MIN_DELAY end
+    mode.delay = n
+    speedBox.Text = tostring(n)
+end)
+
+-- ===================== CONTROLE / LOOPS =====================
+
+local running = true
+
+local function stopAll()
+    running = false
+    mode.enabled = false
+    pcall(function() shimmerTween:Cancel() end)
+    for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
+    pcall(function() gui:Destroy() end)
+end
+
+env.__AtividadesFisicasStop = stopAll
+close.MouseButton1Click:Connect(stopAll)
+
+local minimized = false
+local body = {descLabel, toggleBg, delayLabel, speedBox, qtyLabel, qtyBox, logBtn}
+
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        minBtn.Text = "+"
+        TweenService:Create(frame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Size = UDim2.new(0, 300, 0, 34)}):Play()
+        task.delay(0.2, function()
+            if minimized then
+                for _, o in ipairs(body) do o.Visible = false end
             end
         end)
-        table.insert(conns, UIS.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-                or input.UserInputType == Enum.UserInputType.Touch) then
-                fromInput(input)
-            end
-        end))
+    else
+        minBtn.Text = "\226\136\146"
+        for _, o in ipairs(body) do o.Visible = true end
+        TweenService:Create(frame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Size = UDim2.new(0, 300, 0, FULL_H)}):Play()
     end
+end)
 
-    local function makeKnob(track)
-        local k = new("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 0, 0.5, 0),
-            Size = UDim2.fromOffset(16, 16), BackgroundColor3 = Color3.fromRGB(235, 255, 245),
-            BorderSizePixel = 0, ZIndex = 2,
-        }, track)
-        corner(k, 8)
-        stroke(k, GREEN, 1.5, 0)
-        return k
+local function pathGet(root, names)
+    local cur = root
+    for _, n in ipairs(names) do
+        if not cur then return nil end
+        cur = cur:FindFirstChild(n)
     end
+    return cur
+end
 
-    local function build()
-        local g = new("ScreenGui", {
-            Name = "NeyladHitboxGui", ResetOnSpawn = false, IgnoreGuiInset = true,
-            ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 1000,
-        })
-
-        local p = new("Frame", {
-            Name = "HitboxPanel", AnchorPoint = Vector2.new(0.5, 0.5),
-            Position = UDim2.new(0.5, 0, 0.5, 0),
-            Size = UDim2.fromOffset(300, 0), AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-            BorderSizePixel = 0, ClipsDescendants = true, Active = true, Visible = false,
-        }, g)
-        corner(p, 18)
-        new("UIGradient", {
-            Rotation = 65,
-            Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(6, 7, 7)),
-                ColorSequenceKeypoint.new(0.55, Color3.fromRGB(10, 14, 12)),
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(34, 82, 58)),
-            }),
-        }, p)
-        local pStroke = stroke(p, Color3.fromRGB(255, 255, 255), 1.5, 0.15)
-        local pStrokeGrad = strokeGradient(pStroke)
-        local pShine = addShine(p)
-        local pScale = new("UIScale", { Scale = 0 }, p)
-
-        local titleBar = new("Frame", {
-            Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1,
-        }, p)
-        local d = new("Frame", {
-            Size = UDim2.fromOffset(8, 8), Position = UDim2.new(0, 16, 0.5, -4),
-            BackgroundColor3 = GREEN, BorderSizePixel = 0,
-        }, titleBar)
-        corner(d, 4)
-        local t = label(titleBar, "HITBOX", 15, Enum.Font.GothamBold, TEXT)
-        t.Position = UDim2.new(0, 32, 0, 0)
-        t.Size = UDim2.new(1, -90, 1, 0)
-
-        local closeBtn = new("TextButton", {
-            Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -40, 0.5, -14),
-            BackgroundColor3 = Color3.fromRGB(22, 28, 25), AutoButtonColor = false,
-            Text = "X", TextSize = 13, Font = Enum.Font.GothamBold, TextColor3 = MUTED,
-        }, titleBar)
-        corner(closeBtn, 14)
-        stroke(closeBtn, GREEN, 1, 0.8)
-        closeBtn.MouseEnter:Connect(function() tween(closeBtn, 0.15, { TextColor3 = GREEN }) end)
-        closeBtn.MouseLeave:Connect(function() tween(closeBtn, 0.15, { TextColor3 = MUTED }) end)
-        closeBtn.MouseButton1Click:Connect(function() HitboxMenu.close() end)
-
-        new("Frame", {
-            Size = UDim2.new(1, -32, 0, 1), Position = UDim2.new(0, 16, 0, 44),
-            BackgroundColor3 = GREEN, BackgroundTransparency = 0.85, BorderSizePixel = 0,
-        }, p)
-
-        makeDrag(titleBar, p, nil, nil, nil, conns)
-
-        local list = new("Frame", {
-            BackgroundTransparency = 1, Position = UDim2.new(0, 14, 0, 54),
-            Size = UDim2.new(1, -28, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
-        }, p)
-        new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, list)
-
-        local function row(order, height)
-            local r = new("Frame", {
-                LayoutOrder = order, Size = UDim2.new(1, 0, 0, height),
-                BackgroundColor3 = CARD, BackgroundTransparency = 0.1, BorderSizePixel = 0,
-            }, list)
-            corner(r, 12)
-            stroke(r, GREEN, 1, 0.82)
-            return r
+local function finishRun()
+    mode.enabled = false
+    diagFinish()
+    refresh()
+    task.spawn(function()
+        task.wait(0.4)
+        local pg = player:FindFirstChild("PlayerGui")
+        local pause = pg and pathGet(pg, {"AtividadesFisicas", "Main", "Background", "Infos", "Pause"})
+        if not (pause and pause:IsA("GuiButton")) then
+            pause = findButton({target = "pausar", exact = false})
         end
-
-        -- 1) interruptores
-        local function switchRow(order, text, onToggle)
-            local tr = row(order, 44)
-            local tl = label(tr, text, 13, Enum.Font.GothamMedium, TEXT)
-            tl.Position = UDim2.new(0, 14, 0, 0)
-            tl.Size = UDim2.new(1, -80, 1, 0)
-            local sw = new("TextButton", {
-                AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0),
-                Size = UDim2.fromOffset(44, 24), BackgroundColor3 = TRACK,
-                AutoButtonColor = false, Text = "",
-            }, tr)
-            corner(sw, 12)
-            local swKnob = new("Frame", {
-                Size = UDim2.fromOffset(18, 18), Position = UDim2.new(0, 3, 0.5, -9),
-                BackgroundColor3 = MUTED, BorderSizePixel = 0,
-            }, sw)
-            corner(swKnob, 9)
-
-            local state = false
-            sw.MouseButton1Click:Connect(function()
-                state = not state
-                tween(sw, 0.18, { BackgroundColor3 = state and GREEN or TRACK })
-                tween(swKnob, 0.18, {
-                    Position = state and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
-                    BackgroundColor3 = state and Color3.fromRGB(8, 18, 12) or MUTED,
-                })
-                onToggle(state)
-            end)
+        if pause then
+            clickAll(pause)
+            task.wait(0.5)
         end
+        local closeBtn = pg and pathGet(pg, {"AtividadesFisicas", "Main", "Background", "Close"})
+        if closeBtn and closeBtn:IsA("GuiButton") then
+            clickAll(closeBtn)
+        end
+    end)
+end
 
-        switchRow(1, "Ativar hitbox", function(v)
-            cfg.Enabled = v
-            if not v then restoreAll() end
-            if HitboxMenu.onStatus then pcall(HitboxMenu.onStatus, v) end
-        end)
+-- cada ciclo roda numa thread separada (nao trava o loop nem o jogo)
+local lastRefresh = 0
 
-        -- 2) sliders
-        local function slider(order, name, min, max, default, decimals, suffix, onChange)
-            local r = row(order, 54)
-            local nl = label(r, name, 12, Enum.Font.GothamMedium, MUTED)
-            nl.Position = UDim2.new(0, 14, 0, 8)
-            nl.Size = UDim2.new(0.5, 0, 0, 16)
-            local vl = label(r, "", 12, Enum.Font.GothamBold, GREEN)
-            vl.TextXAlignment = Enum.TextXAlignment.Right
-            vl.Position = UDim2.new(0.5, 0, 0, 8)
-            vl.Size = UDim2.new(0.5, -14, 0, 16)
-
-            local track = new("Frame", {
-                Position = UDim2.new(0, 14, 0, 36), Size = UDim2.new(1, -28, 0, 6),
-                BackgroundColor3 = TRACK, BorderSizePixel = 0,
-            }, r)
-            corner(track, 3)
-            local fill = new("Frame", {
-                Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = GREEN, BorderSizePixel = 0,
-            }, track)
-            corner(fill, 3)
-            new("UIGradient", {
-                Color = ColorSequence.new({
-                    ColorSequenceKeypoint.new(0, Color3.fromRGB(70, 200, 130)),
-                    ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 255, 210)),
-                }),
-            }, fill)
-            local knob = makeKnob(track)
-            local hit = new("TextButton", {
-                Position = UDim2.new(0, 6, 0, 24), Size = UDim2.new(1, -12, 0, 28),
-                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
-            }, r)
-
-            local fmt = "%." .. decimals .. "f"
-            local function render(rel, value)
-                fill.Size = UDim2.new(rel, 0, 1, 0)
-                knob.Position = UDim2.new(rel, 0, 0.5, 0)
-                vl.Text = string.format(fmt, value) .. suffix
+-- Se no PC nao achar bolha nenhuma por 4s, copia um relatorio pra area de transferencia
+-- (e imprime no console F9) pra colar no chat e eu ver o que o jogo mostra de verdade.
+local function dumpDiagnostic()
+    local U = UserInputService
+    local lines = {}
+    table.insert(lines, "== Atividades fisicas: diagnostico ==")
+    table.insert(lines, "plataforma: " .. (IS_MOBILE and "MOBILE" or (IS_CONSOLE and "CONSOLE" or "PC"))
+        .. " | touch=" .. tostring(U.TouchEnabled) .. " teclado=" .. tostring(U.KeyboardEnabled)
+        .. " mouse=" .. tostring(U.MouseEnabled) .. " gamepad=" .. tostring(U.GamepadEnabled))
+    table.insert(lines, "executor: getconnections=" .. tostring(getconnections ~= nil)
+        .. " firesignal=" .. tostring(firesignal ~= nil)
+        .. " mouse1click=" .. tostring(mouse1click ~= nil)
+        .. " keypress=" .. tostring(keypress ~= nil)
+        .. " setclipboard=" .. tostring(setclipboard ~= nil))
+    table.insert(lines, "contador da cabeca achado: " .. tostring(findHeadLabel() ~= nil))
+    local guis = {}
+    local pg = player:FindFirstChild("PlayerGui")
+    if pg then
+        for _, g in ipairs(pg:GetChildren()) do
+            if g:IsA("ScreenGui") and g ~= gui then
+                table.insert(guis, g.Name .. (g.Enabled and "" or "(off)"))
             end
-            render((default - min) / (max - min), default)
-
-            local lastValue = default
-            bindSlide(hit, track, function(rel)
-                rel = math.clamp(rel, 0, 1)
-                local value = tonumber(string.format(fmt, min + (max - min) * rel))
-                render(rel, value)
-                if value ~= lastValue then
-                    lastValue = value
-                    onChange(value)
+        end
+        table.insert(lines, "ScreenGuis: " .. table.concat(guis, ", "))
+        local n = 0
+        for i, obj in ipairs(pg:GetDescendants()) do
+            if i % 250 == 0 then task.wait() end
+            if n >= 80 then break end
+            if (obj:IsA("TextButton") or obj:IsA("TextLabel")) and not obj:IsDescendantOf(gui) then
+                local txt = tostring(obj.Text)
+                if txt ~= "" and #txt <= 24 and isVisible(obj) then
+                    n = n + 1
+                    local path = string.gsub(obj:GetFullName(), "^.-PlayerGui%.", "")
+                    table.insert(lines, obj.ClassName .. " | " .. path .. " | '" .. txt .. "'")
                 end
-            end)
+            end
         end
+    end
+    local text = table.concat(lines, "\n")
+    print(text)
+    local copied = false
+    pcall(function()
+        if setclipboard then
+            setclipboard(text)
+            copied = true
+        elseif toclipboard then
+            toclipboard(text)
+            copied = true
+        end
+    end)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Atividades f\195\173sicas",
+            Text = copied and "N\195\163o achei a bolha. Diagn\195\179stico copiado: cole no chat." or "N\195\163o achei a bolha. Veja o console (F9).",
+            Duration = 8,
+        })
+    end)
+end
 
-        slider(2, "Tamanho", MIN_SIZE, MAX_SIZE, cfg.Size, 0, " studs", function(v) cfg.Size = v; touch() end)
-        slider(3, "Alcance", 10, 150, cfg.Range, 0, " studs", function(v) cfg.Range = v; touch() end)
-        slider(4, "Transpar\u{00EA}ncia", 0, 1, cfg.Transparency, 2, "", function(v) cfg.Transparency = v; touch() end)
+local function cycle()
+    -- confere (sem bloquear) se o metodo atual esta funcionando; troca apos 1s sem resultado
+    judgeMethod()
+    diagState.hasHead = findHeadLabel() ~= nil
 
-        -- 3) cor
+    -- 0) CONFERE O ULTIMO CLIQUE: se o contador da cabeca subiu, o jogo contou e a bolha fica marcada
+    --    como "contada" (nunca mais clicada). Se nao subiu, a bolha continua elegivel e e clicada de
+    --    novo depois de RECLICK_AFTER, enquanto ainda estiver na tela. Isso NAO mexe no ritmo
+    --    (lastClick), entao a proxima bolha nova nunca e atrasada por causa de um reteste.
+    if lastClicked then
+        local h = readHead()
+        if h ~= nil and lastClicked.head ~= nil and h ~= lastClicked.head then
+            if lastClicked.info then lastClicked.info.counted = true end
+            lastClicked = nil
+        elseif os.clock() - lastClicked.t > 1.5 then
+            lastClicked = nil
+        end
+    end
+
+    -- 1) detecta a bolha SEMPRE, antes de qualquer espera/retorno, para marcar o instante exato
+    --    em que ela apareceu (PC: se nao ha "tap", procura bolha de tecla Q/E)
+    local btn = getButton()
+    local keyBtn, key
+    if not btn and IS_PC then
+        keyBtn, key = getKeyBubble()
+        if keyBtn then diagState.lastPath = "tecla" end
+    end
+    local now = os.clock()
+    local seen = btn or (keyBtn and key and keyBtn) or nil
+    do
+        local sObj = btn or keyBtn
+        if sObj then
+            local si = registerBubble(sObj)
+            local okS, sz = pcall(function() return sObj.AbsoluteSize.X end)
+            if okS and sz then
+                if sz >= (si.sizeMax or 0) then
+                    si.sizeMax = sz
+                    si.tMax = now
+                end
+                si.size = sz
+            end
+            if not si.validAt then si.validAt = now end
+        end
+    end
+    if seen ~= seenObj then
+        seenObj = seen
+        seenAt = now
+        clickedSeen = false
+    end
+    if seen and bubbleInfo[seen] then bubbleInfo[seen].chosen = true end
+
+    -- 2) depois de um clique com limite, espera o contador da cabeca mostrar o novo valor
+    --    (assim nunca passa da quantidade escolhida). Espera curta: nao deixa a proxima bolha passar.
+    if awaiting then
+        local h = readHead()
+        if h ~= nil and h ~= awaiting.head then
+            awaiting = nil
+        elseif now - awaiting.t > 0.35 then
+            awaiting = nil
+        else
+            local si = seen and bubbleInfo[seen]
+            if si then
+                si.waitDue = 0.35 - (now - awaiting.t)
+                si.waitWhy = "contador"
+                si.waitUrgent = false
+            end
+            return
+        end
+    end
+
+    -- 3) chegou na quantidade? para ANTES de clicar de novo
+    local p = progress()
+    if mode.limit and p >= mode.limit then
+        finishRun()
+        return
+    end
+
+    -- 4) RITMO DO AUTO JJs ANTIGO: depois de cada clique espera o intervalo (Delay mostrado = segundos
+    --    reais entre cliques, minimo 0.6). A bolha nova e clicada assim que o intervalo termina.
+    --    Se a bolha vai sumir antes disso (urgente), o clique sai antes, com intervalo minimo menor.
+    local urgent = false
+    if seen then
+        local gap = mode.delay - SPEED_OFFSET
+        -- calibrado: se as bolhas nascem mais rapido que o Delay, acompanha o nascimento (piso 0.6s)
+        if calibCadence and bubbleInfo[seen] then
+            gap = math.min(gap, math.max(MIN_DELAY, calibCadence - 0.05))
+        end
+        -- reclique (clique anterior nao contou): nao espera o Delay inteiro, a bolha esta morrendo
+        local sinfo = bubbleInfo[seen]
+        if sinfo and sinfo.clicks > 0 then
+            gap = math.min(gap, RECLICK_AFTER)
+        end
+        local due = lastClick + gap
+        if now < due and sinfo then
+            urgent = bubbleUrgent(seen, due - now)
+            if urgent then
+                gap = math.min(gap, URGENT_GAP)
+                due = lastClick + gap
+            end
+        end
+        if now < due then
+            if sinfo then
+                sinfo.waitDue = due - now
+                sinfo.waitWhy = "ritmo"
+                sinfo.waitUrgent = urgent
+            end
+            noBubbleSince = nil
+            return
+        end
+    end
+
+    if not (btn or (keyBtn and key)) then
+        if (not IS_MOBILE) and not dumped then
+            if not noBubbleSince then
+                noBubbleSince = now
+            elseif now - noBubbleSince > 4 then
+                dumped = true
+                task.spawn(dumpDiagnostic)
+            end
+        end
+    end
+    if btn or (keyBtn and key) then
+        noBubbleSince = nil
+        local headBefore = readHead()
+        local t0 = os.clock()
+        local okClick = true
+        local pre = seen and bubbleInfo[seen]
+        local wasRetry = pre ~= nil and pre.clicks > 0
+        if btn then
+            lastMode = "tap"
+            okClick = clickSmart(btn)
+        else
+            lastMode = "tecla"
+            pressSmart(key, keyBtn)
+        end
+        if okClick == false then return end
+        if urgent then diag.urgent = diag.urgent + 1 end
+        if wasRetry then diag.retries = diag.retries + 1 end
+        local binfo = seen and bubbleInfo[seen]
+        if binfo then
+            binfo.waitDue = nil
+            if not binfo.clicked then
+                binfo.clicked = true
+                diag.clicked = diag.clicked + 1
+                local late = t0 - math.max(binfo.seenAt, lastClick + (mode.delay - SPEED_OFFSET))
+                if late < 0 then late = 0 end
+                diag.lateSum = diag.lateSum + late
+                if late > diag.lateMax then diag.lateMax = late end
+                pcall(calibNote, binfo, t0)
+            end
+            binfo.clicks = binfo.clicks + 1
+            binfo.clickedAt = t0
+        end
+        lastClick = t0
+        if scanSecond and scanSecond ~= btn then
+            lastClick = t0 - (mode.delay - SPEED_OFFSET) + 0.15
+        end
+        clickedSeen = true
+        lastClicked = {info = binfo, t = t0, head = headBefore}
         do
-            local r = row(5, 102)
-            local nl = label(r, "Cor", 12, Enum.Font.GothamMedium, MUTED)
-            nl.Position = UDim2.new(0, 14, 0, 8)
-            nl.Size = UDim2.new(0.5, 0, 0, 16)
+            local pth = diagState.lastPath or "?"
+            diagState.paths[pth] = (diagState.paths[pth] or 0) + 1
+        end
+        if mode.limit and headBefore ~= nil then
+            awaiting = {head = headBefore, t = t0}
+        end
+        if lastClick - lastRefresh > 0.25 then
+            lastRefresh = lastClick
+            refresh()
+        end
+    end
+end
 
-            local preview = new("Frame", {
-                AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -14, 0, 8),
-                Size = UDim2.fromOffset(36, 16), BackgroundColor3 = cfg.Color, BorderSizePixel = 0,
-            }, r)
-            corner(preview, 8)
-            stroke(preview, Color3.fromRGB(255, 255, 255), 1, 0.7)
+-- DETECTOR RAPIDO: roda em todo Heartbeat e todo RenderStepped (o mais rapido que o Roblox permite,
+-- 2 checagens por frame) e tambem no mesmo instante em que uma bolha nasce. So clica no ritmo do delay.
+local busy = false
+local lastTickAt = os.clock()
+local function tick()
+    local nowT = os.clock()
+    local dt = nowT - lastTickAt
+    lastTickAt = nowT
+    -- registra travadas de frame (lag do jogo/executor) para o log
+    if mode.enabled and dt > 0.25 and dt < 10 then
+        diagState.stall = {at = nowT, len = dt}
+        diagState.stalls = diagState.stalls + 1
+        if dt > diagState.stallMax then diagState.stallMax = dt end
+    end
+    if busy or not running or not mode.enabled then return end
+    busy = true
+    pcall(cycle)
+    busy = false
+end
+table.insert(connections, RunService.Heartbeat:Connect(function() tick() end))
+pcall(function()
+    table.insert(connections, RunService.RenderStepped:Connect(function() tick() end))
+end)
 
-            local track = new("Frame", {
-                Position = UDim2.new(0, 14, 0, 38), Size = UDim2.new(1, -28, 0, 8),
-                BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
-            }, r)
-            corner(track, 4)
-            local kp = {}
-            for i = 0, 6 do
-                table.insert(kp, ColorSequenceKeypoint.new(i / 6, Color3.fromHSV(i / 6, 0.7, 1)))
-            end
-            new("UIGradient", { Color = ColorSequence.new(kp) }, track)
-            local knob = makeKnob(track)
-            local hit = new("TextButton", {
-                Position = UDim2.new(0, 6, 0, 26), Size = UDim2.new(1, -12, 0, 32),
-                BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3,
-            }, r)
+-- varredura completa de reserva em segundo plano (so quando nenhuma bolha direta foi achada)
+task.spawn(function()
+    while running do
+        task.wait(IS_MOBILE and 0.5 or 0.25)
+        if running and mode.enabled and not cachedBtn then
+            local ok, f = pcall(findButton, mode)
+            if ok and f then fallbackBtn = f end
+        end
+    end
+end)
 
-            local function setColor(c, moveKnob)
-                cfg.Color = c
-                touch()
-                preview.BackgroundColor3 = c
-                if moveKnob then
-                    local h, s = c:ToHSV()
-                    if s > 0.15 then knob.Position = UDim2.new(h, 0, 0.5, 0) end
+task.spawn(function()
+    while running do
+        task.wait(1)
+        if running then refresh() end
+    end
+end)
+
+-- rastreia as bolhas por evento (existentes + novas) para detectar no mesmo instante
+do
+    local pg = player:FindFirstChild("PlayerGui")
+    if pg then
+        table.insert(connections, pg.DescendantAdded:Connect(function(obj)
+            if running then
+                pcall(trackLabel, obj)
+                if mode.enabled and obj:IsA("ImageButton") then
+                    local par = obj.Parent
+                    if par and par.Name == "Screen" and par.Parent and par.Parent.Name == "Polichinelos" then
+                        pcall(registerBubble, obj)
+                        task.defer(tick)
+                    end
                 end
             end
-            setColor(cfg.Color, true)
-
-            bindSlide(hit, track, function(rel)
-                rel = math.clamp(rel, 0, 1)
-                knob.Position = UDim2.new(rel, 0, 0.5, 0)
-                setColor(Color3.fromHSV(rel, 0.7, 1), false)
-            end)
-
-            local presets = new("Frame", {
-                Position = UDim2.new(0, 14, 0, 66), Size = UDim2.new(1, -28, 0, 26),
-                BackgroundTransparency = 1,
-            }, r)
-            new("UIListLayout", {
-                FillDirection = Enum.FillDirection.Horizontal,
-                Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder,
-            }, presets)
-
-            local colors = {
-                GREEN,
-                Color3.fromRGB(255, 70, 70),
-                Color3.fromRGB(70, 150, 255),
-                Color3.fromRGB(190, 100, 255),
-                Color3.fromRGB(255, 220, 70),
-                Color3.fromRGB(255, 255, 255),
-            }
-            for i, c in ipairs(colors) do
-                local b = new("TextButton", {
-                    LayoutOrder = i, Size = UDim2.fromOffset(30, 26),
-                    BackgroundColor3 = c, AutoButtonColor = false, Text = "",
-                }, presets)
-                corner(b, 8)
-                stroke(b, Color3.fromRGB(255, 255, 255), 1, 0.75)
-                b.MouseButton1Click:Connect(function() setColor(c, true) end)
-            end
-        end
-
-        switchRow(6, "Modo extra leve (sem toque)", function(v)
-            cfg.NoTouch = v
-            touch()
-        end)
-
-        new("Frame", {
-            LayoutOrder = 99, Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1,
-        }, list)
-
-        -- animacao continua (so enquanto o painel esta aberto)
-        local pAcc = 0
-        table.insert(conns, RunService.Heartbeat:Connect(function(dt)
-            if not opened then return end
-            pAcc += dt
-            if pAcc < 0.05 then return end
-            pAcc = 0
-            local now = os.clock()
-            pStrokeGrad.Rotation = (now * 50) % 360
-            pShine.Offset = Vector2.new(math.min(1, -1 + ((now % 6) / 6) * 3), 0)
         end))
-
-        if not parentGui(g) then
-            g:Destroy()
-            error("nao foi possivel anexar a GUI")
-        end
-
-        g.Destroying:Connect(function()
-            alive = false
-            cfg.Enabled = false
-            pcall(restoreAll, true)
-            for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-            conns = {}
-        end)
-
-        -- so publica o estado quando tudo deu certo
-        hbGui, panel, hitScale = g, p, pScale
-        alive = true
-        startEngine()
-    end
-
-    ----------------------------------------------------------------
-    -- API publica
-    ----------------------------------------------------------------
-    function HitboxMenu.open()
-        if not hbGui then
-            local ok, err = pcall(build)
-            if not ok then
-                warn("[Hitbox] falha ao criar o menu: " .. tostring(err))
-                return false
-            end
-        end
-        if opened then return true end
-        opened = true
-        panel.Visible = true
-        hitScale.Scale = 0.85
-        tweenEx(hitScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
-        return true
-    end
-
-    function HitboxMenu.close()
-        if not opened or not hitScale then return end
-        opened = false
-        tweenEx(hitScale, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
-        task.delay(0.24, function()
-            if not opened and panel then panel.Visible = false end
-        end)
-    end
-
-    function HitboxMenu.toggle()
-        if opened then HitboxMenu.close() else HitboxMenu.open() end
-    end
-
-    function HitboxMenu.destroy()
-        alive = false
-        cfg.Enabled = false
-        pcall(restoreAll, true)
-        if hbGui then pcall(function() hbGui:Destroy() end) end
-        for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
-        conns = {}
-    end
-end
-
---------------------------------------------------------------------
--- PAGINA: COMBATE
---------------------------------------------------------------------
-local PageCombat = makePage()
-
-do
-    local d
-    local _
-    _, d = makeOpenCard(PageCombat, "Hitbox", "Abra o menu de hitbox", function()
-        local ok = pcall(HitboxMenu.toggle)
-        if not ok then
-            d.Text = "Falha ao abrir"
-            task.delay(1.5, function() d.Text = "Abra o menu de hitbox" end)
-        end
-    end)
-    HitboxMenu.onStatus = function(on)
-        d.Text = on and "Hitbox ativa" or "Abra o menu de hitbox"
-        d.TextColor3 = on and GREEN or MUTED
-    end
-end
-
---------------------------------------------------------------------
--- PAGINA: JJs
---------------------------------------------------------------------
-local PageJJ = makePage()
-
-do
-    local lastClick = 0
-    local token = 0
-    local jjFn -- codigo ja baixado/compilado (evita baixar de novo e tomar rate limit)
-
-    makeOpenCard(PageJJ, "Menu de JJs", "Abra o menu de JJs", function(d)
-        -- so um anti-spam curto; NUNCA fica preso esperando o script dos JJs
-        if os.clock() - lastClick < 0.6 then return end
-        lastClick = os.clock()
-        token += 1
-        local mine = token
-        d.Text = "Abrindo..."
-
-        local function finish(ok)
-            if mine ~= token then return end
-            d.Text = ok and "Menu aberto" or "Falha ao abrir"
-            task.delay(1.5, function()
-                if mine == token then d.Text = "Abra o menu de JJs" end
-            end)
-        end
-
         task.spawn(function()
-            if not jjFn then
-                local ok, res = pcall(function() return game:HttpGet(JJS_URL) end)
-                if not ok or type(res) ~= "string" or #res == 0 then
-                    warn("[JJs] falha ao baixar: " .. tostring(res))
-                    return finish(false)
-                end
-                local fn, cerr = loadstring(res)
-                if not fn then
-                    warn("[JJs] falha ao compilar: " .. tostring(cerr))
-                    return finish(false)
-                end
-                jjFn = fn
+            for i, obj in ipairs(pg:GetDescendants()) do
+                if i % 250 == 0 then task.wait() end
+                if not running then return end
+                pcall(trackLabel, obj)
             end
-            -- roda em thread propria: se o script dos JJs tiver loop infinito, o botao continua livre
-            task.spawn(function()
-                local ok, err = pcall(jjFn)
-                if not ok then warn("[JJs] erro no script: " .. tostring(err)) end
-            end)
-            finish(true)
         end)
-    end)
-end
-
---------------------------------------------------------------------
--- PAGINA: CREDITOS
---------------------------------------------------------------------
-local PageCred = makePage()
-
-do
-    local c1 = makeCard(PageCred)
-    c1.LayoutOrder = 1
-    new("UIPadding", {
-        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
-        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
-    }, c1)
-    new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, c1)
-
-    local l1 = label(c1, "CRIADOR DO SCRIPT", 11, Enum.Font.GothamBold, GREEN)
-    l1.Size = UDim2.new(1, 0, 0, 16); l1.LayoutOrder = 1
-    local l2 = label(c1, "Neylad", 22, Enum.Font.GothamBold, TEXT)
-    l2.Size = UDim2.new(1, 0, 0, 28); l2.LayoutOrder = 2
-    local l3 = label(c1, "discord", 12, Enum.Font.Gotham, MUTED)
-    l3.Size = UDim2.new(1, 0, 0, 16); l3.LayoutOrder = 3
-
-    local c2 = makeCard(PageCred)
-    c2.LayoutOrder = 2
-    new("UIPadding", {
-        PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 14),
-        PaddingTop = UDim.new(0, 12), PaddingBottom = UDim.new(0, 12),
-    }, c2)
-    new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, c2)
-
-    local a1 = label(c2, "AVISO", 11, Enum.Font.GothamBold, GREEN)
-    a1.Size = UDim2.new(1, 0, 0, 16); a1.LayoutOrder = 1
-    local a2 = label(c2,
-        "Este menu parou na fase de testes. Para aumentar fun\u{00E7}\u{00F5}es ou adaptar para futuras atualiza\u{00E7}\u{00F5}es, contate o Criador.",
-        13, Enum.Font.Gotham, TEXT)
-    a2.TextWrapped = true
-    a2.Size = UDim2.new(1, 0, 0, 0)
-    a2.AutomaticSize = Enum.AutomaticSize.Y
-    a2.LayoutOrder = 2
-end
-
---------------------------------------------------------------------
--- ABAS (hotbar): Parkour | Combate | JJs | Creditos (ultima)
---------------------------------------------------------------------
-local CRED = "Cr\u{00E9}ditos"
-local pages = {
-    ["Parkour"] = PageParkour,
-    ["Combate"] = PageCombat,
-    ["JJs"] = PageJJ,
-    [CRED] = PageCred,
-}
-local order = { "Parkour", "Combate", "JJs", CRED }
-local tabButtons = {}
-
-local function selectTab(name)
-    for n, page in pairs(pages) do
-        page.Visible = (n == name)
     end
-    for n, b in pairs(tabButtons) do
-        local active = (n == name)
-        tween(b, 0.2, {
-            BackgroundTransparency = active and 0 or 1,
-            TextColor3 = active and Color3.fromRGB(8, 18, 12) or MUTED,
+end
+
+refresh()
+
+end
+
+local __ok, __err = xpcall(__AtividadesFisicasMain, function(e)
+    return debug.traceback(tostring(e), 2)
+end)
+if not __ok then
+    warn("[Atividades fisicas] erro ao iniciar: " .. tostring(__err))
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Atividades f\195\173sicas",
+            Text = "Erro ao iniciar. Veja o console (F9).",
+            Duration = 8,
         })
-    end
-end
-
-for idx, name in ipairs(order) do
-    local b = new("TextButton", {
-        Size = UDim2.new(0.25, -3, 1, 0), LayoutOrder = idx,
-        BackgroundColor3 = GREEN, BackgroundTransparency = 1,
-        AutoButtonColor = false, Text = name, TextSize = 12,
-        Font = Enum.Font.GothamBold, TextColor3 = MUTED,
-    }, barInner)
-    corner(b, 16)
-    new("UIGradient", {
-        Rotation = 90,
-        Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(170, 255, 210)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 210, 140)),
-        }),
-    }, b)
-    tabButtons[name] = b
-    b.MouseButton1Click:Connect(function() selectTab(name) end)
-end
-
-selectTab(order[1])
-
---------------------------------------------------------------------
--- ABRIR / FECHAR MENU (animacoes)
---------------------------------------------------------------------
-local isOpen = false
-local animating = false
-local shineStart = os.clock()
-
-local function showLogo()
-    Logo.Visible = true
-    logoScale.Scale = 0
-    tweenEx(logoScale, 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
-end
-
-local function openMenu()
-    if animating or isOpen then return end
-    animating = true
-    isOpen = true
-
-    -- logo encolhe e some
-    tweenEx(logoScale, 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, { Scale = 0 })
-
-    task.delay(0.12, function()
-        Logo.Visible = false
-        holderScale.Scale = 0.86
-        Holder.GroupTransparency = 1
-        Hotbar.Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN)
-        Holder.Visible = true
-        shineStart = os.clock()
-
-        tweenEx(Holder, 0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, { GroupTransparency = 0 })
-        tweenEx(holderScale, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
-        tweenEx(Hotbar, 0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0.14,
-            { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y) })
-
-        task.delay(0.7, function() animating = false end)
     end)
 end
-
-local function closeMenu()
-    if animating or not isOpen then return end
-    animating = true
-    isOpen = false
-
-
-    tweenEx(Hotbar, 0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0,
-        { Position = UDim2.new(0.5, 0, 0, HOTBAR_Y_HIDDEN) })
-    tweenEx(Holder, 0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0.08, { GroupTransparency = 1 })
-    tweenEx(holderScale, 0.34, Enum.EasingStyle.Back, Enum.EasingDirection.In, 0, { Scale = 0.86 })
-
-    task.delay(0.38, function()
-        Holder.Visible = false
-        showLogo()
-        task.delay(0.4, function() animating = false end)
-    end)
-end
-
-CloseBtn.MouseButton1Click:Connect(closeMenu)
-
--- logo: arrasta e, se for so um toque, abre o menu
-makeDrag(Logo, Logo, openMenu,
-    function() if not isOpen then tween(logoScale, 0.1, { Scale = 0.94 }) end end,
-    function() if not isOpen then tween(logoScale, 0.15, { Scale = 1 }) end end)
-
--- entrada da logo ao executar
-task.delay(0.15, function()
-    tweenEx(logoScale, 0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, { Scale = 1 })
-end)
-
---------------------------------------------------------------------
--- ANIMACOES CONTINUAS (shimmer, borda, pulso)
---------------------------------------------------------------------
-local animAcc = 0
-local conn = RunService.Heartbeat:Connect(function(dt)
-    animAcc += dt
-    if animAcc < 0.05 then return end -- ~20 fps basta para brilho/borda
-    animAcc = 0
-    local t = os.clock()
-    if Holder.Visible then
-        local rot = (t * 50) % 360
-        mainStrokeGrad.Rotation = rot
-        barStrokeGrad.Rotation = rot
-        mainShine.Offset = Vector2.new(math.min(1, -1 + (((t - shineStart) % 6) / 6) * 3), 0)
-    end
-    if Logo.Visible then
-        logoStrokeGrad.Rotation = (t * 50) % 360
-        logoShine.Offset = Vector2.new(math.min(1, -1 + ((t % 5) / 5) * 3), 0)
-        logoDot.BackgroundTransparency = 0.35 + 0.35 * math.sin(t * 3)
-    end
-end)
-table.insert(connections, conn)
-
-gui.Destroying:Connect(function()
-    pcall(stopMacro)
-    pcall(HitboxMenu.destroy)
-    for _, c in ipairs(connections) do
-        pcall(function() c:Disconnect() end)
-    end
-end)
