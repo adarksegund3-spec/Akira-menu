@@ -46,6 +46,7 @@ local mode = {
 local count = 0
 
 local env = (getgenv and getgenv()) or _G
+local VERSION = "v3"
 
 if env.__AtividadesFisicasStop then
     pcall(env.__AtividadesFisicasStop)
@@ -250,7 +251,7 @@ make("UIStroke", {Color = BLUE_DEEP, Thickness = 1.2}, qtyBox)
 -- BOTAO TEMPORARIO: copia o log das bolhas perdidas
 local logBtn = make("TextButton", {
     Position = UDim2.new(0, 12, 0, 192), Size = UDim2.new(1, -24, 0, 26), BackgroundColor3 = FIELD,
-    Text = "COPIAR LOG", TextColor3 = SKY, Font = Enum.Font.GothamBold, TextSize = 12,
+    Text = "COPIAR LOG", TextColor3 = SKY, Font = Enum.Font.GothamBold, TextSize = 11,
     BorderSizePixel = 0, AutoButtonColor = false,
 }, frame)
 corner(logBtn, 6)
@@ -445,13 +446,16 @@ end
 -- quantas sumiram sem clique e o atraso real entre "podia clicar" e o clique.
 local bubbleInfo = setmetatable({}, {__mode = "k"})
 local learnedDanger = SAFE_WAIT -- idade (s) a partir da qual uma bolha pendente vira URGENTE (aprendida das que sumiram)
-local diag = {seen = 0, clicked = 0, missed = 0, retries = 0, urgent = 0, lateSum = 0, lateMax = 0, lifeMin = nil}
+local diag = env.__AtividadesDiag or {seen = 0, clicked = 0, missed = 0, retries = 0, urgent = 0, lateSum = 0, lateMax = 0, lifeMin = nil}
 env.__AtividadesDiag = diag
 
 local lastClick = 0 -- instante do ultimo clique (declarado aqui para o log das perdas)
 -- estado do log (botao COPIAR LOG): travadas de frame, pendentes na tela, eventos de perda
-local diagState = {t0 = os.clock(), pending = 0, hasHead = false, stall = nil, stalls = 0, stallMax = 0, notCounted = 0, paths = {}, lastPath = nil}
-local events = {}
+local diagState = env.__AtividadesState or {t0 = os.clock(), pending = 0, hasHead = false, stall = nil, stalls = 0, stallMax = 0, notCounted = 0, paths = {}, lastPath = nil}
+diagState.paths = diagState.paths or {}
+env.__AtividadesState = diagState
+local events = env.__AtividadesEvents or {}
+env.__AtividadesEvents = events
 
 local function logEvent(s)
     table.insert(events, s)
@@ -464,7 +468,7 @@ local function diagReset()
     diagState.t0 = os.clock()
     diagState.pending, diagState.stall = 0, nil
     diagState.stalls, diagState.stallMax, diagState.notCounted = 0, 0, 0
-    events = {}
+    for i = #events, 1, -1 do events[i] = nil end
 end
 
 -- so copia pra area de transferencia (em silencio) se alguma bolha passou sem clique
@@ -1176,7 +1180,11 @@ end
 
 -- ===================== INTERFACE =====================
 
+local logBtnBusy = false
 local function refresh()
+    if not logBtnBusy then
+        logBtn.Text = string.format("COPIAR LOG %s | vistas %d  clic %d  perd %d", VERSION, diag.seen, diag.clicked, diag.missed)
+    end
     if mode.enabled then
         local p = progress()
         local tag = ""
@@ -1201,8 +1209,8 @@ end
 local function buildReport()
     local avg = diag.clicked > 0 and diag.lateSum / diag.clicked or 0
     local lines = {}
-    table.insert(lines, string.format("AtividadesLOG | plat=%s | delay=%.2f limite=%s cabeca=%s metodo=M%d",
-        IS_MOBILE and "MOBILE" or (IS_CONSOLE and "CONSOLE" or "PC"), mode.delay,
+    table.insert(lines, string.format("AtividadesLOG %s | plat=%s | delay=%.2f limite=%s cabeca=%s metodo=M%d",
+        VERSION, IS_MOBILE and "MOBILE" or (IS_CONSOLE and "CONSOLE" or "PC"), mode.delay,
         tostring(mode.limit), tostring(findHeadLabel() ~= nil), chainIdx))
     table.insert(lines, string.format(
         "vistas=%d clicadas=%d perdidas=%d clicadas_sem_contar=%d retestes=%d urgentes=%d | atraso medio=%.0fms max=%.0fms | vida minima=%s",
@@ -1271,7 +1279,6 @@ local function showLogBox(text)
     corner(box, 6)
 end
 
-local logBtnBusy = false
 logBtn.MouseButton1Click:Connect(function()
     if logBtnBusy then return end
     logBtnBusy = true
@@ -1286,8 +1293,8 @@ logBtn.MouseButton1Click:Connect(function()
         showLogBox(text)
     end
     task.delay(2, function()
-        logBtn.Text = "COPIAR LOG"
         logBtnBusy = false
+        refresh()
     end)
 end)
 
