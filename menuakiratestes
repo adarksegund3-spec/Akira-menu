@@ -26,10 +26,11 @@ local MIN_GAP = 0.45       -- NUNCA clicar mais rapido que isso (o jogo ignora c
 local URGENT_GAP = MIN_GAP -- bolha urgente: intervalo minimo (s) desde o clique anterior
 local RECLICK_AFTER = MIN_GAP -- clique que nao foi contado: a mesma bolha pode ser clicada de novo depois disso (s)
 local DEBUG = false -- true = mostra o botao COPIAR LOG e grava os eventos
--- ANTI-PERDA (modo bruto): com bolha na tela o Delay e ignorado, clica no piso (MIN_GAP), sempre na bolha
--- que some primeiro, e nao espera o contador da cabeca entre cliques. Botao na GUI liga/desliga.
-local A = {on = true, floor = MIN_GAP, btn = nil}
-local FULL_H = DEBUG and 256 or 226
+-- ANTI-PERDA (sem acelerar): escolhe a bolha que some primeiro e nao espera o contador da cabeca.
+-- O ritmo respeita SEMPRE o Delay (0.7). Se quiser permitir cliques mais rapidos quando a bolha
+-- estiver quase sumindo, troque speedup para true (fica mais rapido/suspeito).
+local A = {on = true, speedup = false}
+local FULL_H = DEBUG and 226 or 196
 
 local NAVY_1     = Color3.fromRGB(6, 12, 32)
 local NAVY_2     = Color3.fromRGB(12, 30, 80)
@@ -253,27 +254,9 @@ local qtyBox = make("TextBox", {
 corner(qtyBox, 6)
 make("UIStroke", {Color = BLUE_DEEP, Thickness = 1.2}, qtyBox)
 
-do
-    local ab = make("TextButton", {
-        Position = UDim2.new(0, 12, 0, 192), Size = UDim2.new(1, -24, 0, 26), BackgroundColor3 = FIELD,
-        Text = "", TextColor3 = SKY, Font = Enum.Font.GothamBold, TextSize = 11,
-        BorderSizePixel = 0, AutoButtonColor = false,
-    }, frame)
-    corner(ab, 6)
-    local abStroke = make("UIStroke", {Color = SKY, Thickness = 1.2}, ab)
-    local function paint()
-        ab.Text = A.on and "ANTI-PERDA: ON (MODO BRUTO)" or "ANTI-PERDA: OFF"
-        ab.TextColor3 = A.on and SKY or MUTED
-        abStroke.Color = A.on and SKY or BLUE_DEEP
-    end
-    paint()
-    ab.MouseButton1Click:Connect(function() A.on = not A.on paint() end)
-    A.btn = ab
-end
-
 -- BOTAO TEMPORARIO: copia o log das bolhas perdidas
 local logBtn = make("TextButton", {
-    Position = UDim2.new(0, 12, 0, 222), Size = UDim2.new(1, -24, 0, 26), BackgroundColor3 = FIELD,
+    Position = UDim2.new(0, 12, 0, 192), Size = UDim2.new(1, -24, 0, 26), BackgroundColor3 = FIELD,
     Text = "COPIAR LOG", TextColor3 = SKY, Font = Enum.Font.GothamBold, TextSize = 11,
     BorderSizePixel = 0, AutoButtonColor = false,
 }, frame)
@@ -561,7 +544,7 @@ local scanSecond = nil -- 2a bolha pendente mais antiga (se houver duas ou mais 
 -- ela some. Se ela sumiria antes do proximo clique permitido, o clique sai ja (respeitando o piso
 -- minimo de 0.6s entre cliques). Tambem vale a idade aprendida das bolhas que ja passaram.
 local function bubbleUrgent(b, dueIn)
-    if A.on then return true end
+    if not A.speedup then return false end
     local info = bubbleInfo[b]
     if not info then return false end
     local now = os.clock()
@@ -1362,7 +1345,7 @@ env.__AtividadesFisicasStop = stopAll
 close.MouseButton1Click:Connect(stopAll)
 
 local minimized = false
-local body = {descLabel, toggleBg, delayLabel, speedBox, qtyLabel, qtyBox, A.btn, logBtn}
+local body = {descLabel, toggleBg, delayLabel, speedBox, qtyLabel, qtyBox, logBtn}
 
 minBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
@@ -1559,14 +1542,13 @@ local function cycle()
     local urgent = false
     if seen then
         local gap = mode.delay - SPEED_OFFSET
-        if A.on then gap = A.floor end -- anti-perda: ignora o Delay, so respeita o piso do jogo
         -- calibrado: se as bolhas nascem mais rapido que o Delay, acompanha o nascimento (piso 0.6s)
-        if calibCadence and bubbleInfo[seen] then
+        if A.speedup and calibCadence and bubbleInfo[seen] then
             gap = math.min(gap, math.max(MIN_DELAY, calibCadence - 0.05))
         end
         -- reclique (clique anterior nao contou): nao espera o Delay inteiro, a bolha esta morrendo
         local sinfo = bubbleInfo[seen]
-        if sinfo and sinfo.clicks > 0 then
+        if A.speedup and sinfo and sinfo.clicks > 0 then
             gap = math.min(gap, RECLICK_AFTER)
         end
         local due = lastClick + gap
@@ -1638,7 +1620,7 @@ local function cycle()
             binfo.clickedAt = t0
         end
         lastClick = t0
-        if scanSecond and scanSecond ~= btn and not A.on then
+        if A.speedup and scanSecond and scanSecond ~= btn then
             lastClick = t0 - (mode.delay - SPEED_OFFSET) + MIN_GAP
         end
         clickedSeen = true
