@@ -22,8 +22,9 @@ local DEFAULT_DELAY = 0.7  -- valor mostrado: padrao ao abrir
 local SPEED_OFFSET = 0     -- velocidade real = valor mostrado (intervalo entre cliques, como no AUTO JJs antigo)
 local REACT_DELAY = 0      -- clica assim que a bolha aparece (respeitando o intervalo desde o ultimo clique)
 local SAFE_WAIT = 0.3      -- bolha esperando mais que isso (s) e clicada mesmo antes do Delay terminar (nunca deixa passar)
-local URGENT_GAP = 0.25    -- nesse caso, intervalo minimo (s) desde o clique anterior
-local RECLICK_AFTER = 0.5  -- clique que nao foi contado: a mesma bolha pode ser clicada de novo depois disso (s)
+local MIN_GAP = 0.45       -- NUNCA clicar mais rapido que isso (o jogo ignora cliques mais rapidos que ~0.45s)
+local URGENT_GAP = MIN_GAP -- bolha urgente: intervalo minimo (s) desde o clique anterior
+local RECLICK_AFTER = MIN_GAP -- clique que nao foi contado: a mesma bolha pode ser clicada de novo depois disso (s)
 local FULL_H = 226
 
 local NAVY_1     = Color3.fromRGB(6, 12, 32)
@@ -46,7 +47,7 @@ local mode = {
 local count = 0
 
 local env = (getgenv and getgenv()) or _G
-local VERSION = "v3"
+local VERSION = "v4"
 
 if env.__AtividadesFisicasStop then
     pcall(env.__AtividadesFisicasStop)
@@ -1594,6 +1595,8 @@ local function cycle()
         local okClick = true
         local pre = seen and bubbleInfo[seen]
         local wasRetry = pre ~= nil and pre.clicks > 0
+        local prevReal = diagState.realLast or 0
+        local hasSecond = scanSecond ~= nil and scanSecond ~= btn
         if btn then
             lastMode = "tap"
             okClick = clickSmart(btn)
@@ -1604,6 +1607,11 @@ local function cycle()
         if okClick == false then return end
         if urgent then diag.urgent = diag.urgent + 1 end
         if wasRetry then diag.retries = diag.retries + 1 end
+        diagState.realLast = t0
+        if t0 - prevReal < 0.55 then
+            logEvent(string.format("CLIQUE_RAPIDO t=%.1fs intervalo=%.2fs urgente=%s reclique=%s segunda_na_tela=%s",
+                t0 - diagState.t0, t0 - prevReal, tostring(urgent), tostring(wasRetry), tostring(hasSecond)))
+        end
         local binfo = seen and bubbleInfo[seen]
         if binfo then
             binfo.waitDue = nil
@@ -1621,7 +1629,7 @@ local function cycle()
         end
         lastClick = t0
         if scanSecond and scanSecond ~= btn then
-            lastClick = t0 - (mode.delay - SPEED_OFFSET) + 0.15
+            lastClick = t0 - (mode.delay - SPEED_OFFSET) + MIN_GAP
         end
         clickedSeen = true
         lastClicked = {info = binfo, t = t0, head = headBefore}
