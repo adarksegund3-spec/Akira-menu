@@ -25,7 +25,8 @@ local SAFE_WAIT = 0.3      -- bolha esperando mais que isso (s) e clicada mesmo 
 local MIN_GAP = 0.45       -- NUNCA clicar mais rapido que isso (o jogo ignora cliques mais rapidos que ~0.45s)
 local URGENT_GAP = MIN_GAP -- bolha urgente: intervalo minimo (s) desde o clique anterior
 local RECLICK_AFTER = MIN_GAP -- clique que nao foi contado: a mesma bolha pode ser clicada de novo depois disso (s)
-local FULL_H = 226
+local DEBUG = false -- true = mostra o botao COPIAR LOG e grava os eventos
+local FULL_H = DEBUG and 226 or 196
 
 local NAVY_1     = Color3.fromRGB(6, 12, 32)
 local NAVY_2     = Color3.fromRGB(12, 30, 80)
@@ -47,7 +48,7 @@ local mode = {
 local count = 0
 
 local env = (getgenv and getgenv()) or _G
-local VERSION = "v4"
+local VERSION = "v5"
 
 if env.__AtividadesFisicasStop then
     pcall(env.__AtividadesFisicasStop)
@@ -257,6 +258,7 @@ local logBtn = make("TextButton", {
 }, frame)
 corner(logBtn, 6)
 make("UIStroke", {Color = SKY, Thickness = 1.2}, logBtn)
+logBtn.Visible = DEBUG
 
 local shimmer = make("Frame", {
     Size = UDim2.new(1, 0, 1, 0), BackgroundColor3 = Color3.new(1, 1, 1),
@@ -472,22 +474,8 @@ local function diagReset()
     for i = #events, 1, -1 do events[i] = nil end
 end
 
--- so copia pra area de transferencia (em silencio) se alguma bolha passou sem clique
-local function diagFinish()
-    if diag.seen <= 0 or (diag.missed <= 0 and diag.retries <= 0) then return end
-    pcall(function()
-        local avg = diag.clicked > 0 and diag.lateSum / diag.clicked or 0
-        local text = string.format(
-            "AtividadesDiag | vistas=%d clicadas=%d perdidas=%d retestes=%d urgentes=%d | atraso medio=%.0fms maximo=%.0fms | vida minima da bolha=%s | delay=%.2f",
-            diag.seen, diag.clicked, diag.missed, diag.retries, diag.urgent, avg * 1000, diag.lateMax * 1000,
-            diag.lifeMin and string.format("%.2fs", diag.lifeMin) or "-", mode.delay)
-        if setclipboard then
-            setclipboard(text)
-        elseif toclipboard then
-            toclipboard(text)
-        end
-    end)
-end
+-- (silencioso) nada e copiado nem salvo; as estatisticas ficam so na memoria
+local function diagFinish() end
 
 -- texto de uma perda: mostra POR QUE a bolha passou (vida, ritmo, travada de frame, etc.)
 local function lossText(kind, info)
@@ -525,11 +513,11 @@ local function registerBubble(b)
                     local d = math.max(0.12, life * 0.5)
                     if not learnedDanger or d < learnedDanger then learnedDanger = d end
                 end
-                logEvent(lossText("PERDIDA", info))
+                if DEBUG then logEvent(lossText("PERDIDA", info)) end
             elseif not info.counted and diagState.hasHead then
                 info.gone = true
                 diagState.notCounted = diagState.notCounted + 1
-                logEvent(lossText("CLICADA_SEM_CONTAR(pode ser so atraso do contador)", info))
+                if DEBUG then logEvent(lossText("CLICADA_SEM_CONTAR(pode ser so atraso do contador)", info)) end
             end
         end)
     end)
@@ -654,24 +642,7 @@ local function calibApply()
     end
 end
 
-local function calibSave()
-    pcall(function()
-        if writefile then
-            writefile(CALIB_FILE, string.format("life=%.3f\ncadence=%.3f\n", calibLife or 0, calibCadence or 0))
-        end
-    end)
-end
-
-pcall(function()
-    if isfile and readfile and isfile(CALIB_FILE) then
-        local txt = readfile(CALIB_FILE)
-        local l = tonumber(string.match(txt, "life=([%d%.]+)"))
-        local c = tonumber(string.match(txt, "cadence=([%d%.]+)"))
-        if l and l >= 0.2 and l <= 6 then calibLife = l end
-        if c and c >= 0.3 and c <= 3 then calibCadence = c end
-        calibApply()
-    end
-end)
+local function calibSave() end -- sem arquivo: a calibracao fica so na memoria
 
 local function calibReset()
     calib = {n = 0, lifes = {}, births = {}, done = false}
@@ -1368,7 +1339,7 @@ minBtn.MouseButton1Click:Connect(function()
         end)
     else
         minBtn.Text = "\226\136\146"
-        for _, o in ipairs(body) do o.Visible = true end
+        for _, o in ipairs(body) do o.Visible = (o ~= logBtn) or DEBUG end
         TweenService:Create(frame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
             {Size = UDim2.new(0, 300, 0, FULL_H)}):Play()
     end
@@ -1584,7 +1555,7 @@ local function cycle()
                 noBubbleSince = now
             elseif now - noBubbleSince > 4 then
                 dumped = true
-                task.spawn(dumpDiagnostic)
+                if DEBUG then task.spawn(dumpDiagnostic) end
             end
         end
     end
@@ -1608,7 +1579,7 @@ local function cycle()
         if urgent then diag.urgent = diag.urgent + 1 end
         if wasRetry then diag.retries = diag.retries + 1 end
         diagState.realLast = t0
-        if t0 - prevReal < 0.55 then
+        if DEBUG and t0 - prevReal < 0.55 then
             logEvent(string.format("CLIQUE_RAPIDO t=%.1fs intervalo=%.2fs urgente=%s reclique=%s segunda_na_tela=%s",
                 t0 - diagState.t0, t0 - prevReal, tostring(urgent), tostring(wasRetry), tostring(hasSecond)))
         end
@@ -1674,8 +1645,8 @@ end)
 -- varredura completa de reserva em segundo plano (so quando nenhuma bolha direta foi achada)
 task.spawn(function()
     while running do
-        task.wait(IS_MOBILE and 0.5 or 0.25)
-        if running and mode.enabled and not cachedBtn then
+        task.wait(1)
+        if running and mode.enabled and not cachedBtn and next(tracked) == nil then
             local ok, f = pcall(findButton, mode)
             if ok and f then fallbackBtn = f end
         end
