@@ -1,29 +1,34 @@
 --[[
-    ANGEL MUSIC — Audius + Jamendo (+ prévias Deezer) music player for Roblox (Luau, client-side executor)
+    ANGEL MUSIC — Spotify (controle remoto) para Roblox (Luau, executor client-side)
     Criador: Angel
-    Requisitos do executor:
-      * request/http_request (HTTP)            -> pesquisa e metadados
-      * writefile + getcustomasset/getsynasset -> reprodução de áudio e capas
-    Sem writefile/getcustomasset a pesquisa funciona, mas o player mostra ERROR (nunca finge tocar).
-
-    SEGURANÇA: a documentação da Audius diz que o Bearer Token é para backend e nunca deve ir em
-    código distribuído. Para testes ele está em CFG.BEARER. Antes de compartilhar o script:
-    apague/rotacione o token (https://api.audius.co/plans) e deixe CFG.USE_BEARER = false.
+    Como funciona:
+      * Busca, cantores, playlists e álbuns vêm da Web API oficial do Spotify.
+      * A Web API NÃO envia o áudio para o Roblox: a música toca no app do Spotify aberto no
+        seu celular/PC (dispositivo ativo) e este script controla: play, pausa, próxima, anterior,
+        barra de tempo, volume, aleatório e repetir.
+    Requisitos:
+      * Conta Spotify Premium (exigência do Spotify para controlar a reprodução).
+      * Spotify aberto em algum aparelho seu.
+      * Executor com request/http_request. (writefile + getcustomasset só servem para as capas.)
+    TOKEN: o token de acesso dura ~1 hora e precisa dos escopos
+      user-read-playback-state, user-modify-playback-state, user-read-currently-playing (+ user-top-read).
+      Quando expirar o script avisa. Para renovar sozinho, preencha SPOTIFY_CLIENT_ID,
+      SPOTIFY_CLIENT_SECRET e SPOTIFY_REFRESH_TOKEN abaixo.
+    SEGURANÇA: token, client id e secret dão acesso à sua conta/app. Não compartilhe este arquivo
+    com eles preenchidos.
 ]]
 
 ---------------------------------------------------------------- CFG
 local CFG = {
 	LOGO = "rbxassetid://115128671335258",
-	API_HOST = "https://api.audius.co",
-	API_KEY = "0x879f12308f9bfba736cb936e827c930bd4efa161",
-	BEARER = "JaI60nRhgNAVI4LUsPEAxdDf_lGkW5523p0K9I2KF-U=",
-	USE_BEARER = true,      -- enviado só em chamadas de metadados (nunca no stream/CDN)
-	JAMENDO_ID = "489c71e0",                          -- Jamendo: Client ID (é o único necessário p/ buscar e tocar)
-	JAMENDO_SECRET = "5b34d7de1401afa950e011a2bbabde32", -- Jamendo: Client Secret (NÃO é usado aqui; só serve p/ OAuth no backend)
-	USE_JAMENDO = true,
-	APP_NAME = "ANGEL_MUSIC",
+	SPOTIFY_TOKEN = "BQBT2mJBY08TJTc4HG0_kp9nTGDImAukSfy9CAIP0QjWsvBTm5hLUDgMivU_UFqG86cyaMXVXqYSLjvWLPCvqzlWWQM0s9BHSsMYui-_jlO7fSxf_zF-Ld4ZNTwZobsVM8JvQHnce6KJ90ePq4xGtdtU-JU-LWUQ9NWPYnWo1D6qiiiBlTCwaj5ZUfGndPTeJR8ZnEmCgqbKenF6BWcDve4iWvwKTliEsmJEBJZ0CBAPLZmD6dTwIV5t4LoI9grnjaHd_1IHi9nQlIaomgwS-C8Fg6gnhTq5twfUF-jDoxLFFiZyvUlFoURdyKV2qLqme5S01GV8HBWDmqISTQJ4",
+	SPOTIFY_CLIENT_ID = "8550ba80140745349e0fbf930d8dc690", -- ATENÇÃO: confirme se este código é o Client ID (se for o Secret, mova p/ SPOTIFY_CLIENT_SECRET)
+	SPOTIFY_CLIENT_SECRET = "",
+	SPOTIFY_REFRESH_TOKEN = "",  -- opcional: com os 3 campos preenchidos o token é renovado sozinho
+	MARKET = "BR",
+	POLL_OPEN = 2,          -- segundos entre leituras do estado do Spotify (janela aberta)
+	POLL_CLOSED = 5,
 	FOLDER = "AngelMusic",
-	CACHE_LIMIT = 20,       -- faixas de áudio em disco
 	SEARCH_TTL = 300,
 	WIN_W = 296, WIN_H = 392,       -- tamanho inicial (pequeno p/ mobile)
 	MIN_W = 250, MIN_H = 300,       -- limites do redimensionar (seta no canto)
@@ -98,7 +103,7 @@ function Bus.on(n, f) Bus.h[n] = Bus.h[n] or {}; table.insert(Bus.h[n], f) end
 function Bus.fire(n, ...) for _, f in ipairs(Bus.h[n] or {}) do task.spawn(f, ...) end end
 
 ---------------------------------------------------------------- Http
-local Http = { bearerOk = nil }
+local Http = {}
 local httpRequest
 do
 	if type(request) == "function" then httpRequest = request
@@ -108,49 +113,114 @@ do
 	elseif fluxus and type(fluxus.request) == "function" then httpRequest = fluxus.request end
 end
 
-local function q(params)
-	local parts = { "app_name=" .. CFG.APP_NAME, "api_key=" .. HttpService:UrlEncode(CFG.API_KEY) }
-	for k, v in pairs(params or {}) do
-		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
-	end
-	return table.concat(parts, "&")
-end
-
-function Http.raw(url, useBearer)
+function Http.req(method, url, headers, body)
 	if not httpRequest then return nil, "NOHTTP" end
-	local headers = { Accept = "application/json" }
-	if useBearer and CFG.USE_BEARER and Http.bearerOk ~= false then
-		headers.Authorization = "Bearer " .. CFG.BEARER
-	end
-	local ok, res = pcall(httpRequest, { Url = url, Method = "GET", Headers = headers })
+	local ok, res = pcall(httpRequest, { Url = url, Method = method, Headers = headers or {}, Body = body })
 	if not ok or type(res) ~= "table" then return nil, "NETWORK" end
 	return res
 end
+function Http.raw(url) -- GET simples (capas)
+	return Http.req("GET", url, { Accept = "*/*" })
+end
 
--- Retorna tabela decodificada (campo data) ou nil, codigoDeErro
-function Http.json(path, params)
-	local url = CFG.API_HOST .. path .. "?" .. q(params)
+local Errors = {
+	NOHTTP = "Seu executor não suporta requisições HTTP.",
+	NETWORK = "Falha de conexão. Verifique a internet.",
+	TOKEN = "Token do Spotify expirou. Cole um novo em CFG.SPOTIFY_TOKEN.",
+	SCOPE = "Token sem permissão de controle (faltam escopos do player).",
+	PREMIUM = "Controlar a reprodução exige Spotify Premium.",
+	FORBIDDEN = "O Spotify recusou (limite do app em modo de desenvolvimento).",
+	NODEVICE = "Abra o Spotify no celular/PC e toque algo uma vez.",
+	NOTFOUND = "Não encontrado no Spotify.",
+	RATE = "Limite de requisições atingido. Aguarde um pouco.",
+	SERVER = "Servidores do Spotify indisponíveis.",
+	INVALID = "Resposta inválida da API.",
+	UNAVAILABLE = "Música indisponível na sua região.",
+}
+local function errText(code) return Errors[code] or ("Erro: " .. tostring(code)) end
+
+---------------------------------------------------------------- Spotify (Web API oficial)
+local Sp = { token = CFG.SPOTIFY_TOKEN, refreshToken = CFG.SPOTIFY_REFRESH_TOKEN, refreshing = false, lastRefreshOk = false }
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function b64(str)
+	local out = {}
+	for i = 1, #str, 3 do
+		local a, b, c = str:byte(i, i + 2)
+		local n = a * 65536 + (b or 0) * 256 + (c or 0)
+		local c1, c2, c3, c4 = (n // 262144) % 64, (n // 4096) % 64, (n // 64) % 64, n % 64
+		table.insert(out, B64:sub(c1 + 1, c1 + 1))
+		table.insert(out, B64:sub(c2 + 1, c2 + 1))
+		table.insert(out, b and B64:sub(c3 + 1, c3 + 1) or "=")
+		table.insert(out, c and B64:sub(c4 + 1, c4 + 1) or "=")
+	end
+	return table.concat(out)
+end
+
+function Sp.refresh()
+	if CFG.SPOTIFY_CLIENT_ID == "" or CFG.SPOTIFY_CLIENT_SECRET == "" or Sp.refreshToken == "" then return false end
+	if Sp.refreshing then
+		local t0 = os.clock()
+		while Sp.refreshing and os.clock() - t0 < 10 do task.wait(0.1) end
+		return Sp.lastRefreshOk
+	end
+	Sp.refreshing = true
+	local ok = false
+	local res = Http.req("POST", "https://accounts.spotify.com/api/token", {
+		Authorization = "Basic " .. b64(CFG.SPOTIFY_CLIENT_ID .. ":" .. CFG.SPOTIFY_CLIENT_SECRET),
+		["Content-Type"] = "application/x-www-form-urlencoded",
+	}, "grant_type=refresh_token&refresh_token=" .. HttpService:UrlEncode(Sp.refreshToken))
+	if res and res.StatusCode == 200 then
+		local s2, d = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+		if s2 and type(d) == "table" and type(d.access_token) == "string" then
+			Sp.token = d.access_token
+			if type(d.refresh_token) == "string" and d.refresh_token ~= "" then Sp.refreshToken = d.refresh_token end
+			ok = true
+		end
+	end
+	Sp.refreshing = false
+	Sp.lastRefreshOk = ok
+	return ok
+end
+
+-- Retorna: tabela decodificada | true (sem conteúdo) | nil, codigoDeErro
+function Sp.call(method, path, params, body)
+	local parts = {}
+	for k, v in pairs(params or {}) do
+		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
+	end
+	local url = "https://api.spotify.com" .. path .. (#parts > 0 and ("?" .. table.concat(parts, "&")) or "")
+	local payload = body ~= nil and HttpService:JSONEncode(body) or nil
+	local refreshed = false
 	for attempt = 1, 3 do
-		local res, err = Http.raw(url, true)
+		local headers = { Authorization = "Bearer " .. Sp.token, Accept = "application/json" }
+		if payload then headers["Content-Type"] = "application/json" end
+		local res, err = Http.req(method, url, headers, payload)
 		if not res then return nil, err end
 		local code = res.StatusCode or 0
-		if code == 401 or code == 403 then
-			if CFG.USE_BEARER and Http.bearerOk ~= false then
-				Http.bearerOk = false -- tenta de novo só com API key
-			else
-				return nil, "AUTH"
-			end
+		local text = type(res.Body) == "string" and res.Body or ""
+		if code >= 200 and code < 300 then
+			if code == 204 or text == "" then return true end
+			local ok, data = pcall(HttpService.JSONDecode, HttpService, text)
+			if ok and type(data) == "table" then return data end
+			return true
+		elseif code == 401 then
+			if refreshed or not Sp.refresh() then return nil, "TOKEN" end
+			refreshed = true
 		elseif code == 429 then
 			if attempt == 3 then return nil, "RATE" end
-			task.wait(1.5 * attempt)
+			local h = res.Headers or {}
+			task.wait(math.min(tonumber(h["Retry-After"] or h["retry-after"]) or 1, 3))
 		elseif code >= 500 then
 			if attempt == 3 then return nil, "SERVER" end
 			task.wait(1)
-		elseif code >= 200 and code < 300 then
-			local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
-			if not ok or type(data) ~= "table" or data.data == nil then return nil, "INVALID" end
-			if CFG.USE_BEARER and Http.bearerOk == nil then Http.bearerOk = true end
-			return data.data
+		elseif code == 403 then
+			if text:find("PREMIUM_REQUIRED") then return nil, "PREMIUM" end
+			if text:find("VOLUME_CONTROL") then return nil, "NOVOLUME" end
+			if text:lower():find("scope") then return nil, "SCOPE" end
+			return nil, "FORBIDDEN"
+		elseif code == 404 then
+			if text:find("NO_ACTIVE_DEVICE") then return nil, "NODEVICE" end
+			return nil, "NOTFOUND"
 		else
 			return nil, "HTTP_" .. tostring(code)
 		end
@@ -158,43 +228,53 @@ function Http.json(path, params)
 	return nil, "NETWORK"
 end
 
-local Errors = {
-	NOHTTP = "Seu executor não suporta requisições HTTP.",
-	NETWORK = "Falha de conexão. Verifique a internet.",
-	AUTH = "Autenticação recusada pela Audius.",
-	RATE = "Limite de requisições atingido. Aguarde um pouco.",
-	SERVER = "Servidores da Audius indisponíveis.",
-	INVALID = "Resposta inválida da API.",
-	NOAUDIO = "Executor sem writefile/getcustomasset: não é possível tocar áudio.",
-	UNAVAILABLE = "Música indisponível para streaming.",
-	LOADFAIL = "O áudio não carregou.",
-	NOSTART = "O áudio não iniciou.",
-}
-local function errText(code) return Errors[code] or ("Erro: " .. tostring(code)) end
-
----------------------------------------------------------------- Api
-local Api = { cache = {} }
-local function normTrack(t)
-	if type(t) ~= "table" or not t.id then return nil end
-	local art = type(t.artwork) == "table" and (t.artwork["150x150"] or t.artwork["480x480"] or t.artwork["1000x1000"]) or nil
-	return {
-		id = tostring(t.id), title = tostring(t.title or "Sem título"),
-		artist = type(t.user) == "table" and tostring(t.user.name or "Desconhecido") or "Desconhecido",
-		duration = tonumber(t.duration) or 0, art = art, streamable = t.is_streamable ~= false,
-	}
-end
-local function normList(list)
-	local out, seen = {}, {}
-	for _, t in ipairs(type(list) == "table" and list or {}) do
-		local n = normTrack(t)
-		if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
+-- primeiro dispositivo disponível (usado quando não há dispositivo ativo)
+function Sp.firstDevice()
+	local d, e = Sp.call("GET", "/v1/me/player/devices")
+	if type(d) ~= "table" or type(d.devices) ~= "table" then return nil, e or "NODEVICE" end
+	local pick
+	for _, dv in ipairs(d.devices) do
+		if type(dv) == "table" and dv.id and not dv.is_restricted then
+			if dv.is_active then return dv.id end
+			pick = pick or dv.id
+		end
 	end
-	return out
+	if not pick then return nil, "NODEVICE" end
+	return pick
 end
-function Api.trending(limit)
-	local d, e = Http.json("/v1/tracks/trending", { limit = limit or 25 })
-	if not d then return nil, e end
-	return normList(d)
+
+---------------------------------------------------------------- Api (dados)
+local Api = { cache = {} }
+local function each(list, fn)
+	if type(list) ~= "table" then return end
+	for i = 1, 100 do
+		local x = list[i]
+		if type(x) == "table" then fn(x) end
+	end
+end
+local function spImage(images, want) -- menor imagem com pelo menos 'want' px
+	if type(images) ~= "table" then return nil end
+	local best, bw, last
+	each(images, function(im)
+		if type(im.url) == "string" then
+			last = im.url
+			local w = tonumber(im.width) or 0
+			if w >= want and (not bw or w < bw) then best, bw = im.url, w end
+		end
+	end)
+	return best or last
+end
+local function spTrack(t, art)
+	if type(t) ~= "table" or not t.id or type(t.uri) ~= "string" then return nil end
+	local names = {}
+	each(t.artists, function(a) table.insert(names, tostring(a.name or "")) end)
+	local alb = type(t.album) == "table" and t.album or {}
+	return {
+		id = tostring(t.id), uri = t.uri, title = tostring(t.name or "Sem título"),
+		artist = #names > 0 and table.concat(names, ", ") or "Desconhecido",
+		duration = (tonumber(t.duration_ms) or 0) / 1000, art = spImage(alb.images, 64) or art,
+		streamable = t.is_playable ~= false, source = "spotify",
+	}
 end
 -- Texto: normalização, similaridade e filtro (só fica o que tem a frase ou algo parecido)
 local Txt = {}
@@ -287,216 +367,108 @@ local function cached(key, fn)
 	Api.cache[key] = { t = os.clock(), v = v }
 	return v
 end
-function Api.searchTracks(text)
-	return cached("t:" .. text:lower(), function()
-		local d, e = Http.json("/v1/tracks/search", { query = text, limit = 50 })
-		if not d then return nil, e end
-		return normList(d)
-	end)
-end
-function Api.searchUsers(text)
-	return cached("u:" .. text:lower(), function()
-		local d, e = Http.json("/v1/users/search", { query = text, limit = 25 })
-		if not d then return nil, e end
-		local out = {}
-		for _, u in ipairs(type(d) == "table" and d or {}) do
-			if type(u) == "table" and u.id then
-				table.insert(out, { id = tostring(u.id), name = tostring(u.name or u.handle or "Artista"),
-					handle = tostring(u.handle or ""), followers = tonumber(u.follower_count) or 0 })
+function Api.search(text)
+	return cached("s:" .. text:lower(), function()
+		local d, e = Sp.call("GET", "/v1/search", { q = text, type = "track,artist,playlist,album", limit = 10, market = CFG.MARKET })
+		if type(d) ~= "table" then return nil, e or "INVALID" end
+		local out = { tracks = {}, artists = {}, playlists = {}, albums = {} }
+		each(type(d.tracks) == "table" and d.tracks.items, function(t)
+			local n = spTrack(t)
+			if n then table.insert(out.tracks, n) end
+		end)
+		each(type(d.artists) == "table" and d.artists.items, function(u)
+			if u.id then
+				table.insert(out.artists, { id = tostring(u.id), uri = tostring(u.uri or ""), name = tostring(u.name or "Cantor"), handle = "",
+					followers = tonumber(type(u.followers) == "table" and u.followers.total) or 0 })
 			end
-		end
-		return out
-	end)
-end
-function Api.userTracks(id)
-	if tostring(id):match("^jm[upa]%-") then return Api.jamendoTracksFor(id) end
-	local d, e = Http.json("/v1/users/" .. HttpService:UrlEncode(id) .. "/tracks", { limit = 40 })
-	if not d then return nil, e end
-	return normList(d)
-end
--- playlists e álbuns vêm do mesmo endpoint (is_album separa os dois)
-function Api.searchPlaylists(text)
-	return cached("p:" .. text:lower(), function()
-		local d, e = Http.json("/v1/playlists/search", { query = text, limit = 40 })
-		if not d then return nil, e end
-		local out = {}
-		for _, p in ipairs(type(d) == "table" and d or {}) do
-			if type(p) == "table" and p.id then table.insert(out, {
-				id = tostring(p.id), name = tostring(p.playlist_name or "Playlist"),
-				owner = type(p.user) == "table" and tostring(p.user.name or "") or "",
-				count = tonumber(p.track_count) or 0, isAlbum = p.is_album == true,
-			}) end
-		end
-		return out
-	end)
-end
-local function dzTrack(t)
-	if type(t) ~= "table" or not t.id or type(t.preview) ~= "string" or t.preview == "" then return nil end
-	local alb = type(t.album) == "table" and t.album or {}
-	return { id = "dz" .. tostring(t.id), title = tostring(t.title or "Sem título"),
-		artist = type(t.artist) == "table" and tostring(t.artist.name or "Desconhecido") or "Desconhecido",
-		duration = tonumber(t.duration) or 30, art = alb.cover_medium or alb.cover_small, streamable = true,
-		source = "deezer", preview = t.preview }
-end
-local function dzGet(path, params)
-	local parts = {}
-	for k, v in pairs(params or {}) do
-		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
-	end
-	local url = "https://api.deezer.com" .. path .. (#parts > 0 and ("?" .. table.concat(parts, "&")) or "")
-	local res, err = Http.raw(url, false)
-	if not res then return nil, err end
-	if (res.StatusCode or 0) ~= 200 then return nil, "HTTP_" .. tostring(res.StatusCode) end
-	local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
-	if not ok or type(data) ~= "table" or data.error then return nil, "INVALID" end
-	return data
-end
-function Api.searchDeezer(text)
-	return cached("d:" .. text:lower(), function()
-		local d, e = dzGet("/search", { q = text, limit = 50 })
-		if not d then return nil, e end
-		local out, seen = {}, {}
-		for _, t in ipairs(type(d.data) == "table" and d.data or {}) do
-			local n = dzTrack(t)
-			if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
-		end
-		return out
-	end)
-end
-function Api.deezerPreview(id)
-	local d = dzGet("/track/" .. HttpService:UrlEncode((tostring(id):gsub("^dz", ""))), {})
-	if d and type(d.preview) == "string" and d.preview ~= "" then return d.preview end
-	return nil
-end
--- Jamendo (músicas completas, licença Creative Commons)
-local function jmTrack(t)
-	if type(t) ~= "table" or not t.id then return nil end
-	return { id = "jm" .. tostring(t.id), title = tostring(t.name or "Sem título"),
-		artist = tostring(t.artist_name or "Desconhecido"), duration = tonumber(t.duration) or 0,
-		art = (type(t.image) == "string" and t.image ~= "" and t.image) or (type(t.album_image) == "string" and t.album_image ~= "" and t.album_image) or nil,
-		streamable = true, source = "jamendo", audio = type(t.audio) == "string" and t.audio or "" }
-end
-local function jmGet(endpoint, params)
-	if not CFG.USE_JAMENDO then return nil, "INVALID" end
-	local parts = { "client_id=" .. CFG.JAMENDO_ID, "format=json", "audioformat=mp32", "imagesize=200" }
-	for k, v in pairs(params or {}) do
-		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
-	end
-	local res, err = Http.raw("https://api.jamendo.com/v3.0/" .. endpoint .. "?" .. table.concat(parts, "&"), false)
-	if not res then return nil, err end
-	local code = res.StatusCode or 0
-	if code == 429 then return nil, "RATE" end
-	if code >= 500 then return nil, "SERVER" end
-	if code < 200 or code >= 300 then return nil, "HTTP_" .. tostring(code) end
-	local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
-	if not ok or type(data) ~= "table" or type(data.results) ~= "table" then return nil, "INVALID" end
-	if type(data.headers) == "table" and data.headers.status == "failed" then return nil, "AUTH" end
-	return data.results
-end
-local function jmList(d)
-	local out, seen = {}, {}
-	for _, t in ipairs(d) do
-		local n = jmTrack(t)
-		if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
-	end
-	return out
-end
-function Api.searchJamendo(text)
-	return cached("j:" .. text:lower(), function()
-		local d, e = jmGet("tracks/", { search = text, limit = 50, order = "relevance" })
-		if not d then return nil, e end
-		return jmList(d)
-	end)
-end
-function Api.jamendoPopular(limit)
-	local d, e = jmGet("tracks/", { limit = limit or 15, order = "popularity_week" })
-	if not d then return nil, e end
-	return jmList(d)
-end
-function Api.jamendoUrl(id) -- link de áudio novo (o antigo pode expirar)
-	local d = jmGet("tracks/", { id = (tostring(id):gsub("^jm", "")), limit = 1 })
-	local t = d and d[1] and jmTrack(d[1])
-	return t and t.audio or nil
-end
-function Api.searchJamendoArtists(text)
-	return cached("ju:" .. text:lower(), function()
-		local d, e = jmGet("artists/", { namesearch = text, limit = 25 })
-		if not d then return nil, e end
-		local out = {}
-		for _, u in ipairs(d) do
-			if type(u) == "table" and u.id then
-				table.insert(out, { id = "jmu-" .. tostring(u.id), name = tostring(u.name or "Artista"), handle = "", followers = 0, source = "jamendo" })
+		end)
+		each(type(d.playlists) == "table" and d.playlists.items, function(x)
+			if x.id then
+				local cnt = (type(x.tracks) == "table" and tonumber(x.tracks.total)) or (type(x.items) == "table" and tonumber(x.items.total)) or 0
+				table.insert(out.playlists, { id = tostring(x.id), uri = tostring(x.uri or ""), name = tostring(x.name or "Playlist"),
+					owner = type(x.owner) == "table" and tostring(x.owner.display_name or "") or "", count = cnt, isAlbum = false, art = spImage(x.images, 64) })
 			end
-		end
-		return out
-	end)
-end
-function Api.searchJamendoPlaylists(text)
-	return cached("jp:" .. text:lower(), function()
-		local d, e = jmGet("playlists/", { namesearch = text, limit = 25 })
-		if not d then return nil, e end
-		local out = {}
-		for _, x in ipairs(d) do
-			if type(x) == "table" and x.id then
-				table.insert(out, { id = "jmp-" .. tostring(x.id), name = tostring(x.name or "Playlist"), owner = tostring(x.user_name or ""), count = 0, isAlbum = false, source = "jamendo" })
+		end)
+		each(type(d.albums) == "table" and d.albums.items, function(x)
+			if x.id then
+				local first = type(x.artists) == "table" and type(x.artists[1]) == "table" and x.artists[1] or {}
+				table.insert(out.albums, { id = tostring(x.id), uri = tostring(x.uri or ""), name = tostring(x.name or "Álbum"),
+					owner = tostring(first.name or ""), count = tonumber(x.total_tracks) or 0, isAlbum = true, art = spImage(x.images, 64) })
 			end
-		end
+		end)
 		return out
 	end)
-end
-function Api.searchJamendoAlbums(text)
-	return cached("ja:" .. text:lower(), function()
-		local d, e = jmGet("albums/", { namesearch = text, limit = 25 })
-		if not d then return nil, e end
-		local out = {}
-		for _, x in ipairs(d) do
-			if type(x) == "table" and x.id then
-				table.insert(out, { id = "jma-" .. tostring(x.id), name = tostring(x.name or "Álbum"), owner = tostring(x.artist_name or ""), count = 0, isAlbum = true, source = "jamendo" })
-			end
-		end
-		return out
-	end)
-end
--- faixas de um cantor (jmu-), álbum (jma-) ou playlist (jmp-) do Jamendo
-function Api.jamendoTracksFor(id)
-	local kind, num = tostring(id):match("^jm([upa])%-(%d+)$")
-	if not kind then return nil, "INVALID" end
-	if kind == "u" then
-		local d, e = jmGet("tracks/", { artist_id = num, limit = 50, order = "popularity_total" })
-		if not d then return nil, e end
-		return jmList(d)
-	elseif kind == "a" then
-		local d, e = jmGet("tracks/", { album_id = num, limit = 100 })
-		if not d then return nil, e end
-		return jmList(d)
-	end
-	local d, e = jmGet("playlists/tracks/", { id = num })
-	if not d then return nil, e end
-	local first = d[1]
-	return jmList(type(first) == "table" and type(first.tracks) == "table" and first.tracks or {})
-end
--- mistura duas listas alternando os itens (Audius, Jamendo, Audius, Jamendo...)
-function Api.interleave(a, b)
-	local out, seen = {}, {}
-	a, b = a or {}, b or {}
-	for i = 1, math.max(#a, #b) do
-		for _, t in ipairs({ a[i], b[i] }) do
-			if t and not seen[t.id] then seen[t.id] = true; table.insert(out, t) end
-		end
-	end
-	return out
-end
-function Api.playlistTracks(id)
-	if tostring(id):match("^jm[upa]%-") then return Api.jamendoTracksFor(id) end
-	local d, e = Http.json("/v1/playlists/" .. HttpService:UrlEncode(id) .. "/tracks", {})
-	if not d then return nil, e end
-	return normList(d)
-end
-function Api.streamUrl(id)
-	return CFG.API_HOST .. "/v1/tracks/" .. HttpService:UrlEncode(id) .. "/stream?" .. q({})
 end
 
----------------------------------------------------------------- Audio (download -> arquivo local -> asset)
+-- Início: mais tocadas da sua conta (ou tocadas recentemente)
+function Api.home()
+	local out = {}
+	local d, e = Sp.call("GET", "/v1/me/top/tracks", { limit = 20, time_range = "short_term" })
+	if type(d) == "table" then
+		each(d.items, function(t) local n = spTrack(t); if n then table.insert(out, n) end end)
+	end
+	if #out == 0 then
+		local r, e2 = Sp.call("GET", "/v1/me/player/recently-played", { limit = 20 })
+		if type(r) == "table" then
+			local seen = {}
+			each(r.items, function(it)
+				local n = spTrack(it.track)
+				if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
+			end)
+		else
+			e = e or e2
+		end
+	end
+	if #out == 0 and e then return nil, e end
+	return out
+end
+
+function Api.artistTracks(u)
+	local out = {}
+	local d, e = Sp.call("GET", "/v1/artists/" .. HttpService:UrlEncode(u.id) .. "/top-tracks", { market = CFG.MARKET })
+	if type(d) == "table" then
+		each(d.tracks, function(t) local n = spTrack(t); if n then table.insert(out, n) end end)
+		if #out > 0 then return out end
+	end
+	-- top-tracks é bloqueado em apps novos: usa a busca pelo nome do cantor
+	local r, e2 = Sp.call("GET", "/v1/search", { q = "artist:\"" .. u.name .. "\"", type = "track", limit = 10, market = CFG.MARKET })
+	if type(r) ~= "table" then return nil, e2 or e end
+	each(type(r.tracks) == "table" and r.tracks.items, function(t)
+		local mine = false
+		each(t.artists, function(a) if a.id == u.id then mine = true end end)
+		if mine then local n = spTrack(t); if n then table.insert(out, n) end end
+	end)
+	return out
+end
+
+function Api.playlistTracks(pl)
+	local base = "/v1/playlists/" .. HttpService:UrlEncode(pl.id)
+	local d, e = Sp.call("GET", base .. "/items", { limit = 50, market = CFG.MARKET })
+	if type(d) ~= "table" then d, e = Sp.call("GET", base .. "/tracks", { limit = 50, market = CFG.MARKET }) end
+	if type(d) ~= "table" then return nil, e end
+	local out = {}
+	each(d.items, function(it)
+		local t = it.item or it.track
+		if type(t) == "table" and t.type ~= "episode" then
+			local n = spTrack(t)
+			if n then table.insert(out, n) end
+		end
+	end)
+	return out
+end
+
+function Api.albumTracks(al)
+	local d, e = Sp.call("GET", "/v1/albums/" .. HttpService:UrlEncode(al.id) .. "/tracks", { limit = 50, market = CFG.MARKET })
+	if type(d) ~= "table" then return nil, e end
+	local out = {}
+	each(d.items, function(t)
+		local n = spTrack(t, al.art)
+		if n then table.insert(out, n) end
+	end)
+	return out
+end
+
+---------------------------------------------------------------- Audio (somente download das capas)
 local Audio = {}
 local getAsset = (type(getcustomasset) == "function" and getcustomasset) or (type(getsynasset) == "function" and getsynasset) or nil
 Audio.supported = type(writefile) == "function" and getAsset ~= nil
@@ -510,7 +482,7 @@ local function ensureFolders()
 end
 
 function Audio.download(url, path, validator)
-	local res, err = Http.raw(url, false) -- sem Bearer: o stream redireciona para nós de conteúdo
+	local res, err = Http.raw(url)
 	if not res then return nil, err end
 	if res.StatusCode == 401 or res.StatusCode == 403 then return nil, "AUTH" end
 	if res.StatusCode == 429 then return nil, "RATE" end
@@ -522,44 +494,6 @@ function Audio.download(url, path, validator)
 	local ok = pcall(writefile, path, body)
 	if not ok then return nil, "NOAUDIO" end
 	return true
-end
-
-local function looksLikeAudio(b)
-	local h3 = b:sub(1, 3)
-	return h3 == "ID3" or b:byte(1) == 0xFF or b:sub(1, 4) == "OggS" or b:sub(5, 8) == "ftyp"
-end
-
-function Audio.fetch(track)
-	if not Audio.supported then return nil, "NOAUDIO" end
-	ensureFolders()
-	local path = ("%s/cache/%s.mp3"):format(CFG.FOLDER, track.id)
-	if not (type(isfile) == "function" and fsOk(isfile, path)) then
-		local ok, err
-		if track.source == "jamendo" then
-			ok, err = Audio.download(track.audio or "", path, looksLikeAudio)
-			if not ok then
-				local fresh = Api.jamendoUrl(track.id)
-				if fresh then ok, err = Audio.download(fresh, path, looksLikeAudio) end
-			end
-		elseif track.source == "deezer" then
-			ok, err = Audio.download(track.preview or "", path, looksLikeAudio)
-			if not ok then
-				local fresh = Api.deezerPreview(track.id) -- link da prévia expira: pega um novo
-				if fresh then ok, err = Audio.download(fresh, path, looksLikeAudio) end
-			end
-		else
-			ok, err = Audio.download(Api.streamUrl(track.id), path, looksLikeAudio)
-		end
-		if not ok then return nil, err end
-		table.insert(Audio.order, path)
-		while #Audio.order > CFG.CACHE_LIMIT do
-			local old = table.remove(Audio.order, 1)
-			if type(delfile) == "function" then pcall(delfile, old) end
-		end
-	end
-	local ok, asset = pcall(getAsset, path)
-	if not ok or not asset then return nil, "LOADFAIL" end
-	return asset
 end
 
 ---------------------------------------------------------------- Img (capas)
@@ -598,6 +532,16 @@ function Store.load()
 		Store.data.playlists = type(d.playlists) == "table" and d.playlists or {}
 		Store.data.recent = type(d.recent) == "table" and d.recent or {}
 		Store.data.volume = tonumber(d.volume) or 0.7
+		local function keep(list)
+			local o = {}
+			for _, t in ipairs(type(list) == "table" and list or {}) do
+				if type(t) == "table" and t.uri then table.insert(o, t) end
+			end
+			return o
+		end
+		Store.data.fav = keep(Store.data.fav)
+		Store.data.recent = keep(Store.data.recent)
+		for _, pl in ipairs(Store.data.playlists) do if type(pl) == "table" then pl.tracks = keep(pl.tracks) end end
 	end
 end
 function Store.save()
@@ -633,17 +577,36 @@ function Store.playlistAdd(p, track)
 	table.insert(p.tracks, track); Store.save(); Bus.fire("playlists"); return true
 end
 
----------------------------------------------------------------- Player
-local Player = { state = "IDLE", queue = {}, index = 0, shuffle = false, repeatMode = 0, token = 0, msg = "" }
-local sound = Maid.add(new("Sound", { Name = "AngelMusicSound", Volume = 0.7, Parent = SoundService }))
+---------------------------------------------------------------- Player (controle remoto do Spotify)
+local Player = { state = "IDLE", queue = {}, index = 0, base = 1, shuffle = false, repeatMode = 0, token = 0, msg = "",
+	pos = 0, len = 0, playing = false, stamp = 0, hold = 0, volHold = 0, modeHold = 0, curUri = "", cleared = false, alive = true }
+Maid.add(function() Player.alive = false end)
+local REPEAT = { [0] = "off", [1] = "context", [2] = "track" }
 
 function Player.setState(s, msg)
 	Player.state, Player.msg = s, msg or ""
 	Bus.fire("state")
 end
 function Player.current() return Player.queue[Player.index] end
-function Player.setVolume(v)
-	v = math.clamp(v, 0, 1); sound.Volume = v; Store.data.volume = v; Store.save(); Bus.fire("volume")
+function Player.position()
+	local p = Player.pos
+	if Player.playing then p += os.clock() - Player.stamp end
+	if Player.len > 0 then p = math.min(p, Player.len) end
+	return p
+end
+local function fail(err) Player.setState("ERROR", errText(err)) end
+
+-- PUT /play; se não há dispositivo ativo, ativa o primeiro disponível e tenta de novo
+local function sendPlay(body)
+	local ok, err = Sp.call("PUT", "/v1/me/player/play", nil, body)
+	if not ok and err == "NODEVICE" then
+		local id = Sp.firstDevice()
+		if id then ok, err = Sp.call("PUT", "/v1/me/player/play", { device_id = id }, body) end
+	end
+	return ok, err
+end
+function Player.pollSoon(d)
+	task.delay(d or 0.8, function() if Player.alive then pcall(Player.poll) end end)
 end
 
 function Player.playQueue(list, start)
@@ -654,104 +617,237 @@ function Player.playQueue(list, start)
 		Player.playIndex(Player.shuffle and start == nil and math.random(#Player.queue) or (start or 1))
 	end
 end
-function Player.enqueue(track)
-	table.insert(Player.queue, track); Bus.fire("queue")
-	if Player.state == "IDLE" and Player.index == 0 then Player.playIndex(#Player.queue) end
-end
-function Player.removeAt(i)
-	table.remove(Player.queue, i)
-	if i < Player.index then Player.index -= 1
-	elseif i == Player.index then
-		sound:Stop(); Player.token += 1; Player.index = math.min(Player.index, #Player.queue)
-		Player.setState("IDLE")
-		if Player.index > 0 then Player.playIndex(Player.index) end
-	end
-	Bus.fire("queue")
-end
-function Player.clear()
-	Player.token += 1; sound:Stop(); sound.SoundId = ""
-	Player.queue, Player.index = {}, 0
-	Player.setState("IDLE"); Bus.fire("queue")
-end
-
-function Player.playIndex(i)
+function Player.playIndex(i, posMs)
 	local track = Player.queue[i]
 	if not track then return end
 	Player.token += 1
 	local my = Player.token
+	local wasPaused = posMs ~= nil and Player.state == "PAUSED"
 	Player.index = i
-	sound:Stop()
+	Player.cleared = false
 	Bus.fire("queue"); Bus.fire("track")
-	if track.streamable == false then Player.setState("ERROR", errText("UNAVAILABLE")) return end
+	if track.streamable == false then fail("UNAVAILABLE") return end
 	Player.setState("LOADING")
 	task.spawn(function()
-		local asset, err = Audio.fetch(track)
-		if my ~= Player.token then return end
-		if not asset then Player.setState("ERROR", errText(err)) return end
-		sound.SoundId = asset
-		local t0 = os.clock()
-		while not sound.IsLoaded and os.clock() - t0 < 10 do task.wait(0.1) end
-		if my ~= Player.token then return end
-		if not sound.IsLoaded then Player.setState("ERROR", errText("LOADFAIL")) return end
-		sound.TimePosition = 0
-		sound:Play()
-		-- Só vira PLAYING quando o áudio realmente avança
-		t0 = os.clock()
-		while os.clock() - t0 < 6 do
-			if my ~= Player.token then return end
-			if sound.IsPlaying and sound.TimePosition > 0.05 then
-				Store.addRecent(track); Player.setState("PLAYING") return
-			end
-			task.wait(0.1)
+		local n = #Player.queue
+		local base = n <= 100 and 1 or i
+		local uris = {}
+		for j = base, math.min(n, base + 99) do
+			local t = Player.queue[j]
+			if t and t.uri then table.insert(uris, t.uri) end
 		end
-		sound:Stop()
-		Player.setState("ERROR", errText("NOSTART"))
+		local body = { uris = uris, offset = { position = i - base } }
+		if posMs then body.position_ms = posMs end
+		local ok, err = sendPlay(body)
+		if my ~= Player.token then return end
+		if not ok then fail(err) return end
+		Player.base, Player.curUri = base, track.uri
+		Player.pos, Player.len, Player.playing, Player.stamp = (posMs or 0) / 1000, track.duration, true, os.clock()
+		Player.hold = os.clock() + 1.2
+		Store.addRecent(track)
+		Player.setState("PLAYING")
+		Sp.call("PUT", "/v1/me/player/shuffle", { state = tostring(Player.shuffle) })
+		Sp.call("PUT", "/v1/me/player/repeat", { state = REPEAT[Player.repeatMode] })
+		if wasPaused then
+			Sp.call("PUT", "/v1/me/player/pause")
+			Player.playing = false; Player.setState("PAUSED")
+		end
+		Player.pollSoon(1.3)
 	end)
+end
+-- toca uma playlist/álbum/cantor inteiro direto no Spotify (quando não dá para listar as faixas)
+function Player.playContext(uri)
+	if type(uri) ~= "string" or uri == "" then return end
+	Player.token += 1
+	local my = Player.token
+	Player.cleared = false
+	Player.setState("LOADING")
+	task.spawn(function()
+		local ok, err = sendPlay({ context_uri = uri })
+		if my ~= Player.token then return end
+		if not ok then fail(err) return end
+		Player.playing, Player.stamp = true, os.clock()
+		Player.setState("PLAYING")
+		Player.pollSoon(0.9)
+	end)
+end
+function Player.enqueue(track)
+	if not track or not track.uri then return end
+	table.insert(Player.queue, track); Bus.fire("queue")
+	if Player.state == "IDLE" and Player.index == 0 then Player.playIndex(#Player.queue) return end
+	task.spawn(function()
+		local ok, err = Sp.call("POST", "/v1/me/player/queue", { uri = track.uri })
+		if not ok then Bus.fire("toast", errText(err), true) end
+	end)
+end
+function Player.removeAt(i)
+	if not Player.queue[i] then return end
+	local cur = Player.index
+	table.remove(Player.queue, i)
+	if i < cur then
+		Player.index = cur - 1; Bus.fire("queue")
+	elseif i == cur then
+		if #Player.queue == 0 then Player.clear() return end
+		Player.playIndex(math.min(i, #Player.queue))
+	else
+		Bus.fire("queue")
+		if Player.state ~= "LOADING" then Player.playIndex(Player.index, math.floor(Player.position() * 1000)) end
+	end
+end
+function Player.clear()
+	Player.token += 1
+	Player.queue, Player.index, Player.curUri, Player.playing, Player.cleared = {}, 0, "", false, true
+	Player.setState("IDLE"); Bus.fire("queue")
+	task.spawn(function() Sp.call("PUT", "/v1/me/player/pause") end)
 end
 
 function Player.toggle()
 	local s = Player.state
-	if s == "PLAYING" then sound:Pause(); Player.setState("PAUSED")
-	elseif s == "PAUSED" then
-		sound:Resume()
-		local my = Player.token
+	if s == "PLAYING" then
+		Player.pos = Player.position(); Player.playing = false; Player.hold = os.clock() + 1.2
+		Player.setState("PAUSED")
 		task.spawn(function()
-			task.wait(0.4)
-			if my == Player.token and Player.state == "PAUSED" then
-				if sound.IsPlaying then Player.setState("PLAYING") else Player.setState("ERROR", errText("NOSTART")) end
-			end
+			local ok, err = Sp.call("PUT", "/v1/me/player/pause")
+			if not ok and err ~= "FORBIDDEN" then fail(err) end
+			Player.pollSoon(1.3)
 		end)
-	elseif s ~= "LOADING" and #Player.queue > 0 then
-		Player.playIndex(Player.index > 0 and Player.index or 1)
+	elseif s == "PAUSED" then
+		Player.playing, Player.stamp, Player.hold = true, os.clock(), os.clock() + 1.2
+		Player.setState("PLAYING")
+		task.spawn(function()
+			local ok, err = sendPlay(nil)
+			if not ok and err ~= "FORBIDDEN" then fail(err) end
+			Player.pollSoon(1.3)
+		end)
+	elseif s ~= "LOADING" then
+		if #Player.queue > 0 then
+			Player.playIndex(Player.index > 0 and Player.index or 1)
+		else
+			task.spawn(function()
+				local ok, err = sendPlay(nil)
+				if not ok then fail(err) else Player.pollSoon(0.8) end
+			end)
+		end
 	end
 end
-function Player.next(auto)
-	local n = #Player.queue
-	if n == 0 then return end
-	if auto and Player.repeatMode == 2 then Player.playIndex(Player.index) return end
-	if Player.shuffle and n > 1 then
-		local j = Player.index
-		while j == Player.index do j = math.random(n) end
-		Player.playIndex(j) return
-	end
-	if Player.index < n then Player.playIndex(Player.index + 1)
-	elseif Player.repeatMode == 1 or not auto then Player.playIndex(1)
-	else Player.setState("FINISHED") end
+local function skip(dir)
+	task.spawn(function()
+		local path = "/v1/me/player/" .. dir
+		local ok, err = Sp.call("POST", path)
+		if not ok and err == "NODEVICE" then
+			local id = Sp.firstDevice()
+			if id then ok, err = Sp.call("POST", path, { device_id = id }) end
+		end
+		if not ok then
+			if err ~= "FORBIDDEN" then fail(err) end
+			return
+		end
+		Player.cleared = false
+		Player.pollSoon(0.7)
+	end)
+end
+function Player.next() skip("next") end
+function Player.seekTo(sec)
+	sec = math.max(0, sec)
+	Player.pos, Player.stamp, Player.hold = sec, os.clock(), os.clock() + 1.5
+	Player.seekTok = (Player.seekTok or 0) + 1
+	local my = Player.seekTok
+	task.delay(0.25, function() -- só envia quando o dedo para de arrastar
+		if my ~= Player.seekTok then return end
+		local ok, err = Sp.call("PUT", "/v1/me/player/seek", { position_ms = math.floor(sec * 1000) })
+		if not ok and err ~= "FORBIDDEN" then fail(err) end
+		Player.pollSoon(1.0)
+	end)
 end
 function Player.prev()
-	if #Player.queue == 0 then return end
-	if sound.TimePosition > 3 then sound.TimePosition = 0 return end
-	Player.playIndex(Player.index > 1 and Player.index - 1 or (Player.repeatMode == 1 and #Player.queue or 1))
+	if Player.position() > 3 then Player.seekTo(0) return end
+	skip("previous")
 end
 function Player.seek(r)
-	if sound.IsLoaded and sound.TimeLength > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
-		sound.TimePosition = math.clamp(r, 0, 1) * sound.TimeLength
+	if Player.len > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
+		Player.seekTo(math.clamp(r, 0, 1) * Player.len)
 	end
 end
-Maid.add(sound.Ended:Connect(function()
-	if Player.state == "PLAYING" then Player.next(true) end
-end))
-Maid.add(sound.Paused:Connect(function() if Player.state == "PLAYING" then Player.setState("PAUSED") end end))
+function Player.setShuffle(v)
+	Player.shuffle = v; Player.modeHold = os.clock() + 2; Bus.fire("mode")
+	task.spawn(function() Sp.call("PUT", "/v1/me/player/shuffle", { state = tostring(v) }) end)
+end
+function Player.cycleRepeat()
+	Player.repeatMode = (Player.repeatMode + 1) % 3; Player.modeHold = os.clock() + 2; Bus.fire("mode")
+	local mode = Player.repeatMode
+	task.spawn(function() Sp.call("PUT", "/v1/me/player/repeat", { state = REPEAT[mode] }) end)
+end
+function Player.setVolume(v)
+	v = math.clamp(v, 0, 1)
+	Store.data.volume = v; Store.save(); Bus.fire("volume")
+	Player.volHold = os.clock() + 4
+	Player.volTok = (Player.volTok or 0) + 1
+	local my = Player.volTok
+	task.delay(0.3, function()
+		if my ~= Player.volTok then return end
+		local ok, err = Sp.call("PUT", "/v1/me/player/volume", { volume_percent = math.floor(v * 100 + 0.5) })
+		if not ok and err == "NOVOLUME" then Bus.fire("toast", "Este aparelho não aceita volume pelo app.", true)
+		elseif not ok and err ~= "FORBIDDEN" then Bus.fire("toast", errText(err), true) end
+	end)
+end
+
+-- lê o estado real do Spotify (faixa, tempo, play/pausa, aleatório, repetir, volume)
+local function matchQueue(uri)
+	local q = Player.queue
+	for j = Player.base, #q do if q[j] and q[j].uri == uri then return j end end
+	for j = 1, #q do if q[j] and q[j].uri == uri then return j end end
+end
+function Player.poll()
+	local d, e = Sp.call("GET", "/v1/me/player", { additional_types = "track,episode" })
+	if os.clock() < Player.hold then return end
+	if d == nil then
+		if (e == "TOKEN" or e == "SCOPE") and Player.lastErr ~= e then
+			Player.lastErr = e; Bus.fire("toast", errText(e), true)
+		end
+		return
+	end
+	Player.lastErr = nil
+	if d == true or type(d.item) ~= "table" then
+		if Player.state == "PLAYING" or Player.state == "PAUSED" then Player.playing = false; Player.setState("IDLE") end
+		return
+	end
+	if Player.cleared then
+		if d.is_playing == true then Player.cleared = false else return end
+	end
+	local item = d.item
+	local tr = spTrack(item)
+	if not tr and item.type == "episode" and item.id then
+		tr = { id = tostring(item.id), uri = tostring(item.uri), title = tostring(item.name or "Episódio"),
+			artist = type(item.show) == "table" and tostring(item.show.name or "Podcast") or "Podcast",
+			duration = (tonumber(item.duration_ms) or 0) / 1000, art = spImage(item.images, 64), streamable = true, source = "spotify" }
+	end
+	if not tr then return end
+	if tr.uri ~= Player.curUri then
+		Player.curUri = tr.uri
+		local j = matchQueue(tr.uri)
+		if j then Player.index = j else Player.queue, Player.index, Player.base = { tr }, 1, 1 end
+		Bus.fire("queue"); Bus.fire("track")
+		Store.addRecent(Player.queue[Player.index])
+	end
+	Player.len = (tonumber(item.duration_ms) or 0) / 1000
+	Player.pos = (tonumber(d.progress_ms) or 0) / 1000
+	Player.playing = d.is_playing == true
+	Player.stamp = os.clock()
+	local st = Player.playing and "PLAYING" or "PAUSED"
+	if Player.state ~= st then Player.setState(st) end
+	if os.clock() > Player.modeHold then
+		local sh = d.shuffle_state == true
+		local rm = d.repeat_state == "track" and 2 or (d.repeat_state == "context" and 1 or 0)
+		if sh ~= Player.shuffle or rm ~= Player.repeatMode then Player.shuffle, Player.repeatMode = sh, rm; Bus.fire("mode") end
+	end
+	if type(d.device) == "table" then
+		Player.device = d.device.name
+		local vp = tonumber(d.device.volume_percent)
+		if vp and os.clock() > Player.volHold and math.abs(vp / 100 - Store.data.volume) > 0.02 then
+			Store.data.volume = vp / 100; Bus.fire("volume")
+		end
+	end
+end
 
 ---------------------------------------------------------------- UI base
 local function getContainer()
@@ -916,6 +1012,8 @@ function Toast(msg, isErr)
 	end)
 end
 
+Bus.on("toast", function(m, bad) Toast(m, bad) end)
+
 ---------------------------------------------------------------- Janela (pequena + redimensionável)
 local PH = CFG.PLAYER_H
 local winW = cl(CFG.WIN_W, 200, viewport().X - 12)
@@ -1079,7 +1177,7 @@ local function trackRow(parent, track, ctx)
 	local bw = 56
 	label({ Text = track.title, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = isCur and C.aqua or C.white,
 		Size = UDim2.new(1, -(45 + bw + 4), 0, 16), Position = UDim2.fromOffset(45, 5), TextTransparency = track.streamable and 0 or 0.5, Parent = row })
-	label({ Text = track.artist .. "  ·  " .. (track.source == "deezer" and "PRÉVIA 30s" or (fmt(track.duration) .. (track.source == "jamendo" and "  ·  Jamendo" or ""))) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 9,
+	label({ Text = track.artist .. "  ·  " .. fmt(track.duration) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 9,
 		TextColor3 = C.gray, Size = UDim2.new(1, -(45 + bw + 4), 0, 13), Position = UDim2.fromOffset(45, 23), Parent = row })
 	local hit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -(bw + 4), 1, 0), Parent = row })
 	tap(hit, ctx.play)
@@ -1135,20 +1233,15 @@ local function listPage(name, title, actions)
 	return p
 end
 
--- INÍCIO (trending real da Audius)
+-- INÍCIO (mais tocadas da sua conta Spotify)
 do
-	local p = listPage("Início", "Em alta (Audius + Jamendo)", { { "Atualizar", function() Pages["Início"].load(true) end, 58 },
+	local p = listPage("Início", "Suas mais tocadas", { { "Atualizar", function() Pages["Início"].load(true) end, 58 },
 		{ "Tocar tudo", function() if Pages["Início"].tracks and #Pages["Início"].tracks > 0 then Player.playQueue(Pages["Início"].tracks, 1) end end, 64 } })
 	function p.load(force)
 		if p.tracks and not force then return end
 		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
 		task.spawn(function()
-			local jm, jmDone
-			task.spawn(function() jm = Api.jamendoPopular(15); jmDone = true end)
-			local list, err = Api.trending(25)
-			local t0 = os.clock()
-			while not jmDone and os.clock() - t0 < 15 do task.wait(0.05) end
-			if jm then list = Api.interleave(list, jm) end
+			local list, err = Api.home()
 			if not p.scroll.Parent then return end
 			clearList(p.scroll)
 			if not list then infoLabel(p.scroll, errText(err), C.red) return end
@@ -1202,7 +1295,7 @@ do
 	end
 
 	-- abre uma lista de faixas (playlist, álbum ou músicas de um cantor)
-	local function showTracksView(fetch)
+	local function showTracksView(fetch, ctxUri)
 		token += 1; local my = token
 		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
 		task.spawn(function()
@@ -1213,7 +1306,7 @@ do
 				{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }) })
 			button({ Text = "← Resultados", Size = UDim2.fromOffset(86, 26), TextSize = 10, Radius = 13, Parent = bar }, function() renderResults() end)
 			button({ Text = "Tocar tudo", Size = UDim2.fromOffset(76, 26), TextSize = 10, Radius = 13, Parent = bar },
-				function() if tr and #tr > 0 then Player.playQueue(tr, 1) end end)
+				function() if tr and #tr > 0 then Player.playQueue(tr, 1) elseif ctxUri and ctxUri ~= "" then Player.playContext(ctxUri) end end)
 			if not tr then infoLabel(p.scroll, errText(err), C.red) return end
 			if #tr == 0 then infoLabel(p.scroll, "Nada por aqui.") return end
 			renderTracks(p.scroll, tr, { baseOrder = 1 })
@@ -1240,12 +1333,6 @@ do
 				if all then sectionTitle("Músicas", 0) end
 				renderTracks(p.scroll, list, { baseOrder = 1 })
 			end
-			local dzl = slice(res.dz or {}, all and 6 or 1000)
-			if #dzl > 0 then
-				shown += #dzl
-				sectionTitle("Prévias 30s (Deezer)", 500)
-				renderTracks(p.scroll, dzl, { baseOrder = 500 })
-			end
 		end
 		if all or mode == "Cantores" then
 			local list = slice(res.artists, all and 3 or 1000)
@@ -1253,8 +1340,8 @@ do
 				shown += #list
 				sectionTitle("Cantores", 1000)
 				for i, u in ipairs(list) do
-					infoRow(1000 + i, u.name, (u.source == "jamendo" and "Jamendo" or ((u.handle ~= "" and ("@" .. u.handle .. " · ") or "") .. fmtNum(u.followers) .. " seguidores")), "Abrir",
-						function() showTracksView(function() return Api.userTracks(u.id) end) end)
+					infoRow(1000 + i, u.name, (u.followers > 0 and (fmtNum(u.followers) .. " seguidores") or "Cantor"), "Abrir",
+						function() showTracksView(function() return Api.artistTracks(u) end, u.uri) end)
 				end
 			end
 		end
@@ -1264,8 +1351,8 @@ do
 				shown += #list
 				sectionTitle("Playlists", 2000)
 				for i, pl in ipairs(list) do
-					infoRow(2000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.source == "jamendo" and "Jamendo" or (pl.count .. " faixas")), "Abrir",
-						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
+					infoRow(2000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.count > 0 and (pl.count .. " faixas") or (pl.isAlbum and "Álbum" or "Playlist")), "Abrir",
+						function() showTracksView(function() return Api.playlistTracks(pl) end, pl.uri) end)
 				end
 			end
 		end
@@ -1275,8 +1362,8 @@ do
 				shown += #list
 				sectionTitle("Álbuns", 3000)
 				for i, pl in ipairs(list) do
-					infoRow(3000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.source == "jamendo" and "Jamendo" or (pl.count .. " faixas")), "Abrir",
-						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
+					infoRow(3000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.count > 0 and (pl.count .. " faixas") or (pl.isAlbum and "Álbum" or "Playlist")), "Abrir",
+						function() showTracksView(function() return Api.albumTracks(pl) end, pl.uri) end)
 				end
 			end
 		end
@@ -1290,41 +1377,17 @@ do
 		clearList(p.scroll); infoLabel(p.scroll, "Buscando…")
 		go.Text = "…"
 		task.spawn(function()
-			local out, errs, pending = {}, {}, 8
-			local function job(key, fn)
-				task.spawn(function()
-					local v, e = fn()
-					out[key], errs[key] = v, e
-					pending -= 1
-				end)
-			end
-			job("tracks", function() return Api.searchTracks(text) end)
-			job("users", function() return Api.searchUsers(text) end)
-			job("pls", function() return Api.searchPlaylists(text) end)
-			job("dz", function() return Api.searchDeezer(text) end)
-			job("jm", function() return Api.searchJamendo(text) end)
-			job("jmu", function() return Api.searchJamendoArtists(text) end)
-			job("jmp", function() return Api.searchJamendoPlaylists(text) end)
-			job("jma", function() return Api.searchJamendoAlbums(text) end)
-			local t0 = os.clock()
-			while pending > 0 and os.clock() - t0 < 25 do task.wait(0.05) end
+			local data, err = Api.search(text)
 			if my ~= token then return end -- resposta antiga ignorada
 			go.Text = "Buscar"
-			if not out.tracks and not out.users and not out.pls and not out.dz and not out.jm and not out.jmu and not out.jmp and not out.jma then
-				clearList(p.scroll); infoLabel(p.scroll, errText(errs.tracks or errs.users or errs.pls or errs.dz or errs.jm or errs.jmu or "NETWORK"), C.red) return
-			end
+			if not data then clearList(p.scroll); infoLabel(p.scroll, errText(err or "NETWORK"), C.red) return end
 			-- pesquisa afiada: só fica o que contém a frase (ou algo bem parecido)
-			local albums, pls = {}, {}
-			for _, x in ipairs(out.pls or {}) do table.insert(x.isAlbum and albums or pls, x) end
-			for _, x in ipairs(out.jmp or {}) do table.insert(pls, x) end
-			for _, x in ipairs(out.jma or {}) do table.insert(albums, x) end
 			res = {
 				q = text,
-				tracks = Txt.filter(Api.interleave(out.tracks, out.jm), text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
-				dz = Txt.filter(out.dz, text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
-				artists = Txt.filter(Api.interleave(out.users, out.jmu), text, function(u) return u.name .. " " .. u.handle end, function(u) return u.name end),
-				playlists = Txt.filter(pls, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
-				albums = Txt.filter(albums, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
+				tracks = Txt.filter(data.tracks, text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
+				artists = Txt.filter(data.artists, text, function(u) return u.name end, function(u) return u.name end),
+				playlists = Txt.filter(data.playlists, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
+				albums = Txt.filter(data.albums, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
 			}
 			renderResults()
 		end)
@@ -1498,16 +1561,17 @@ local function slider(hit, onChange)
 	end))
 end
 local function refreshProgress()
-	local len = sound.TimeLength
+	local len = Player.len
 	if len > 0 then
-		barFill.Size = UDim2.fromScale(math.clamp(sound.TimePosition / len, 0, 1), 1)
-		tCur.Text = fmt(sound.TimePosition); tDur.Text = fmt(len)
+		local pos = Player.position()
+		barFill.Size = UDim2.fromScale(math.clamp(pos / len, 0, 1), 1)
+		tCur.Text = fmt(pos); tDur.Text = fmt(len)
 	end
 end
 slider(barHit, function(r)
 	Player.seek(r)
-	if sound.TimeLength > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
-		barFill.Size = UDim2.fromScale(r, 1); tCur.Text = fmt(r * sound.TimeLength)
+	if Player.len > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
+		barFill.Size = UDim2.fromScale(r, 1); tCur.Text = fmt(r * Player.len)
 	end
 end)
 
@@ -1523,7 +1587,7 @@ local function ctrlBtn(size, order, cb)
 	return b
 end
 
-local bShuffle = ctrlBtn(30, 1, function() Player.shuffle = not Player.shuffle; Bus.fire("mode") end)
+local bShuffle = ctrlBtn(30, 1, function() Player.setShuffle(not Player.shuffle) end)
 local icShuf = mkIcon(bShuffle, 20, 16, 9)
 icRect(icShuf, 9, 8, 16, 2, 28, true); icRect(icShuf, 9, 8, 16, 2, -28, true)
 icTri(icShuf, 15, 1, 4, 6, true); icTri(icShuf, 15, 9, 4, 6, true)
@@ -1555,7 +1619,7 @@ local bNext = ctrlBtn(34, 4, function() Player.next(false) end)
 local icNext = mkIcon(bNext, 14, 14, 9)
 icTri(icNext, 0, 0, 10, 14, true); icRect(icNext, 11, 0, 3, 14); icSet(icNext, C.white)
 
-local bRepeat = ctrlBtn(30, 5, function() Player.repeatMode = (Player.repeatMode + 1) % 3; Bus.fire("mode") end)
+local bRepeat = ctrlBtn(30, 5, function() Player.cycleRepeat() end)
 local icRep = mkIcon(bRepeat, 18, 14, 9)
 do
 	local outline = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(16, 10), Position = UDim2.fromOffset(1, 3), ZIndex = 9, Parent = icRep.frame },
@@ -1601,8 +1665,6 @@ end
 Bus.on("state", function()
 	local s = Player.state
 	pState.Text = s == "ERROR" and ("ERRO — " .. Player.msg) or (STATE_TXT[s] or s)
-	local ct = Player.current()
-	if ct and ct.source == "deezer" and (s == "PLAYING" or s == "PAUSED") then pState.Text = pState.Text .. " · PRÉVIA 30s" end
 	pState.TextColor3 = s == "ERROR" and C.red or C.aqua
 	refreshPlay()
 	if s == "ERROR" then Toast(Player.msg, true) end
@@ -1612,7 +1674,7 @@ Bus.on("track", function()
 	if not t then return end
 	pTitle.Text, pArtist.Text = t.title, t.artist
 	pCover.Image = CFG.LOGO; Img.apply(pCover, t)
-	tDur.Text = fmt(t.source == "deezer" and 30 or t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
+	tDur.Text = fmt(t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
 end)
 Bus.on("mode", function()
 	icSet(icShuf, Player.shuffle and C.green or C.gray); dotShuf.Visible = Player.shuffle
@@ -1626,7 +1688,7 @@ Maid.add(RunService.Heartbeat:Connect(function(dt)
 	acc += dt
 	if acc < 0.2 then return end
 	acc = 0
-	if windowOpen and Player.state == "PLAYING" then refreshProgress() end
+	if windowOpen and (Player.state == "PLAYING" or Player.state == "PAUSED") then refreshProgress() end
 end))
 
 ---------------------------------------------------------------- Seta de redimensionar (canto inferior direito)
@@ -1703,7 +1765,8 @@ local function closeWindow()
 end
 btnMin.Activated:Connect(closeWindow)
 btnClose.Activated:Connect(function()
-	Player.token += 1; sound:Stop()
+	Player.token += 1
+	task.spawn(function() Sp.call("PUT", "/v1/me/player/pause") end)
 	Maid.clean() -- destrói sons, conexões, tweens e a GUI
 end)
 
@@ -1736,22 +1799,28 @@ end
 
 ---------------------------------------------------------------- Inicialização
 Store.load()
-sound.Volume = Store.data.volume
 volFill.Size = UDim2.fromScale(Store.data.volume, 1)
 Bus.fire("mode")
 refreshPlay()
 
--- Verificação real da API/credenciais (só mostra "conectado" após resposta válida)
+-- Verificação real do Spotify (só mostra "conectado" após resposta válida)
 task.spawn(function()
 	if not httpRequest then setConn("err", "Sem suporte HTTP") return end
-	local d, e = Http.json("/v1/tracks/trending", { limit = 1 })
-	if d and type(d) == "table" and d[1] then
-		if CFG.USE_BEARER and Http.bearerOk == false then setConn("ok", "Audius conectado (só API key)")
-		else setConn("ok", "Audius conectado") end
+	local me, e = Sp.call("GET", "/v1/me")
+	if type(me) == "table" then
+		setConn("ok", "Spotify · " .. tostring(me.display_name or me.id or "conectado"))
+		pcall(Player.poll)
 	else
-		setConn("err", e == "AUTH" and "Auth recusada" or "Sem conexão")
+		setConn("err", e == "TOKEN" and "Token expirou" or "Sem conexão")
+		Toast(errText(e or "NETWORK"), true)
 	end
 end)
-if not Audio.supported then
-	task.delay(1, function() Toast("Executor sem writefile/getcustomasset: busca ok, áudio indisponível", true) end)
-end
+
+-- acompanha o Spotify (faixa, tempo, play/pausa) enquanto o script existir
+task.spawn(function()
+	while Player.alive do
+		task.wait(windowOpen and CFG.POLL_OPEN or CFG.POLL_CLOSED)
+		if not Player.alive then break end
+		pcall(Player.poll)
+	end
+end)
