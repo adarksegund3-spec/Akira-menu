@@ -1,0 +1,1086 @@
+--[[
+    ANGEL MUSIC — Audius music player for Roblox (Luau, client-side executor)
+    Módulos (tudo em um arquivo): CFG, Maid, Util, Http, Api, Audio, Img, Store, Player, UI, Pages, App
+    Requisitos do executor:
+      * request/http_request (HTTP)            -> pesquisa e metadados
+      * writefile + getcustomasset/getsynasset -> reprodução de áudio e capas
+    Sem writefile/getcustomasset a pesquisa funciona, mas o player mostra ERROR (nunca finge tocar).
+
+    SEGURANÇA: a documentação da Audius diz que o Bearer Token é para backend e nunca deve ir em
+    código distribuído. Para testes ele está em CFG.BEARER. Antes de compartilhar o script:
+    apague/rotacione o token (https://api.audius.co/plans) e deixe CFG.USE_BEARER = false.
+]]
+
+---------------------------------------------------------------- CFG
+local CFG = {
+	LOGO = "rbxassetid://115128671335258",
+	API_HOST = "https://api.audius.co",
+	API_KEY = "0x879f12308f9bfba736cb936e827c930bd4efa161",
+	BEARER = "JaI60nRhgNAVI4LUsPEAxdDf_lGkW5523p0K9I2KF-U=",
+	USE_BEARER = true,      -- enviado só em chamadas de metadados (nunca no stream/CDN)
+	APP_NAME = "ANGEL_MUSIC",
+	FOLDER = "AngelMusic",
+	CACHE_LIMIT = 20,       -- faixas de áudio em disco
+	SEARCH_TTL = 300,
+	WIN_W = 360, WIN_H = 540, PLAYER_H = 112,
+}
+
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
+
+local C = {
+	black = Color3.fromHex("#050807"), black2 = Color3.fromHex("#0A100D"),
+	dgreen = Color3.fromHex("#0C2519"), green = Color3.fromHex("#1ED760"),
+	aqua = Color3.fromHex("#55FFD0"), white = Color3.fromHex("#F4FFF8"),
+	gray = Color3.fromHex("#91A49A"), red = Color3.fromHex("#FF5C6C"),
+}
+
+---------------------------------------------------------------- Maid / Util
+local Maid = { items = {} }
+function Maid.add(x) table.insert(Maid.items, x) return x end
+function Maid.clean()
+	for _, x in ipairs(Maid.items) do
+		pcall(function()
+			if typeof(x) == "RBXScriptConnection" then x:Disconnect()
+			elseif typeof(x) == "Instance" then x:Destroy()
+			elseif typeof(x) == "Tween" then x:Cancel()
+			elseif type(x) == "function" then x() end
+		end)
+	end
+	Maid.items = {}
+end
+
+local function new(class, props, kids)
+	local o = Instance.new(class)
+	local parent
+	for k, v in pairs(props or {}) do
+		if k == "Parent" then parent = v else o[k] = v end
+	end
+	for _, c in ipairs(kids or {}) do c.Parent = o end
+	if parent then o.Parent = parent end
+	return o
+end
+local function corner(r) return new("UICorner", { CornerRadius = UDim.new(0, r) }) end
+local function fmt(sec)
+	sec = math.max(0, math.floor(tonumber(sec) or 0))
+	return string.format("%d:%02d", sec // 60, sec % 60)
+end
+local function tween(o, t, props, style, dir)
+	local tw = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+	tw:Play()
+	return tw
+end
+local function clearList(sc)
+	for _, c in ipairs(sc:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+end
+
+local Bus = { h = {} }
+function Bus.on(n, f) Bus.h[n] = Bus.h[n] or {}; table.insert(Bus.h[n], f) end
+function Bus.fire(n, ...) for _, f in ipairs(Bus.h[n] or {}) do task.spawn(f, ...) end end
+
+---------------------------------------------------------------- Http
+local Http = { bearerOk = nil }
+local httpRequest
+do
+	if type(request) == "function" then httpRequest = request
+	elseif type(http_request) == "function" then httpRequest = http_request
+	elseif syn and type(syn.request) == "function" then httpRequest = syn.request
+	elseif http and type(http.request) == "function" then httpRequest = http.request
+	elseif fluxus and type(fluxus.request) == "function" then httpRequest = fluxus.request end
+end
+
+local function q(params)
+	local parts = { "app_name=" .. CFG.APP_NAME, "api_key=" .. HttpService:UrlEncode(CFG.API_KEY) }
+	for k, v in pairs(params or {}) do
+		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
+	end
+	return table.concat(parts, "&")
+end
+
+function Http.raw(url, useBearer)
+	if not httpRequest then return nil, "NOHTTP" end
+	local headers = { Accept = "application/json" }
+	if useBearer and CFG.USE_BEARER and Http.bearerOk ~= false then
+		headers.Authorization = "Bearer " .. CFG.BEARER
+	end
+	local ok, res = pcall(httpRequest, { Url = url, Method = "GET", Headers = headers })
+	if not ok or type(res) ~= "table" then return nil, "NETWORK" end
+	return res
+end
+
+-- Retorna tabela decodificada (campo data) ou nil, codigoDeErro
+function Http.json(path, params)
+	local url = CFG.API_HOST .. path .. "?" .. q(params)
+	for attempt = 1, 3 do
+		local res, err = Http.raw(url, true)
+		if not res then return nil, err end
+		local code = res.StatusCode or 0
+		if code == 401 or code == 403 then
+			if CFG.USE_BEARER and Http.bearerOk ~= false then
+				Http.bearerOk = false -- tenta de novo só com API key
+			else
+				return nil, "AUTH"
+			end
+		elseif code == 429 then
+			if attempt == 3 then return nil, "RATE" end
+			task.wait(1.5 * attempt)
+		elseif code >= 500 then
+			if attempt == 3 then return nil, "SERVER" end
+			task.wait(1)
+		elseif code >= 200 and code < 300 then
+			local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+			if not ok or type(data) ~= "table" or data.data == nil then return nil, "INVALID" end
+			if CFG.USE_BEARER and Http.bearerOk == nil then Http.bearerOk = true end
+			return data.data
+		else
+			return nil, "HTTP_" .. tostring(code)
+		end
+	end
+	return nil, "NETWORK"
+end
+
+local Errors = {
+	NOHTTP = "Seu executor não suporta requisições HTTP.",
+	NETWORK = "Falha de conexão. Verifique a internet.",
+	AUTH = "Autenticação recusada pela Audius.",
+	RATE = "Limite de requisições atingido. Aguarde um pouco.",
+	SERVER = "Servidores da Audius indisponíveis.",
+	INVALID = "Resposta inválida da API.",
+	NOAUDIO = "Executor sem writefile/getcustomasset: não é possível tocar áudio.",
+	UNAVAILABLE = "Música indisponível para streaming.",
+	LOADFAIL = "O áudio não carregou.",
+	NOSTART = "O áudio não iniciou.",
+}
+local function errText(code) return Errors[code] or ("Erro: " .. tostring(code)) end
+
+---------------------------------------------------------------- Api
+local Api = { cache = {} }
+local function normTrack(t)
+	if type(t) ~= "table" or not t.id then return nil end
+	local art = type(t.artwork) == "table" and (t.artwork["150x150"] or t.artwork["480x480"] or t.artwork["1000x1000"]) or nil
+	return {
+		id = tostring(t.id), title = tostring(t.title or "Sem título"),
+		artist = type(t.user) == "table" and tostring(t.user.name or "Desconhecido") or "Desconhecido",
+		duration = tonumber(t.duration) or 0, art = art, streamable = t.is_streamable ~= false,
+	}
+end
+local function normList(list)
+	local out, seen = {}, {}
+	for _, t in ipairs(type(list) == "table" and list or {}) do
+		local n = normTrack(t)
+		if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
+	end
+	return out
+end
+function Api.trending(limit)
+	local d, e = Http.json("/v1/tracks/trending", { limit = limit or 25 })
+	if not d then return nil, e end
+	return normList(d)
+end
+function Api.searchTracks(text)
+	local key = "t:" .. text:lower()
+	local c = Api.cache[key]
+	if c and os.clock() - c.t < CFG.SEARCH_TTL then return c.v end
+	local d, e = Http.json("/v1/tracks/search", { query = text, limit = 25 })
+	if not d then return nil, e end
+	local v = normList(d)
+	Api.cache[key] = { t = os.clock(), v = v }
+	return v
+end
+function Api.searchPlaylists(text)
+	local d, e = Http.json("/v1/playlists/search", { query = text, limit = 6 })
+	if not d then return nil, e end
+	local out = {}
+	for _, p in ipairs(d) do
+		if p.id then table.insert(out, {
+			id = tostring(p.id), name = tostring(p.playlist_name or "Playlist"),
+			owner = type(p.user) == "table" and tostring(p.user.name or "") or "",
+			count = tonumber(p.track_count) or 0,
+			art = type(p.artwork) == "table" and (p.artwork["150x150"] or p.artwork["480x480"]) or nil,
+		}) end
+	end
+	return out
+end
+function Api.playlistTracks(id)
+	local d, e = Http.json("/v1/playlists/" .. HttpService:UrlEncode(id) .. "/tracks", {})
+	if not d then return nil, e end
+	return normList(d)
+end
+function Api.streamUrl(id)
+	return CFG.API_HOST .. "/v1/tracks/" .. HttpService:UrlEncode(id) .. "/stream?" .. q({})
+end
+
+---------------------------------------------------------------- Audio (download -> arquivo local -> asset)
+local Audio = {}
+local getAsset = (type(getcustomasset) == "function" and getcustomasset) or (type(getsynasset) == "function" and getsynasset) or nil
+Audio.supported = type(writefile) == "function" and getAsset ~= nil
+Audio.order = {}
+local function fsOk(f, ...) local ok, r = pcall(f, ...) return ok and r end
+local function ensureFolders()
+	if type(makefolder) ~= "function" then return end
+	for _, p in ipairs({ CFG.FOLDER, CFG.FOLDER .. "/cache" }) do
+		if not fsOk(isfolder, p) then pcall(makefolder, p) end
+	end
+end
+
+function Audio.download(url, path, validator)
+	local res, err = Http.raw(url, false) -- sem Bearer: o stream redireciona para nós de conteúdo
+	if not res then return nil, err end
+	if res.StatusCode == 401 or res.StatusCode == 403 then return nil, "AUTH" end
+	if res.StatusCode == 429 then return nil, "RATE" end
+	if res.StatusCode == 404 or res.StatusCode == 400 then return nil, "UNAVAILABLE" end
+	if res.StatusCode >= 500 then return nil, "SERVER" end
+	local body = res.Body
+	if res.StatusCode ~= 200 or type(body) ~= "string" or #body < 2048 then return nil, "UNAVAILABLE" end
+	if validator and not validator(body) then return nil, "INVALID" end
+	local ok = pcall(writefile, path, body)
+	if not ok then return nil, "NOAUDIO" end
+	return true
+end
+
+local function looksLikeAudio(b)
+	local h3 = b:sub(1, 3)
+	return h3 == "ID3" or b:byte(1) == 0xFF or b:sub(1, 4) == "OggS" or b:sub(5, 8) == "ftyp"
+end
+
+function Audio.fetch(track)
+	if not Audio.supported then return nil, "NOAUDIO" end
+	ensureFolders()
+	local path = ("%s/cache/%s.mp3"):format(CFG.FOLDER, track.id)
+	if not (type(isfile) == "function" and fsOk(isfile, path)) then
+		local ok, err = Audio.download(Api.streamUrl(track.id), path, looksLikeAudio)
+		if not ok then return nil, err end
+		table.insert(Audio.order, path)
+		while #Audio.order > CFG.CACHE_LIMIT do
+			local old = table.remove(Audio.order, 1)
+			if type(delfile) == "function" then pcall(delfile, old) end
+		end
+	end
+	local ok, asset = pcall(getAsset, path)
+	if not ok or not asset then return nil, "LOADFAIL" end
+	return asset
+end
+
+---------------------------------------------------------------- Img (capas)
+local Img = { cache = {}, active = 0 }
+function Img.apply(label, track)
+	if not (Audio.supported and track.art) then return end
+	local key = "art_" .. track.id
+	if Img.cache[key] then label.Image = Img.cache[key] return end
+	task.spawn(function()
+		while Img.active >= 4 do task.wait(0.15) end
+		if not label.Parent then return end
+		Img.active += 1
+		ensureFolders()
+		local path = ("%s/cache/%s.jpg"):format(CFG.FOLDER, key)
+		local ok = type(isfile) == "function" and fsOk(isfile, path)
+		if not ok then ok = Audio.download(track.art, path, nil) end
+		Img.active -= 1
+		if ok then
+			local s, asset = pcall(getAsset, path)
+			if s and asset then
+				Img.cache[key] = asset
+				if label.Parent then label.Image = asset end
+			end
+		end
+	end)
+end
+
+---------------------------------------------------------------- Store (persistência)
+local Store = { data = { fav = {}, playlists = {}, recent = {}, volume = 0.7 }, dirty = false }
+local DATA_PATH = CFG.FOLDER .. "/data.json"
+function Store.load()
+	if type(readfile) ~= "function" or not (type(isfile) == "function" and fsOk(isfile, DATA_PATH)) then return end
+	local ok, d = pcall(function() return HttpService:JSONDecode(readfile(DATA_PATH)) end)
+	if ok and type(d) == "table" then
+		Store.data.fav = type(d.fav) == "table" and d.fav or {}
+		Store.data.playlists = type(d.playlists) == "table" and d.playlists or {}
+		Store.data.recent = type(d.recent) == "table" and d.recent or {}
+		Store.data.volume = tonumber(d.volume) or 0.7
+	end
+end
+function Store.save()
+	if Store.dirty or type(writefile) ~= "function" then return end
+	Store.dirty = true
+	task.delay(1, function()
+		Store.dirty = false
+		ensureFolders()
+		pcall(function() writefile(DATA_PATH, HttpService:JSONEncode(Store.data)) end)
+	end)
+end
+function Store.isFav(id) for _, t in ipairs(Store.data.fav) do if t.id == id then return true end end return false end
+function Store.toggleFav(track)
+	for i, t in ipairs(Store.data.fav) do
+		if t.id == track.id then table.remove(Store.data.fav, i); Store.save(); Bus.fire("favs"); return false end
+	end
+	table.insert(Store.data.fav, 1, track); Store.save(); Bus.fire("favs"); return true
+end
+function Store.addRecent(track)
+	local r = Store.data.recent
+	for i, t in ipairs(r) do if t.id == track.id then table.remove(r, i) break end end
+	table.insert(r, 1, track)
+	while #r > 40 do table.remove(r) end
+	Store.save()
+end
+function Store.newPlaylist(name)
+	local p = { id = HttpService:GenerateGUID(false), name = name, tracks = {} }
+	table.insert(Store.data.playlists, p); Store.save(); Bus.fire("playlists")
+	return p
+end
+function Store.playlistAdd(p, track)
+	for _, t in ipairs(p.tracks) do if t.id == track.id then return false end end
+	table.insert(p.tracks, track); Store.save(); Bus.fire("playlists"); return true
+end
+
+---------------------------------------------------------------- Player
+local Player = { state = "IDLE", queue = {}, index = 0, shuffle = false, repeatMode = 0, token = 0, msg = "" }
+local sound = Maid.add(new("Sound", { Name = "AngelMusicSound", Volume = 0.7, Parent = SoundService }))
+
+function Player.setState(s, msg)
+	Player.state, Player.msg = s, msg or ""
+	Bus.fire("state")
+end
+function Player.current() return Player.queue[Player.index] end
+function Player.setVolume(v)
+	v = math.clamp(v, 0, 1); sound.Volume = v; Store.data.volume = v; Store.save(); Bus.fire("volume")
+end
+
+function Player.playQueue(list, start)
+	Player.queue = {}
+	for _, t in ipairs(list) do table.insert(Player.queue, t) end
+	Bus.fire("queue")
+	if #Player.queue > 0 then
+		Player.playIndex(Player.shuffle and start == nil and math.random(#Player.queue) or (start or 1))
+	end
+end
+function Player.enqueue(track)
+	table.insert(Player.queue, track); Bus.fire("queue")
+	if Player.state == "IDLE" and Player.index == 0 then Player.playIndex(#Player.queue) end
+end
+function Player.removeAt(i)
+	table.remove(Player.queue, i)
+	if i < Player.index then Player.index -= 1
+	elseif i == Player.index then
+		sound:Stop(); Player.token += 1; Player.index = math.min(Player.index, #Player.queue)
+		Player.setState("IDLE")
+		if Player.index > 0 then Player.playIndex(Player.index) end
+	end
+	Bus.fire("queue")
+end
+function Player.clear()
+	Player.token += 1; sound:Stop(); sound.SoundId = ""
+	Player.queue, Player.index = {}, 0
+	Player.setState("IDLE"); Bus.fire("queue")
+end
+
+function Player.playIndex(i)
+	local track = Player.queue[i]
+	if not track then return end
+	Player.token += 1
+	local my = Player.token
+	Player.index = i
+	sound:Stop()
+	Bus.fire("queue"); Bus.fire("track")
+	if track.streamable == false then Player.setState("ERROR", errText("UNAVAILABLE")) return end
+	Player.setState("LOADING")
+	task.spawn(function()
+		local asset, err = Audio.fetch(track)
+		if my ~= Player.token then return end
+		if not asset then Player.setState("ERROR", errText(err)) return end
+		sound.SoundId = asset
+		local t0 = os.clock()
+		while not sound.IsLoaded and os.clock() - t0 < 10 do task.wait(0.1) end
+		if my ~= Player.token then return end
+		if not sound.IsLoaded then Player.setState("ERROR", errText("LOADFAIL")) return end
+		sound.TimePosition = 0
+		sound:Play()
+		-- Só vira PLAYING quando o áudio realmente avança
+		t0 = os.clock()
+		while os.clock() - t0 < 6 do
+			if my ~= Player.token then return end
+			if sound.IsPlaying and sound.TimePosition > 0.05 then
+				Store.addRecent(track); Player.setState("PLAYING") return
+			end
+			task.wait(0.1)
+		end
+		sound:Stop()
+		Player.setState("ERROR", errText("NOSTART"))
+	end)
+end
+
+function Player.toggle()
+	local s = Player.state
+	if s == "PLAYING" then sound:Pause(); Player.setState("PAUSED")
+	elseif s == "PAUSED" then
+		sound:Resume()
+		local my = Player.token
+		task.spawn(function()
+			local p0 = sound.TimePosition; task.wait(0.4)
+			if my == Player.token and Player.state == "PAUSED" then
+				if sound.IsPlaying then Player.setState("PLAYING") else Player.setState("ERROR", errText("NOSTART")) end
+			end
+		end)
+	elseif s ~= "LOADING" and #Player.queue > 0 then
+		Player.playIndex(Player.index > 0 and Player.index or 1)
+	end
+end
+function Player.next(auto)
+	local n = #Player.queue
+	if n == 0 then return end
+	if auto and Player.repeatMode == 2 then Player.playIndex(Player.index) return end
+	if Player.shuffle and n > 1 then
+		local j = Player.index
+		while j == Player.index do j = math.random(n) end
+		Player.playIndex(j) return
+	end
+	if Player.index < n then Player.playIndex(Player.index + 1)
+	elseif Player.repeatMode == 1 or not auto then Player.playIndex(1)
+	else Player.setState("FINISHED") end
+end
+function Player.prev()
+	if #Player.queue == 0 then return end
+	if sound.TimePosition > 3 then sound.TimePosition = 0 return end
+	Player.playIndex(Player.index > 1 and Player.index - 1 or (Player.repeatMode == 1 and #Player.queue or 1))
+end
+function Player.seek(r)
+	if sound.IsLoaded and sound.TimeLength > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
+		sound.TimePosition = math.clamp(r, 0, 1) * sound.TimeLength
+	end
+end
+Maid.add(sound.Ended:Connect(function()
+	if Player.state == "PLAYING" then Player.next(true) end
+end))
+Maid.add(sound.Paused:Connect(function() if Player.state == "PLAYING" then Player.setState("PAUSED") end end))
+
+---------------------------------------------------------------- UI base
+local function getContainer()
+	local ok, h = pcall(function() return gethui and gethui() end)
+	if ok and h then return h end
+	local ok2, cg = pcall(function() return game:GetService("CoreGui") end)
+	if ok2 and cg then
+		local t = Instance.new("ScreenGui")
+		local w = pcall(function() t.Parent = cg end)
+		t:Destroy()
+		if w then return cg end
+	end
+	return Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+local container = getContainer()
+local old = container:FindFirstChild("AngelMusicGui")
+if old then old:Destroy() end
+
+local gui = Maid.add(new("ScreenGui", {
+	Name = "AngelMusicGui", ResetOnSpawn = false, IgnoreGuiInset = true,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999, Parent = container,
+}))
+
+local function label(props)
+	local p = { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextColor3 = C.white, TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }
+	for k, v in pairs(props) do p[k] = v end
+	return new("TextLabel", p)
+end
+local function button(props, cb)
+	local p = { BackgroundColor3 = C.dgreen, BackgroundTransparency = 0.2, Font = Enum.Font.GothamBold, TextColor3 = C.white,
+		TextSize = 13, AutoButtonColor = true, BorderSizePixel = 0 }
+	for k, v in pairs(props) do p[k] = v end
+	local b = new("TextButton", p, { corner(8) })
+	if cb then Maid.add(b.Activated:Connect(cb)) end
+	return b
+end
+local function shimmerGradient()
+	return new("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, C.dgreen), ColorSequenceKeypoint.new(0.15, C.aqua),
+			ColorSequenceKeypoint.new(0.3, C.dgreen), ColorSequenceKeypoint.new(0.65, C.dgreen),
+			ColorSequenceKeypoint.new(0.8, C.aqua), ColorSequenceKeypoint.new(1, C.dgreen) }),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.7), NumberSequenceKeypoint.new(0.15, 0),
+			NumberSequenceKeypoint.new(0.3, 0.7), NumberSequenceKeypoint.new(0.65, 0.7),
+			NumberSequenceKeypoint.new(0.8, 0), NumberSequenceKeypoint.new(1, 0.7) }),
+	})
+end
+local function startShimmer(grad, period)
+	grad.Rotation = 0
+	local tw = TweenService:Create(grad, TweenInfo.new(period, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), { Rotation = 360 })
+	tw:Play()
+	return Maid.add(tw)
+end
+
+---------------------------------------------------------------- Toast
+local Toast
+local toastLabel
+function Toast(msg, isErr)
+	if not toastLabel then return end
+	toastLabel.Text = msg
+	toastLabel.TextColor3 = isErr and C.red or C.aqua
+	toastLabel.BackgroundTransparency = 0.1
+	toastLabel.TextTransparency = 0
+	toastLabel.Visible = true
+	local id = (toastLabel:GetAttribute("id") or 0) + 1
+	toastLabel:SetAttribute("id", id)
+	task.delay(2.2, function()
+		if toastLabel and toastLabel.Parent and toastLabel:GetAttribute("id") == id then
+			tween(toastLabel, 0.3, { BackgroundTransparency = 1, TextTransparency = 1 })
+		end
+	end)
+end
+
+---------------------------------------------------------------- Janela
+local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+
+local bubbleSize = 56
+local bubble = new("Frame", {
+	Name = "Bubble", AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(bubbleSize, bubbleSize),
+	Position = UDim2.fromOffset(40, math.floor(vp.Y * 0.4)), BackgroundColor3 = C.black, Active = true, ZIndex = 50, Parent = gui,
+}, { corner(bubbleSize), new("UIStroke", { Color = C.aqua, Thickness = 1, Transparency = 0.7 }) })
+new("ImageLabel", { BackgroundTransparency = 1, Image = CFG.LOGO, Size = UDim2.fromScale(0.64, 0.64),
+	AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 52, Parent = bubble })
+local bubbleRing = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 51, Parent = bubble },
+	{ corner(bubbleSize) })
+local bubbleStroke = new("UIStroke", { Color = C.aqua, Thickness = 2.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = bubbleRing })
+local bubbleGrad = shimmerGradient(); bubbleGrad.Parent = bubbleStroke
+startShimmer(bubbleGrad, 5)
+
+local window = new("Frame", {
+	Name = "Window", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+	Size = UDim2.fromOffset(CFG.WIN_W, CFG.WIN_H), BackgroundTransparency = 1, Visible = false, ZIndex = 5, Parent = gui,
+})
+local uiScale = new("UIScale", { Parent = window })
+local function rescale()
+	local v = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or vp
+	vp = v
+	uiScale.Scale = math.clamp(math.min((v.X - 16) / CFG.WIN_W, (v.Y - 16) / CFG.WIN_H), 0.5, 1.15)
+end
+rescale()
+if Workspace.CurrentCamera then Maid.add(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)) end
+
+local body = new("CanvasGroup", { Name = "Body", Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.black,
+	BorderSizePixel = 0, GroupTransparency = 1, Parent = window }, { corner(18) })
+-- Degradê: centro verde-água -> verde escuro -> bordas pretas
+local glow = new("Frame", { Name = "CenterGlow", Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.aqua,
+	BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1, Parent = body }, {
+	new("UIGradient", {
+		Color = ColorSequence.new({ ColorSequenceKeypoint.new(0, C.black), ColorSequenceKeypoint.new(0.25, C.dgreen),
+			ColorSequenceKeypoint.new(0.5, C.aqua), ColorSequenceKeypoint.new(0.75, C.dgreen), ColorSequenceKeypoint.new(1, C.black) }),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.25, 0.7),
+			NumberSequenceKeypoint.new(0.5, 0.82), NumberSequenceKeypoint.new(0.75, 0.7), NumberSequenceKeypoint.new(1, 1) }),
+		Rotation = 0,
+	}) })
+local vignette = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.dgreen, BackgroundTransparency = 0,
+	BorderSizePixel = 0, ZIndex = 1, Parent = body }, {
+	new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9),
+		NumberSequenceKeypoint.new(0.5, 1), NumberSequenceKeypoint.new(1, 0.85) }) }) })
+
+local border = new("Frame", { Name = "Border", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 20, Parent = window }, { corner(18) })
+local borderBase = new("UIStroke", { Color = C.aqua, Thickness = 1, Transparency = 0.75, Parent = border })
+local border2 = new("Frame", { Name = "Shimmer", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 21, Parent = window }, { corner(18) })
+local shimmerStroke = new("UIStroke", { Color = C.aqua, Thickness = 2.5, Parent = border2 })
+local winGrad = shimmerGradient(); winGrad.Parent = shimmerStroke
+local winShimmerTween = startShimmer(winGrad, 4)
+winShimmerTween:Pause()
+
+-- Cabeçalho
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, ZIndex = 3, Parent = body })
+new("ImageLabel", { BackgroundTransparency = 1, Image = CFG.LOGO, Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(12, 8), ZIndex = 4, Parent = header })
+label({ Text = "ANGEL MUSIC", Font = Enum.Font.GothamBlack, TextSize = 15, Size = UDim2.fromOffset(110, 18), Position = UDim2.fromOffset(46, 6), ZIndex = 4, Parent = header })
+local statusDot = new("Frame", { Size = UDim2.fromOffset(7, 7), Position = UDim2.fromOffset(48, 29), BackgroundColor3 = C.gray, ZIndex = 4, Parent = header }, { corner(4) })
+local statusText = label({ Text = "Verificando…", TextSize = 10, TextColor3 = C.gray, Size = UDim2.fromOffset(150, 12), Position = UDim2.fromOffset(60, 26), ZIndex = 4, Parent = header })
+local btnMin = button({ Text = "–", Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -74, 0, 9), ZIndex = 4, Parent = header })
+local btnClose = button({ Text = "✕", Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -40, 0, 9), ZIndex = 4, Parent = header })
+
+local function setConn(kind, text)
+	statusText.Text = text
+	local col = kind == "ok" and C.green or (kind == "err" and C.red or C.gray)
+	statusDot.BackgroundColor3 = col; statusText.TextColor3 = col
+end
+
+-- Navegação
+local NAV = { "Início", "Busca", "Biblioteca", "Favoritos", "Playlists", "Fila" }
+local nav = new("Frame", { Size = UDim2.new(1, -16, 0, 30), Position = UDim2.fromOffset(8, 46), BackgroundTransparency = 1, ZIndex = 3, Parent = body },
+	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 3) }) })
+local content = new("Frame", { Size = UDim2.new(1, -16, 1, -(80 + CFG.PLAYER_H + 8)), Position = UDim2.fromOffset(8, 80),
+	BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 3, Parent = body })
+toastLabel = new("TextLabel", { Size = UDim2.new(0.8, 0, 0, 24), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -4),
+	BackgroundColor3 = C.black, BackgroundTransparency = 1, TextTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 11,
+	TextColor3 = C.aqua, ZIndex = 30, Visible = false, Text = "", Parent = content }, { corner(12) })
+
+---------------------------------------------------------------- Linhas de faixa
+local pickPlaylist -- definida adiante
+
+local function trackRow(parent, track, ctx)
+	local isCur = ctx.highlight
+	local row = new("Frame", { Size = UDim2.new(1, -4, 0, 52), BackgroundColor3 = isCur and C.dgreen or C.black2,
+		BackgroundTransparency = isCur and 0.1 or 0.35, BorderSizePixel = 0, LayoutOrder = ctx.order or 0, Parent = parent },
+		{ corner(10) })
+	local cover = new("ImageLabel", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(6, 6), BackgroundColor3 = C.black,
+		Image = CFG.LOGO, ScaleType = Enum.ScaleType.Crop, Parent = row }, { corner(6) })
+	Img.apply(cover, track)
+	local nb = ctx.onRemove and 5 or 4
+	local bw = nb * 27
+	label({ Text = track.title, Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, -(56 + bw), 0, 18),
+		Position = UDim2.fromOffset(52, 8), TextTransparency = track.streamable and 0 or 0.5, Parent = row })
+	label({ Text = track.artist .. "  ·  " .. fmt(track.duration) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 10,
+		TextColor3 = C.gray, Size = UDim2.new(1, -(56 + bw), 0, 14), Position = UDim2.fromOffset(52, 27), Parent = row })
+	local btns = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(bw, 40), AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -4, 0.5, 0), Parent = row },
+		{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 2) }) })
+	local function mini(text, cb, col)
+		return button({ Text = text, Size = UDim2.fromOffset(25, 30), TextSize = 14, TextColor3 = col or C.white, Parent = btns }, cb)
+	end
+	mini("▶", function() ctx.play() end, C.green)
+	local fav = mini(Store.isFav(track.id) and "♥" or "♡", nil, C.aqua)
+	Maid.add(fav.Activated:Connect(function()
+		local on = Store.toggleFav(track)
+		fav.Text = on and "♥" or "♡"
+		Toast(on and "Adicionado aos favoritos" or "Removido dos favoritos")
+	end))
+	mini("+", function() Player.enqueue(track); Toast("Adicionado à fila") end)
+	mini("≡", function() pickPlaylist(track) end)
+	if ctx.onRemove then mini("✕", ctx.onRemove, C.red) end
+	return row
+end
+
+local function renderTracks(scroll, tracks, opts)
+	opts = opts or {}
+	for i, t in ipairs(tracks) do
+		trackRow(scroll, t, {
+			order = (opts.baseOrder or 0) + i, highlight = opts.highlight and opts.highlight(i, t),
+			play = function() if opts.onPlay then opts.onPlay(i) else Player.playQueue(tracks, i) end end,
+			onRemove = opts.onRemove and function() opts.onRemove(i, t) end or nil,
+		})
+	end
+end
+
+local function newScroll(parent, pos, size)
+	return new("ScrollingFrame", { Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 3, ScrollBarImageColor3 = C.aqua, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = parent },
+		{ new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }) })
+end
+local function infoLabel(parent, text, col)
+	return label({ Text = text, TextColor3 = col or C.gray, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center,
+		Size = UDim2.new(1, -4, 0, 40), TextSize = 12, LayoutOrder = -1, Parent = parent })
+end
+
+---------------------------------------------------------------- Páginas
+local Pages = {}
+local function makePage(name)
+	local f = new("Frame", { Name = name, Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Visible = false, Parent = content })
+	Pages[name] = { frame = f }
+	return Pages[name]
+end
+local function headerBar(parent, title, actions)
+	local h = new("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, Parent = parent })
+	label({ Text = title, Font = Enum.Font.GothamBold, TextSize = 14, Size = UDim2.new(0.5, 0, 1, 0), Parent = h })
+	local x = 0
+	for i = #actions, 1, -1 do
+		local a = actions[i]
+		button({ Text = a[1], Size = UDim2.fromOffset(a[3] or 78, 26), AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -x - 2, 0.5, 0), TextSize = 11, Parent = h }, a[2])
+		x += (a[3] or 78) + 4
+	end
+	return h
+end
+local function listPage(name, title, actions)
+	local p = makePage(name)
+	headerBar(p.frame, title, actions)
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 34), UDim2.new(1, 0, 1, -34))
+	return p
+end
+
+-- INÍCIO (trending real da Audius)
+do
+	local p = listPage("Início", "Em alta na Audius", { { "Atualizar", function() Pages["Início"].load(true) end, 72 },
+		{ "Tocar tudo", function() if Pages["Início"].tracks and #Pages["Início"].tracks > 0 then Player.playQueue(Pages["Início"].tracks, 1) end end, 78 } })
+	function p.load(force)
+		if p.tracks and not force then return end
+		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
+		task.spawn(function()
+			local list, err = Api.trending(25)
+			if not p.scroll.Parent then return end
+			clearList(p.scroll)
+			if not list then infoLabel(p.scroll, errText(err), C.red) return end
+			if #list == 0 then infoLabel(p.scroll, "Nenhum resultado.") return end
+			p.tracks = list; renderTracks(p.scroll, list)
+		end)
+	end
+	p.show = function() p.load(false) end
+end
+
+-- BUSCA
+do
+	local p = makePage("Busca")
+	local box = new("TextBox", { Size = UDim2.new(1, -74, 0, 32), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Música, artista, playlist…",
+		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = p.frame }, { corner(8), new("UIPadding", { PaddingLeft = UDim.new(0, 10) }) })
+	local go = button({ Text = "Buscar", Size = UDim2.fromOffset(68, 32), Position = UDim2.new(1, -68, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, Parent = p.frame })
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 38), UDim2.new(1, 0, 1, -38))
+	local token = 0
+	local function showPlaylist(pl)
+		token += 1; local my = token
+		clearList(p.scroll); infoLabel(p.scroll, "Carregando playlist…")
+		task.spawn(function()
+			local tr, err = Api.playlistTracks(pl.id)
+			if my ~= token then return end
+			clearList(p.scroll)
+			button({ Text = "← Voltar aos resultados   |   Tocar playlist", Size = UDim2.new(1, -4, 0, 30), LayoutOrder = 0, TextSize = 11, Parent = p.scroll },
+				function() if tr and #tr > 0 then Player.playQueue(tr, 1) end end)
+			if not tr then infoLabel(p.scroll, errText(err), C.red) return end
+			if #tr == 0 then infoLabel(p.scroll, "Playlist vazia.") return end
+			renderTracks(p.scroll, tr, { baseOrder = 1 })
+		end)
+	end
+	local lastResult
+	local function render(tracks, pls)
+		clearList(p.scroll)
+		if #tracks == 0 and #pls == 0 then infoLabel(p.scroll, "Nenhum resultado encontrado.") return end
+		renderTracks(p.scroll, tracks, { baseOrder = 0 })
+		if #pls > 0 then
+			label({ Text = "Playlists", Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 100, Parent = p.scroll })
+			for i, pl in ipairs(pls) do
+				local row = new("Frame", { Size = UDim2.new(1, -4, 0, 44), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = 100 + i, Parent = p.scroll }, { corner(10) })
+				label({ Text = pl.name, Font = Enum.Font.GothamBold, Size = UDim2.new(1, -90, 0, 18), Position = UDim2.fromOffset(10, 5), Parent = row })
+				label({ Text = (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", TextColor3 = C.gray, TextSize = 10,
+					Size = UDim2.new(1, -90, 0, 14), Position = UDim2.fromOffset(10, 24), Parent = row })
+				button({ Text = "Abrir", Size = UDim2.fromOffset(60, 28), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 11, Parent = row },
+					function() showPlaylist(pl) end)
+			end
+		end
+	end
+	local function search()
+		local text = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
+		if text == "" then return end
+		token += 1; local my = token
+		clearList(p.scroll); infoLabel(p.scroll, "Buscando…")
+		go.Text = "…"
+		task.spawn(function()
+			local tracks, err = Api.searchTracks(text)
+			local pls = Api.searchPlaylists(text) or {}
+			if my ~= token then return end -- resposta antiga ignorada
+			go.Text = "Buscar"
+			if not tracks then clearList(p.scroll); infoLabel(p.scroll, errText(err), C.red) return end
+			lastResult = { tracks, pls }
+			render(tracks, pls)
+		end)
+	end
+	Maid.add(go.Activated:Connect(search))
+	Maid.add(box.FocusLost:Connect(function(enter) if enter then search() end end))
+	p.show = function() end
+end
+
+-- BIBLIOTECA (reproduzidas recentemente)
+do
+	local p = listPage("Biblioteca", "Tocadas recentemente", { { "Tocar tudo", function() if #Store.data.recent > 0 then Player.playQueue(Store.data.recent, 1) end end, 78 },
+		{ "Limpar", function() Store.data.recent = {}; Store.save(); Pages["Biblioteca"].show() end, 56 } })
+	function p.show()
+		clearList(p.scroll)
+		if #Store.data.recent == 0 then infoLabel(p.scroll, "Nada tocado ainda. Reproduza uma música para ela aparecer aqui.") return end
+		renderTracks(p.scroll, Store.data.recent)
+	end
+end
+
+-- FAVORITOS
+do
+	local p = listPage("Favoritos", "Favoritos", { { "Tocar", function() if #Store.data.fav > 0 then Player.playQueue(Store.data.fav, 1) end end, 54 },
+		{ "Aleatório", function()
+			local f = Store.data.fav
+			if #f == 0 then return end
+			Player.shuffle = true; Bus.fire("mode"); Player.playQueue(f, math.random(#f))
+		end, 72 } })
+	function p.show()
+		clearList(p.scroll)
+		if #Store.data.fav == 0 then infoLabel(p.scroll, "Nenhum favorito. Toque em ♡ em qualquer faixa.") return end
+		renderTracks(p.scroll, Store.data.fav, { onRemove = function(i) table.remove(Store.data.fav, i); Store.save(); p.show() end })
+	end
+	Bus.on("favs", function() if p.frame.Visible then p.show() end end)
+end
+
+-- FILA
+do
+	local p = listPage("Fila", "Fila de reprodução", { { "Limpar fila", function() Player.clear() end, 80 } })
+	function p.show()
+		clearList(p.scroll)
+		if #Player.queue == 0 then infoLabel(p.scroll, "A fila está vazia. Use + em uma faixa para adicionar.") return end
+		renderTracks(p.scroll, Player.queue, {
+			highlight = function(i) return i == Player.index end,
+			onPlay = function(i) Player.playIndex(i) end,
+			onRemove = function(i) Player.removeAt(i) end,
+		})
+	end
+	Bus.on("queue", function() if p.frame.Visible then p.show() end end)
+end
+
+-- PLAYLISTS
+do
+	local p = makePage("Playlists")
+	local box = new("TextBox", { Size = UDim2.new(1, -74, 0, 32), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Nome da playlist",
+		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = p.frame }, { corner(8), new("UIPadding", { PaddingLeft = UDim.new(0, 10) }) })
+	local create = button({ Text = "Criar", Size = UDim2.fromOffset(68, 32), Position = UDim2.new(1, -68, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, Parent = p.frame })
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 38), UDim2.new(1, 0, 1, -38))
+	local open -- playlist aberta (ou nil)
+	local function list()
+		open = nil; box.PlaceholderText = "Nome da playlist"; create.Text = "Criar"
+		clearList(p.scroll)
+		if #Store.data.playlists == 0 then infoLabel(p.scroll, "Nenhuma playlist. Digite um nome e toque em Criar.") return end
+		for i, pl in ipairs(Store.data.playlists) do
+			local row = new("Frame", { Size = UDim2.new(1, -4, 0, 44), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = i, Parent = p.scroll }, { corner(10) })
+			label({ Text = pl.name, Font = Enum.Font.GothamBold, Size = UDim2.new(1, -90, 0, 18), Position = UDim2.fromOffset(10, 5), Parent = row })
+			label({ Text = #pl.tracks .. " faixas", TextColor3 = C.gray, TextSize = 10, Size = UDim2.new(1, -90, 0, 14), Position = UDim2.fromOffset(10, 24), Parent = row })
+			button({ Text = "Abrir", Size = UDim2.fromOffset(60, 28), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 11, Parent = row },
+				function() p.openPlaylist(pl) end)
+		end
+	end
+	function p.openPlaylist(pl)
+		open = pl; box.Text = ""; box.PlaceholderText = "Novo nome…"; create.Text = "Renomear"
+		clearList(p.scroll)
+		local bar = new("Frame", { Size = UDim2.new(1, -4, 0, 30), BackgroundTransparency = 1, LayoutOrder = 0, Parent = p.scroll },
+			{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }) })
+		local function b(t, cb, w) return button({ Text = t, Size = UDim2.fromOffset(w, 28), TextSize = 11, Parent = bar }, cb) end
+		b("← Voltar", list, 64)
+		b("Tocar", function() if #pl.tracks > 0 then Player.playQueue(pl.tracks, 1) end end, 52)
+		b("Aleatório", function() if #pl.tracks > 0 then Player.shuffle = true; Bus.fire("mode"); Player.playQueue(pl.tracks, math.random(#pl.tracks)) end end, 70)
+		b("Excluir", function()
+			for i, x in ipairs(Store.data.playlists) do if x == pl then table.remove(Store.data.playlists, i) break end end
+			Store.save(); list()
+		end, 56)
+		label({ Text = pl.name, Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 1, Parent = p.scroll })
+		if #pl.tracks == 0 then
+			label({ Text = "Vazia. Use ≡ em uma faixa para adicionar aqui.", TextColor3 = C.gray, TextSize = 11, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = 2, Parent = p.scroll })
+			return
+		end
+		renderTracks(p.scroll, pl.tracks, { baseOrder = 2, onRemove = function(i)
+			table.remove(pl.tracks, i); Store.save(); p.openPlaylist(pl)
+		end })
+	end
+	Maid.add(create.Activated:Connect(function()
+		local name = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
+		if name == "" then Toast("Digite um nome", true) return end
+		if open then open.name = name; Store.save(); box.Text = ""; p.openPlaylist(open); Toast("Playlist renomeada")
+		else Store.newPlaylist(name); box.Text = ""; list(); Toast("Playlist criada") end
+	end))
+	p.show = function() if open then p.openPlaylist(open) else list() end end
+	Bus.on("playlists", function() if p.frame.Visible and not open then list() end end)
+end
+
+---------------------------------------------------------------- Popup "adicionar à playlist"
+function pickPlaylist(track)
+	local ov = new("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.black, BackgroundTransparency = 0.35, Text = "", AutoButtonColor = false, ZIndex = 40, Parent = body })
+	local panel = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45), Size = UDim2.fromOffset(280, 260),
+		BackgroundColor3 = C.black2, ZIndex = 41, Parent = ov }, { corner(14), new("UIStroke", { Color = C.aqua, Transparency = 0.5 }) })
+	label({ Text = "Adicionar à playlist", Font = Enum.Font.GothamBold, TextSize = 14, Size = UDim2.new(1, -20, 0, 26), Position = UDim2.fromOffset(12, 6), ZIndex = 42, Parent = panel })
+	local sc = newScroll(panel, UDim2.fromOffset(10, 36), UDim2.new(1, -20, 1, -82))
+	local function close() ov:Destroy() end
+	local function add(pl)
+		Toast(Store.playlistAdd(pl, track) and ("Adicionado a " .. pl.name) or "Já está na playlist")
+		close()
+	end
+	for i, pl in ipairs(Store.data.playlists) do
+		button({ Text = pl.name, Size = UDim2.new(1, -4, 0, 30), LayoutOrder = i, TextSize = 12, ZIndex = 42, Parent = sc }, function() add(pl) end)
+	end
+	button({ Text = "+ Nova playlist", Size = UDim2.new(1, -4, 0, 30), LayoutOrder = 999, BackgroundColor3 = C.green, TextColor3 = C.black, ZIndex = 42, Parent = sc },
+		function() add(Store.newPlaylist("Playlist " .. (#Store.data.playlists + 1))) end)
+	button({ Text = "Cancelar", Size = UDim2.new(1, -20, 0, 28), Position = UDim2.new(0, 10, 1, -36), ZIndex = 42, Parent = panel }, close)
+	for _, d in ipairs(panel:GetDescendants()) do if d:IsA("GuiObject") then d.ZIndex = math.max(d.ZIndex, 42) end end
+end
+
+---------------------------------------------------------------- Barra de navegação
+local navBtns, currentTab = {}, nil
+local function selectTab(name)
+	currentTab = name
+	for n, b in pairs(navBtns) do
+		local on = n == name
+		b.BackgroundColor3 = on and C.green or C.dgreen
+		b.TextColor3 = on and C.black or C.white
+		Pages[n].frame.Visible = on
+	end
+	if Pages[name].show then Pages[name].show() end
+end
+for i, n in ipairs(NAV) do
+	navBtns[n] = button({ Text = n, Size = UDim2.new(1 / #NAV, -3, 1, 0), TextSize = 10, LayoutOrder = i, Parent = nav }, function() selectTab(n) end)
+end
+
+---------------------------------------------------------------- Player UI
+local pbar = new("Frame", { Size = UDim2.new(1, -16, 0, CFG.PLAYER_H), Position = UDim2.new(0, 8, 1, -(CFG.PLAYER_H + 6)),
+	BackgroundColor3 = C.black, BackgroundTransparency = 0.25, ZIndex = 6, Parent = body }, { corner(12), new("UIStroke", { Color = C.aqua, Transparency = 0.8 }) })
+local pCover = new("ImageLabel", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(8, 7), Image = CFG.LOGO, BackgroundColor3 = C.black,
+	ScaleType = Enum.ScaleType.Crop, ZIndex = 7, Parent = pbar }, { corner(6) })
+local pTitle = label({ Text = "Nada tocando", Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, -62, 0, 16), Position = UDim2.fromOffset(54, 6), ZIndex = 7, Parent = pbar })
+local pArtist = label({ Text = "—", TextColor3 = C.gray, TextSize = 11, Size = UDim2.new(1, -62, 0, 14), Position = UDim2.fromOffset(54, 22), ZIndex = 7, Parent = pbar })
+local pState = label({ Text = "IDLE", TextColor3 = C.aqua, Font = Enum.Font.GothamBold, TextSize = 9, Size = UDim2.new(1, -62, 0, 12), Position = UDim2.fromOffset(54, 36), ZIndex = 7, Parent = pbar })
+local tCur = label({ Text = "0:00", TextSize = 10, TextColor3 = C.gray, Size = UDim2.fromOffset(32, 12), Position = UDim2.fromOffset(8, 52), ZIndex = 7, Parent = pbar })
+local tDur = label({ Text = "0:00", TextSize = 10, TextColor3 = C.gray, TextXAlignment = Enum.TextXAlignment.Right, Size = UDim2.fromOffset(32, 12), Position = UDim2.new(1, -40, 0, 52), ZIndex = 7, Parent = pbar })
+local barHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -88, 0, 16), Position = UDim2.fromOffset(44, 50), ZIndex = 8, Parent = pbar })
+local barTrack = new("Frame", { Size = UDim2.new(1, 0, 0, 4), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), BackgroundColor3 = C.dgreen, BorderSizePixel = 0, ZIndex = 8, Parent = barHit }, { corner(2) })
+local barFill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.aqua, BorderSizePixel = 0, ZIndex = 9, Parent = barTrack }, { corner(2) })
+
+local function slider(hit, onChange)
+	local dragging = false
+	local function upd(x) onChange(math.clamp((x - hit.AbsolutePosition.X) / math.max(hit.AbsoluteSize.X, 1), 0, 1)) end
+	Maid.add(hit.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; upd(i.Position.X) end
+	end))
+	Maid.add(UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i.Position.X) end
+	end))
+	Maid.add(UIS.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+	end))
+end
+slider(barHit, function(r) Player.seek(r) end)
+
+local ctrl = new("Frame", { Size = UDim2.new(1, -110, 0, 36), Position = UDim2.fromOffset(6, 70), BackgroundTransparency = 1, ZIndex = 7, Parent = pbar },
+	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 5) }) })
+local function cbtn(t, w, cb, props)
+	local p = { Text = t, Size = UDim2.fromOffset(w, 30), TextSize = 14, ZIndex = 8, Parent = ctrl }
+	for k, v in pairs(props or {}) do p[k] = v end
+	return button(p, cb)
+end
+local bShuffle = cbtn("⤮", 32, function() Player.shuffle = not Player.shuffle; Bus.fire("mode") end)
+cbtn("⏮", 32, function() Player.prev() end)
+local bPlay = cbtn("▶", 40, function() Player.toggle() end, { BackgroundColor3 = C.green, TextColor3 = C.black, TextSize = 16, Size = UDim2.fromOffset(40, 32) })
+cbtn("⏭", 32, function() Player.next(false) end)
+local bRepeat = cbtn("⟲", 32, function() Player.repeatMode = (Player.repeatMode + 1) % 3; Bus.fire("mode") end)
+
+label({ Text = "VOL", TextSize = 9, TextColor3 = C.gray, Size = UDim2.fromOffset(22, 12), Position = UDim2.new(1, -92, 0, 80), ZIndex = 7, Parent = pbar })
+local volHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(62, 20), Position = UDim2.new(1, -68, 0, 76), ZIndex = 8, Parent = pbar })
+local volTrack = new("Frame", { Size = UDim2.new(1, 0, 0, 4), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), BackgroundColor3 = C.dgreen, BorderSizePixel = 0, ZIndex = 8, Parent = volHit }, { corner(2) })
+local volFill = new("Frame", { Size = UDim2.fromScale(Store.data.volume, 1), BackgroundColor3 = C.green, BorderSizePixel = 0, ZIndex = 9, Parent = volTrack }, { corner(2) })
+slider(volHit, function(r) Player.setVolume(r) end)
+Bus.on("volume", function() volFill.Size = UDim2.fromScale(Store.data.volume, 1) end)
+
+local STATE_TXT = { IDLE = "PARADO", LOADING = "CARREGANDO…", PLAYING = "REPRODUZINDO", PAUSED = "PAUSADO", FINISHED = "FINALIZADO" }
+Bus.on("state", function()
+	local s = Player.state
+	pState.Text = s == "ERROR" and ("ERRO — " .. Player.msg) or (STATE_TXT[s] or s)
+	pState.TextColor3 = s == "ERROR" and C.red or C.aqua
+	bPlay.Text = s == "PLAYING" and "⏸" or "▶"
+	if s == "ERROR" then Toast(Player.msg, true) end
+end)
+Bus.on("track", function()
+	local t = Player.current()
+	if not t then return end
+	pTitle.Text, pArtist.Text = t.title, t.artist
+	pCover.Image = CFG.LOGO; Img.apply(pCover, t)
+	tDur.Text = fmt(t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
+end)
+Bus.on("mode", function()
+	bShuffle.BackgroundColor3 = Player.shuffle and C.green or C.dgreen
+	bShuffle.TextColor3 = Player.shuffle and C.black or C.white
+	bRepeat.Text = Player.repeatMode == 2 and "⟲1" or "⟲"
+	bRepeat.BackgroundColor3 = Player.repeatMode > 0 and C.green or C.dgreen
+	bRepeat.TextColor3 = Player.repeatMode > 0 and C.black or C.white
+end)
+
+local acc, windowOpen = 0, false
+Maid.add(RunService.Heartbeat:Connect(function(dt)
+	acc += dt
+	if acc < 0.2 then return end
+	acc = 0
+	if not windowOpen or Player.state ~= "PLAYING" then return end
+	local len = sound.TimeLength
+	if len > 0 then
+		barFill.Size = UDim2.fromScale(math.clamp(sound.TimePosition / len, 0, 1), 1)
+		tCur.Text = fmt(sound.TimePosition); tDur.Text = fmt(len)
+	end
+end))
+
+---------------------------------------------------------------- Abrir / fechar com animação
+local animating = false
+local function bubbleCenter() return bubble.AbsolutePosition + bubble.AbsoluteSize / 2 end
+
+local function openWindow()
+	if animating or windowOpen then return end
+	animating = true
+	local bc = bubbleCenter()
+	window.Position = UDim2.fromOffset(bc.X, bc.Y)
+	window.Size = UDim2.fromOffset(CFG.WIN_W * 0.35, CFG.WIN_H * 0.35)
+	body.GroupTransparency = 1; glow.BackgroundTransparency = 1; border2.Visible = true
+	shimmerStroke.Transparency = 1; borderBase.Transparency = 1
+	window.Visible = true; windowOpen = true
+	winShimmerTween:Play()
+	tween(glow, 0.9, { BackgroundTransparency = 0 })                       -- degradê surge progressivamente
+	tween(body, 0.35, { GroupTransparency = 0 })
+	tween(shimmerStroke, 0.5, { Transparency = 0 }); tween(borderBase, 0.5, { Transparency = 0.75 })
+	tween(window, 0.45, { Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(CFG.WIN_W, CFG.WIN_H) }, Enum.EasingStyle.Back)
+	tween(bubble, 0.25, { BackgroundTransparency = 1 })
+	bubble.Visible = false
+	task.delay(0.5, function() animating = false end)
+	if not currentTab then selectTab("Início") end
+end
+local function closeWindow()
+	if animating or not windowOpen then return end
+	animating = true
+	local bc = bubbleCenter()
+	bubble.Visible = true; bubble.BackgroundTransparency = 0
+	tween(body, 0.3, { GroupTransparency = 1 })
+	tween(shimmerStroke, 0.25, { Transparency = 1 }); tween(borderBase, 0.25, { Transparency = 1 })
+	tween(window, 0.3, { Position = UDim2.fromOffset(bc.X, bc.Y), Size = UDim2.fromOffset(CFG.WIN_W * 0.2, CFG.WIN_H * 0.2) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	task.delay(0.32, function()
+		window.Visible = false; windowOpen = false; animating = false
+		winShimmerTween:Pause()  -- sem animação de borda enquanto minimizado
+	end)
+end
+Maid.add(btnMin.Activated:Connect(closeWindow))
+Maid.add(btnClose.Activated:Connect(function()
+	Player.token += 1; sound:Stop()
+	Maid.clean() -- destrói sons, conexões, tweens e a GUI
+end))
+
+---------------------------------------------------------------- Arrastar a bolinha (distingue clique de arraste)
+do
+	local dragging, moved, dragInput, startInput, startPos = false, false, nil, nil, nil
+	Maid.add(bubble.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, moved, dragInput = true, false, i
+			startInput = i.Position; startPos = bubble.AbsolutePosition + bubble.AbsoluteSize / 2
+		end
+	end))
+	Maid.add(UIS.InputChanged:Connect(function(i)
+		if not dragging then return end
+		local ok = (dragInput.UserInputType == Enum.UserInputType.Touch and i == dragInput)
+			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1 and i.UserInputType == Enum.UserInputType.MouseMovement)
+		if not ok then return end
+		local d = Vector3.new(i.Position.X - startInput.X, i.Position.Y - startInput.Y, 0)
+		if not moved and d.Magnitude < 8 then return end -- limiar de arraste
+		moved = true
+		local r = bubbleSize / 2
+		local x = math.clamp(startPos.X + d.X, r, vp.X - r)
+		local y = math.clamp(startPos.Y + d.Y, r, vp.Y - r)
+		bubble.Position = UDim2.fromOffset(x, y)
+	end))
+	Maid.add(UIS.InputEnded:Connect(function(i)
+		if not dragging then return end
+		if i == dragInput or (i.UserInputType == Enum.UserInputType.MouseButton1 and dragInput.UserInputType == Enum.UserInputType.MouseButton1) then
+			dragging = false
+			if not moved then openWindow() end
+		end
+	end))
+end
+
+---------------------------------------------------------------- Inicialização
+Store.load()
+sound.Volume = Store.data.volume
+volFill.Size = UDim2.fromScale(Store.data.volume, 1)
+Bus.fire("mode")
+
+-- Verificação real da API/credenciais (só mostra "conectado" após resposta válida)
+task.spawn(function()
+	if not httpRequest then setConn("err", "Sem suporte HTTP") return end
+	local d, e = Http.json("/v1/tracks/trending", { limit = 1 })
+	if d and type(d) == "table" and d[1] then
+		if CFG.USE_BEARER and Http.bearerOk == false then setConn("ok", "Audius conectado (só API key)")
+		else setConn("ok", "Audius conectado") end
+	else
+		setConn("err", e == "AUTH" and "Auth recusada" or "Sem conexão")
+	end
+end)
+if not Audio.supported then
+	task.delay(1, function() Toast("Executor sem writefile/getcustomasset: busca ok, áudio indisponível", true) end)
+end
