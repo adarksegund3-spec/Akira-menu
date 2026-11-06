@@ -1,5 +1,5 @@
 --[[
-    ANGEL MUSIC — Audius music player for Roblox (Luau, client-side executor)
+    ANGEL MUSIC — Audius + Jamendo (+ prévias Deezer) music player for Roblox (Luau, client-side executor)
     Criador: Angel
     Requisitos do executor:
       * request/http_request (HTTP)            -> pesquisa e metadados
@@ -18,6 +18,9 @@ local CFG = {
 	API_KEY = "0x879f12308f9bfba736cb936e827c930bd4efa161",
 	BEARER = "JaI60nRhgNAVI4LUsPEAxdDf_lGkW5523p0K9I2KF-U=",
 	USE_BEARER = true,      -- enviado só em chamadas de metadados (nunca no stream/CDN)
+	JAMENDO_ID = "489c71e0",                          -- Jamendo: Client ID (é o único necessário p/ buscar e tocar)
+	JAMENDO_SECRET = "5b34d7de1401afa950e011a2bbabde32", -- Jamendo: Client Secret (NÃO é usado aqui; só serve p/ OAuth no backend)
+	USE_JAMENDO = true,
 	APP_NAME = "ANGEL_MUSIC",
 	FOLDER = "AngelMusic",
 	CACHE_LIMIT = 20,       -- faixas de áudio em disco
@@ -306,6 +309,7 @@ function Api.searchUsers(text)
 	end)
 end
 function Api.userTracks(id)
+	if tostring(id):match("^jm[upa]%-") then return Api.jamendoTracksFor(id) end
 	local d, e = Http.json("/v1/users/" .. HttpService:UrlEncode(id) .. "/tracks", { limit = 40 })
 	if not d then return nil, e end
 	return normList(d)
@@ -326,7 +330,164 @@ function Api.searchPlaylists(text)
 		return out
 	end)
 end
+local function dzTrack(t)
+	if type(t) ~= "table" or not t.id or type(t.preview) ~= "string" or t.preview == "" then return nil end
+	local alb = type(t.album) == "table" and t.album or {}
+	return { id = "dz" .. tostring(t.id), title = tostring(t.title or "Sem título"),
+		artist = type(t.artist) == "table" and tostring(t.artist.name or "Desconhecido") or "Desconhecido",
+		duration = tonumber(t.duration) or 30, art = alb.cover_medium or alb.cover_small, streamable = true,
+		source = "deezer", preview = t.preview }
+end
+local function dzGet(path, params)
+	local parts = {}
+	for k, v in pairs(params or {}) do
+		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
+	end
+	local url = "https://api.deezer.com" .. path .. (#parts > 0 and ("?" .. table.concat(parts, "&")) or "")
+	local res, err = Http.raw(url, false)
+	if not res then return nil, err end
+	if (res.StatusCode or 0) ~= 200 then return nil, "HTTP_" .. tostring(res.StatusCode) end
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+	if not ok or type(data) ~= "table" or data.error then return nil, "INVALID" end
+	return data
+end
+function Api.searchDeezer(text)
+	return cached("d:" .. text:lower(), function()
+		local d, e = dzGet("/search", { q = text, limit = 50 })
+		if not d then return nil, e end
+		local out, seen = {}, {}
+		for _, t in ipairs(type(d.data) == "table" and d.data or {}) do
+			local n = dzTrack(t)
+			if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
+		end
+		return out
+	end)
+end
+function Api.deezerPreview(id)
+	local d = dzGet("/track/" .. HttpService:UrlEncode((tostring(id):gsub("^dz", ""))), {})
+	if d and type(d.preview) == "string" and d.preview ~= "" then return d.preview end
+	return nil
+end
+-- Jamendo (músicas completas, licença Creative Commons)
+local function jmTrack(t)
+	if type(t) ~= "table" or not t.id then return nil end
+	return { id = "jm" .. tostring(t.id), title = tostring(t.name or "Sem título"),
+		artist = tostring(t.artist_name or "Desconhecido"), duration = tonumber(t.duration) or 0,
+		art = (type(t.image) == "string" and t.image ~= "" and t.image) or (type(t.album_image) == "string" and t.album_image ~= "" and t.album_image) or nil,
+		streamable = true, source = "jamendo", audio = type(t.audio) == "string" and t.audio or "" }
+end
+local function jmGet(endpoint, params)
+	if not CFG.USE_JAMENDO then return nil, "INVALID" end
+	local parts = { "client_id=" .. CFG.JAMENDO_ID, "format=json", "audioformat=mp32", "imagesize=200" }
+	for k, v in pairs(params or {}) do
+		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
+	end
+	local res, err = Http.raw("https://api.jamendo.com/v3.0/" .. endpoint .. "?" .. table.concat(parts, "&"), false)
+	if not res then return nil, err end
+	local code = res.StatusCode or 0
+	if code == 429 then return nil, "RATE" end
+	if code >= 500 then return nil, "SERVER" end
+	if code < 200 or code >= 300 then return nil, "HTTP_" .. tostring(code) end
+	local ok, data = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+	if not ok or type(data) ~= "table" or type(data.results) ~= "table" then return nil, "INVALID" end
+	if type(data.headers) == "table" and data.headers.status == "failed" then return nil, "AUTH" end
+	return data.results
+end
+local function jmList(d)
+	local out, seen = {}, {}
+	for _, t in ipairs(d) do
+		local n = jmTrack(t)
+		if n and not seen[n.id] then seen[n.id] = true; table.insert(out, n) end
+	end
+	return out
+end
+function Api.searchJamendo(text)
+	return cached("j:" .. text:lower(), function()
+		local d, e = jmGet("tracks/", { search = text, limit = 50, order = "relevance" })
+		if not d then return nil, e end
+		return jmList(d)
+	end)
+end
+function Api.jamendoPopular(limit)
+	local d, e = jmGet("tracks/", { limit = limit or 15, order = "popularity_week" })
+	if not d then return nil, e end
+	return jmList(d)
+end
+function Api.jamendoUrl(id) -- link de áudio novo (o antigo pode expirar)
+	local d = jmGet("tracks/", { id = (tostring(id):gsub("^jm", "")), limit = 1 })
+	local t = d and d[1] and jmTrack(d[1])
+	return t and t.audio or nil
+end
+function Api.searchJamendoArtists(text)
+	return cached("ju:" .. text:lower(), function()
+		local d, e = jmGet("artists/", { namesearch = text, limit = 25 })
+		if not d then return nil, e end
+		local out = {}
+		for _, u in ipairs(d) do
+			if type(u) == "table" and u.id then
+				table.insert(out, { id = "jmu-" .. tostring(u.id), name = tostring(u.name or "Artista"), handle = "", followers = 0, source = "jamendo" })
+			end
+		end
+		return out
+	end)
+end
+function Api.searchJamendoPlaylists(text)
+	return cached("jp:" .. text:lower(), function()
+		local d, e = jmGet("playlists/", { namesearch = text, limit = 25 })
+		if not d then return nil, e end
+		local out = {}
+		for _, x in ipairs(d) do
+			if type(x) == "table" and x.id then
+				table.insert(out, { id = "jmp-" .. tostring(x.id), name = tostring(x.name or "Playlist"), owner = tostring(x.user_name or ""), count = 0, isAlbum = false, source = "jamendo" })
+			end
+		end
+		return out
+	end)
+end
+function Api.searchJamendoAlbums(text)
+	return cached("ja:" .. text:lower(), function()
+		local d, e = jmGet("albums/", { namesearch = text, limit = 25 })
+		if not d then return nil, e end
+		local out = {}
+		for _, x in ipairs(d) do
+			if type(x) == "table" and x.id then
+				table.insert(out, { id = "jma-" .. tostring(x.id), name = tostring(x.name or "Álbum"), owner = tostring(x.artist_name or ""), count = 0, isAlbum = true, source = "jamendo" })
+			end
+		end
+		return out
+	end)
+end
+-- faixas de um cantor (jmu-), álbum (jma-) ou playlist (jmp-) do Jamendo
+function Api.jamendoTracksFor(id)
+	local kind, num = tostring(id):match("^jm([upa])%-(%d+)$")
+	if not kind then return nil, "INVALID" end
+	if kind == "u" then
+		local d, e = jmGet("tracks/", { artist_id = num, limit = 50, order = "popularity_total" })
+		if not d then return nil, e end
+		return jmList(d)
+	elseif kind == "a" then
+		local d, e = jmGet("tracks/", { album_id = num, limit = 100 })
+		if not d then return nil, e end
+		return jmList(d)
+	end
+	local d, e = jmGet("playlists/tracks/", { id = num })
+	if not d then return nil, e end
+	local first = d[1]
+	return jmList(type(first) == "table" and type(first.tracks) == "table" and first.tracks or {})
+end
+-- mistura duas listas alternando os itens (Audius, Jamendo, Audius, Jamendo...)
+function Api.interleave(a, b)
+	local out, seen = {}, {}
+	a, b = a or {}, b or {}
+	for i = 1, math.max(#a, #b) do
+		for _, t in ipairs({ a[i], b[i] }) do
+			if t and not seen[t.id] then seen[t.id] = true; table.insert(out, t) end
+		end
+	end
+	return out
+end
 function Api.playlistTracks(id)
+	if tostring(id):match("^jm[upa]%-") then return Api.jamendoTracksFor(id) end
 	local d, e = Http.json("/v1/playlists/" .. HttpService:UrlEncode(id) .. "/tracks", {})
 	if not d then return nil, e end
 	return normList(d)
@@ -373,7 +534,22 @@ function Audio.fetch(track)
 	ensureFolders()
 	local path = ("%s/cache/%s.mp3"):format(CFG.FOLDER, track.id)
 	if not (type(isfile) == "function" and fsOk(isfile, path)) then
-		local ok, err = Audio.download(Api.streamUrl(track.id), path, looksLikeAudio)
+		local ok, err
+		if track.source == "jamendo" then
+			ok, err = Audio.download(track.audio or "", path, looksLikeAudio)
+			if not ok then
+				local fresh = Api.jamendoUrl(track.id)
+				if fresh then ok, err = Audio.download(fresh, path, looksLikeAudio) end
+			end
+		elseif track.source == "deezer" then
+			ok, err = Audio.download(track.preview or "", path, looksLikeAudio)
+			if not ok then
+				local fresh = Api.deezerPreview(track.id) -- link da prévia expira: pega um novo
+				if fresh then ok, err = Audio.download(fresh, path, looksLikeAudio) end
+			end
+		else
+			ok, err = Audio.download(Api.streamUrl(track.id), path, looksLikeAudio)
+		end
 		if not ok then return nil, err end
 		table.insert(Audio.order, path)
 		while #Audio.order > CFG.CACHE_LIMIT do
@@ -903,7 +1079,7 @@ local function trackRow(parent, track, ctx)
 	local bw = 56
 	label({ Text = track.title, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = isCur and C.aqua or C.white,
 		Size = UDim2.new(1, -(45 + bw + 4), 0, 16), Position = UDim2.fromOffset(45, 5), TextTransparency = track.streamable and 0 or 0.5, Parent = row })
-	label({ Text = track.artist .. "  ·  " .. fmt(track.duration) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 9,
+	label({ Text = track.artist .. "  ·  " .. (track.source == "deezer" and "PRÉVIA 30s" or (fmt(track.duration) .. (track.source == "jamendo" and "  ·  Jamendo" or ""))) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 9,
 		TextColor3 = C.gray, Size = UDim2.new(1, -(45 + bw + 4), 0, 13), Position = UDim2.fromOffset(45, 23), Parent = row })
 	local hit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -(bw + 4), 1, 0), Parent = row })
 	tap(hit, ctx.play)
@@ -961,13 +1137,18 @@ end
 
 -- INÍCIO (trending real da Audius)
 do
-	local p = listPage("Início", "Em alta na Audius", { { "Atualizar", function() Pages["Início"].load(true) end, 58 },
+	local p = listPage("Início", "Em alta (Audius + Jamendo)", { { "Atualizar", function() Pages["Início"].load(true) end, 58 },
 		{ "Tocar tudo", function() if Pages["Início"].tracks and #Pages["Início"].tracks > 0 then Player.playQueue(Pages["Início"].tracks, 1) end end, 64 } })
 	function p.load(force)
 		if p.tracks and not force then return end
 		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
 		task.spawn(function()
+			local jm, jmDone
+			task.spawn(function() jm = Api.jamendoPopular(15); jmDone = true end)
 			local list, err = Api.trending(25)
+			local t0 = os.clock()
+			while not jmDone and os.clock() - t0 < 15 do task.wait(0.05) end
+			if jm then list = Api.interleave(list, jm) end
 			if not p.scroll.Parent then return end
 			clearList(p.scroll)
 			if not list then infoLabel(p.scroll, errText(err), C.red) return end
@@ -1059,6 +1240,12 @@ do
 				if all then sectionTitle("Músicas", 0) end
 				renderTracks(p.scroll, list, { baseOrder = 1 })
 			end
+			local dzl = slice(res.dz or {}, all and 6 or 1000)
+			if #dzl > 0 then
+				shown += #dzl
+				sectionTitle("Prévias 30s (Deezer)", 500)
+				renderTracks(p.scroll, dzl, { baseOrder = 500 })
+			end
 		end
 		if all or mode == "Cantores" then
 			local list = slice(res.artists, all and 3 or 1000)
@@ -1066,7 +1253,7 @@ do
 				shown += #list
 				sectionTitle("Cantores", 1000)
 				for i, u in ipairs(list) do
-					infoRow(1000 + i, u.name, (u.handle ~= "" and ("@" .. u.handle .. " · ") or "") .. fmtNum(u.followers) .. " seguidores", "Abrir",
+					infoRow(1000 + i, u.name, (u.source == "jamendo" and "Jamendo" or ((u.handle ~= "" and ("@" .. u.handle .. " · ") or "") .. fmtNum(u.followers) .. " seguidores")), "Abrir",
 						function() showTracksView(function() return Api.userTracks(u.id) end) end)
 				end
 			end
@@ -1077,7 +1264,7 @@ do
 				shown += #list
 				sectionTitle("Playlists", 2000)
 				for i, pl in ipairs(list) do
-					infoRow(2000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", "Abrir",
+					infoRow(2000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.source == "jamendo" and "Jamendo" or (pl.count .. " faixas")), "Abrir",
 						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
 				end
 			end
@@ -1088,7 +1275,7 @@ do
 				shown += #list
 				sectionTitle("Álbuns", 3000)
 				for i, pl in ipairs(list) do
-					infoRow(3000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", "Abrir",
+					infoRow(3000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. (pl.source == "jamendo" and "Jamendo" or (pl.count .. " faixas")), "Abrir",
 						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
 				end
 			end
@@ -1103,7 +1290,7 @@ do
 		clearList(p.scroll); infoLabel(p.scroll, "Buscando…")
 		go.Text = "…"
 		task.spawn(function()
-			local out, errs, pending = {}, {}, 3
+			local out, errs, pending = {}, {}, 8
 			local function job(key, fn)
 				task.spawn(function()
 					local v, e = fn()
@@ -1114,20 +1301,28 @@ do
 			job("tracks", function() return Api.searchTracks(text) end)
 			job("users", function() return Api.searchUsers(text) end)
 			job("pls", function() return Api.searchPlaylists(text) end)
+			job("dz", function() return Api.searchDeezer(text) end)
+			job("jm", function() return Api.searchJamendo(text) end)
+			job("jmu", function() return Api.searchJamendoArtists(text) end)
+			job("jmp", function() return Api.searchJamendoPlaylists(text) end)
+			job("jma", function() return Api.searchJamendoAlbums(text) end)
 			local t0 = os.clock()
 			while pending > 0 and os.clock() - t0 < 25 do task.wait(0.05) end
 			if my ~= token then return end -- resposta antiga ignorada
 			go.Text = "Buscar"
-			if not out.tracks and not out.users and not out.pls then
-				clearList(p.scroll); infoLabel(p.scroll, errText(errs.tracks or errs.users or errs.pls or "NETWORK"), C.red) return
+			if not out.tracks and not out.users and not out.pls and not out.dz and not out.jm and not out.jmu and not out.jmp and not out.jma then
+				clearList(p.scroll); infoLabel(p.scroll, errText(errs.tracks or errs.users or errs.pls or errs.dz or errs.jm or errs.jmu or "NETWORK"), C.red) return
 			end
 			-- pesquisa afiada: só fica o que contém a frase (ou algo bem parecido)
 			local albums, pls = {}, {}
 			for _, x in ipairs(out.pls or {}) do table.insert(x.isAlbum and albums or pls, x) end
+			for _, x in ipairs(out.jmp or {}) do table.insert(pls, x) end
+			for _, x in ipairs(out.jma or {}) do table.insert(albums, x) end
 			res = {
 				q = text,
-				tracks = Txt.filter(out.tracks, text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
-				artists = Txt.filter(out.users, text, function(u) return u.name .. " " .. u.handle end, function(u) return u.name end),
+				tracks = Txt.filter(Api.interleave(out.tracks, out.jm), text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
+				dz = Txt.filter(out.dz, text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
+				artists = Txt.filter(Api.interleave(out.users, out.jmu), text, function(u) return u.name .. " " .. u.handle end, function(u) return u.name end),
 				playlists = Txt.filter(pls, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
 				albums = Txt.filter(albums, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
 			}
@@ -1406,6 +1601,8 @@ end
 Bus.on("state", function()
 	local s = Player.state
 	pState.Text = s == "ERROR" and ("ERRO — " .. Player.msg) or (STATE_TXT[s] or s)
+	local ct = Player.current()
+	if ct and ct.source == "deezer" and (s == "PLAYING" or s == "PAUSED") then pState.Text = pState.Text .. " · PRÉVIA 30s" end
 	pState.TextColor3 = s == "ERROR" and C.red or C.aqua
 	refreshPlay()
 	if s == "ERROR" then Toast(Player.msg, true) end
@@ -1415,7 +1612,7 @@ Bus.on("track", function()
 	if not t then return end
 	pTitle.Text, pArtist.Text = t.title, t.artist
 	pCover.Image = CFG.LOGO; Img.apply(pCover, t)
-	tDur.Text = fmt(t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
+	tDur.Text = fmt(t.source == "deezer" and 30 or t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
 end)
 Bus.on("mode", function()
 	icSet(icShuf, Player.shuffle and C.green or C.gray); dotShuf.Visible = Player.shuffle
