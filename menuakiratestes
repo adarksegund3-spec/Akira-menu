@@ -3,6 +3,9 @@
     Criador: Angel
     Como funciona:
       * Busca, cantores, playlists e álbuns vêm da Web API oficial do Spotify.
+      * CFG.PLAY_MODE = "roblox": o som toca DENTRO do Roblox. O Spotify não fornece áudio, então o
+        script acha a mesma música na Audius (completa) e, se não tiver, no Deezer (prévia de 30s).
+      * CFG.PLAY_MODE = "spotify": controla o app do Spotify aberto no celular/PC (exige Premium).
       * A Web API NÃO envia o áudio para o Roblox: a música toca no app do Spotify aberto no
         seu celular/PC (dispositivo ativo) e este script controla: play, pausa, próxima, anterior,
         barra de tempo, volume, aleatório e repetir.
@@ -27,6 +30,10 @@ local CFG = {
 	SPOTIFY_TOKEN = "",       -- opcional (token manual, dura ~1h). Deixe vazio usando o código acima
 	SPOTIFY_REFRESH_TOKEN = "", -- opcional: o script salva o dele em AngelMusic/spotify.json
 	MARKET = "BR",
+	PLAY_MODE = "roblox",     -- "roblox" (toca no jogo) ou "spotify" (controle remoto do app)
+	CACHE_LIMIT = 20,         -- faixas de áudio guardadas em disco
+	AUDIUS_API_KEY = "0x879f12308f9bfba736cb936e827c930bd4efa161",
+	AUDIUS_BEARER = "JaI60nRhgNAVI4LUsPEAxdDf_lGkW5523p0K9I2KF-U=", -- opcional; apague antes de compartilhar o script
 	POLL_OPEN = 2,          -- segundos entre leituras do estado do Spotify (janela aberta)
 	POLL_CLOSED = 5,
 	FOLDER = "AngelMusic",
@@ -137,6 +144,10 @@ local Errors = {
 	SERVER = "Servidores do Spotify indisponíveis.",
 	INVALID = "Resposta inválida da API.",
 	UNAVAILABLE = "Música indisponível na sua região.",
+	NOAUDIO = "Executor sem writefile/getcustomasset: não dá para tocar áudio.",
+	NOMATCH = "Não achei essa música com áudio (Audius/Deezer).",
+	LOADFAIL = "O áudio não carregou.",
+	NOSTART = "O áudio não iniciou.",
 }
 local function errText(code) return Errors[code] or ("Erro: " .. tostring(code)) end
 
@@ -500,6 +511,119 @@ function Audio.download(url, path, validator)
 	return true
 end
 
+
+local function looksLikeAudio(b)
+	local h3 = b:sub(1, 3)
+	return h3 == "ID3" or b:byte(1) == 0xFF or b:sub(1, 4) == "OggS" or b:sub(5, 8) == "ftyp"
+end
+Audio.kind = {} -- id da faixa -> "full" (Audius) ou "preview" (Deezer 30s)
+
+local function cleanTitle(t)
+	t = Txt.norm(t)
+	for _, pat in ipairs({ "%sfeat%s.*$", "%sft%s.*$", "%swith%s.*$", "%sremaster.*$", "%sao vivo.*$", "%slive.*$" }) do
+		t = (t:gsub(pat, ""))
+	end
+	return t
+end
+local function sameTitle(a, b)
+	a, b = cleanTitle(a), cleanTitle(b)
+	return a ~= "" and a == b
+end
+local function sameArtist(list, cand)
+	cand = Txt.norm(cand)
+	if cand == "" then return false end
+	for name in tostring(list):gmatch("[^,]+") do
+		local n = Txt.norm(name)
+		if n ~= "" and (cand:find(n, 1, true) or n:find(cand, 1, true)) then return true end
+	end
+	return false
+end
+local function durOk(a, b) return b <= 0 or math.abs(a - b) <= 25 end
+
+local function jsonGet(url, headers)
+	local res = Http.req("GET", url, headers or { Accept = "application/json" })
+	if not res then return nil end
+	local code = res.StatusCode or 0
+	if code < 200 or code >= 300 then return nil, code end
+	local ok, d = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+	if ok and type(d) == "table" then return d end
+end
+local function qs(params)
+	local parts = {}
+	for k, v in pairs(params) do
+		table.insert(parts, HttpService:UrlEncode(tostring(k)) .. "=" .. HttpService:UrlEncode(tostring(v)))
+	end
+	return table.concat(parts, "&")
+end
+
+local function findAudius(track)
+	if CFG.AUDIUS_API_KEY == "" then return nil end
+	local first = tostring(track.artist):match("[^,]+") or ""
+	local base = "app_name=ANGEL_MUSIC&api_key=" .. HttpService:UrlEncode(CFG.AUDIUS_API_KEY)
+	local url = "https://api.audius.co/v1/tracks/search?" .. base .. "&" .. qs({ query = first .. " " .. track.title, limit = 10 })
+	local d, code = nil, nil
+	if CFG.AUDIUS_BEARER ~= "" then
+		d, code = jsonGet(url, { Accept = "application/json", Authorization = "Bearer " .. CFG.AUDIUS_BEARER })
+	end
+	if not d then d = jsonGet(url) end
+	if not d then return nil end
+	local found
+	each(d.data, function(t)
+		if found or not t.id or t.is_streamable == false then return end
+		local u = type(t.user) == "table" and tostring(t.user.name or "") or ""
+		if sameTitle(track.title, tostring(t.title or "")) and sameArtist(track.artist, u) and durOk(track.duration, tonumber(t.duration) or 0) then
+			found = t
+		end
+	end)
+	if found then return "https://api.audius.co/v1/tracks/" .. HttpService:UrlEncode(tostring(found.id)) .. "/stream?" .. base end
+end
+
+local function findDeezer(track)
+	local first = tostring(track.artist):match("[^,]+") or ""
+	local title = (track.title:gsub("\"", ""))
+	local queries = { "artist:\"" .. first .. "\" track:\"" .. title .. "\"", first .. " " .. title }
+	for _, q in ipairs(queries) do
+		local d = jsonGet("https://api.deezer.com/search?" .. qs({ q = q, limit = 10 }))
+		local found
+		each(d and d.data, function(t)
+			if found or type(t.preview) ~= "string" or t.preview == "" then return end
+			local art = type(t.artist) == "table" and tostring(t.artist.name or "") or ""
+			if sameTitle(track.title, tostring(t.title or "")) and sameArtist(track.artist, art) and durOk(track.duration, tonumber(t.duration) or 0) then
+				found = t
+			end
+		end)
+		if found then return found.preview end
+	end
+end
+
+function Audio.fetch(track)
+	if not Audio.supported then return nil, "NOAUDIO" end
+	ensureFolders()
+	local base = ("%s/cache/%s"):format(CFG.FOLDER, track.id)
+	local pf, pp = base .. "_f.mp3", base .. "_p.mp3"
+	local hasFs = type(isfile) == "function"
+	local path
+	if hasFs and fsOk(isfile, pf) then path, Audio.kind[track.id] = pf, "full"
+	elseif hasFs and fsOk(isfile, pp) then path, Audio.kind[track.id] = pp, "preview"
+	else
+		local url = findAudius(track)
+		if url and Audio.download(url, pf, looksLikeAudio) then path, Audio.kind[track.id] = pf, "full" end
+		if not path then
+			local pv = findDeezer(track)
+			if pv and Audio.download(pv, pp, looksLikeAudio) then path, Audio.kind[track.id] = pp, "preview" end
+		end
+		if not path then return nil, "NOMATCH" end
+		table.insert(Audio.order, path)
+		while #Audio.order > CFG.CACHE_LIMIT do
+			local old = table.remove(Audio.order, 1)
+			if type(delfile) == "function" then pcall(delfile, old) end
+		end
+	end
+	local ok, asset = pcall(getAsset, path)
+	if not ok or not asset then return nil, "LOADFAIL" end
+	return asset
+end
+
 ---------------------------------------------------------------- Img (capas)
 local Img = { cache = {}, active = 0 }
 function Img.apply(label, track)
@@ -851,6 +975,124 @@ function Player.poll()
 			Store.data.volume = vp / 100; Bus.fire("volume")
 		end
 	end
+end
+
+---------------------------------------------------------------- Player local (toca DENTRO do Roblox)
+Player.localMode = CFG.PLAY_MODE == "roblox"
+if Player.localMode then
+	local sound = Maid.add(new("Sound", { Name = "AngelMusicSound", Volume = Store.data.volume, Parent = SoundService }))
+	function Player.position() return sound.TimePosition end
+	function Player.syncVolume() sound.Volume = Store.data.volume end
+	Maid.add(RunService.Heartbeat:Connect(function()
+		if (Player.state == "PLAYING" or Player.state == "PAUSED") and sound.IsLoaded and sound.TimeLength > 0 then Player.len = sound.TimeLength end
+	end))
+
+	function Player.playIndex(i)
+		local track = Player.queue[i]
+		if not track then return end
+		Player.token += 1
+		local my = Player.token
+		Player.index = i
+		sound:Stop()
+		Player.len = track.duration
+		Bus.fire("queue"); Bus.fire("track")
+		if track.streamable == false then fail("UNAVAILABLE") return end
+		Player.setState("LOADING")
+		task.spawn(function()
+			local asset, err = Audio.fetch(track)
+			if my ~= Player.token then return end
+			if not asset then fail(err) return end
+			sound.SoundId = asset
+			local t0 = os.clock()
+			while not sound.IsLoaded and os.clock() - t0 < 10 do task.wait(0.1) end
+			if my ~= Player.token then return end
+			if not sound.IsLoaded then fail("LOADFAIL") return end
+			sound.TimePosition = 0
+			sound:Play()
+			t0 = os.clock()
+			while os.clock() - t0 < 6 do -- só vira PLAYING quando o áudio realmente avança
+				if my ~= Player.token then return end
+				if sound.IsPlaying and sound.TimePosition > 0.05 then
+					Store.addRecent(track); Player.setState("PLAYING") return
+				end
+				task.wait(0.1)
+			end
+			sound:Stop()
+			fail("NOSTART")
+		end)
+	end
+	function Player.playContext()
+		Bus.fire("toast", "Abra a lista e toque numa faixa.", true)
+	end
+	function Player.enqueue(track)
+		if not track or not track.uri then return end
+		table.insert(Player.queue, track); Bus.fire("queue")
+		if Player.state == "IDLE" and Player.index == 0 then Player.playIndex(#Player.queue) end
+	end
+	function Player.removeAt(i)
+		if not Player.queue[i] then return end
+		table.remove(Player.queue, i)
+		if i < Player.index then Player.index -= 1
+		elseif i == Player.index then
+			sound:Stop(); Player.token += 1; Player.index = math.min(Player.index, #Player.queue)
+			Player.setState("IDLE")
+			if Player.index > 0 then Player.playIndex(Player.index) end
+		end
+		Bus.fire("queue")
+	end
+	function Player.clear()
+		Player.token += 1; sound:Stop(); sound.SoundId = ""
+		Player.queue, Player.index = {}, 0
+		Player.setState("IDLE"); Bus.fire("queue")
+	end
+	function Player.toggle()
+		local s = Player.state
+		if s == "PLAYING" then sound:Pause(); Player.setState("PAUSED")
+		elseif s == "PAUSED" then
+			sound:Resume()
+			local my = Player.token
+			task.spawn(function()
+				task.wait(0.4)
+				if my == Player.token and Player.state == "PAUSED" then
+					if sound.IsPlaying then Player.setState("PLAYING") else fail("NOSTART") end
+				end
+			end)
+		elseif s ~= "LOADING" and #Player.queue > 0 then
+			Player.playIndex(Player.index > 0 and Player.index or 1)
+		end
+	end
+	function Player.next(auto)
+		local n = #Player.queue
+		if n == 0 then return end
+		if auto and Player.repeatMode == 2 then Player.playIndex(Player.index) return end
+		if Player.shuffle and n > 1 then
+			local j = Player.index
+			while j == Player.index do j = math.random(n) end
+			Player.playIndex(j) return
+		end
+		if Player.index < n then Player.playIndex(Player.index + 1)
+		elseif Player.repeatMode == 1 or not auto then Player.playIndex(1)
+		else Player.setState("FINISHED") end
+	end
+	function Player.prev()
+		if #Player.queue == 0 then return end
+		if sound.TimePosition > 3 then sound.TimePosition = 0 return end
+		Player.playIndex(Player.index > 1 and Player.index - 1 or (Player.repeatMode == 1 and #Player.queue or 1))
+	end
+	function Player.seek(r)
+		if sound.IsLoaded and sound.TimeLength > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
+			sound.TimePosition = math.clamp(r, 0, 1) * sound.TimeLength
+		end
+	end
+	function Player.setVolume(v)
+		v = math.clamp(v, 0, 1); sound.Volume = v; Store.data.volume = v; Store.save(); Bus.fire("volume")
+	end
+	function Player.setShuffle(v) Player.shuffle = v; Bus.fire("mode") end
+	function Player.cycleRepeat() Player.repeatMode = (Player.repeatMode + 1) % 3; Bus.fire("mode") end
+	Maid.add(sound.Ended:Connect(function()
+		if Player.state == "PLAYING" then Player.next(true) end
+	end))
+	Maid.add(sound.Paused:Connect(function() if Player.state == "PLAYING" then Player.setState("PAUSED") end end))
 end
 
 ---------------------------------------------------------------- UI base
@@ -1669,6 +1911,8 @@ end
 Bus.on("state", function()
 	local s = Player.state
 	pState.Text = s == "ERROR" and ("ERRO — " .. Player.msg) or (STATE_TXT[s] or s)
+	local ct = Player.current()
+	if Player.localMode and ct and Audio.kind[ct.id] == "preview" and (s == "PLAYING" or s == "PAUSED") then pState.Text = pState.Text .. " · PRÉVIA 30s" end
 	pState.TextColor3 = s == "ERROR" and C.red or C.aqua
 	refreshPlay()
 	if s == "ERROR" then Toast(Player.msg, true) end
@@ -1770,7 +2014,7 @@ end
 btnMin.Activated:Connect(closeWindow)
 btnClose.Activated:Connect(function()
 	Player.token += 1
-	task.spawn(function() Sp.call("PUT", "/v1/me/player/pause") end)
+	if not Player.localMode then task.spawn(function() Sp.call("PUT", "/v1/me/player/pause") end) end
 	Maid.clean() -- destrói sons, conexões, tweens e a GUI
 end)
 
@@ -1803,6 +2047,7 @@ end
 
 ---------------------------------------------------------------- Inicialização
 Store.load()
+if Player.syncVolume then Player.syncVolume() end
 volFill.Size = UDim2.fromScale(Store.data.volume, 1)
 Bus.fire("mode")
 refreshPlay()
@@ -1858,7 +2103,7 @@ task.spawn(function()
 	local me, e = Sp.call("GET", "/v1/me")
 	if type(me) == "table" then
 		setConn("ok", "Spotify · " .. tostring(me.display_name or me.id or "conectado"))
-		pcall(Player.poll)
+		if not Player.localMode then pcall(Player.poll) end
 	else
 		setConn("err", e == "TOKEN" and "Token expirou" or "Sem conexão")
 		Toast(errText(e or "NETWORK"), true)
@@ -1867,7 +2112,7 @@ end)
 
 -- acompanha o Spotify (faixa, tempo, play/pausa) enquanto o script existir
 task.spawn(function()
-	while Player.alive do
+	while Player.alive and not Player.localMode do
 		task.wait(windowOpen and CFG.POLL_OPEN or CFG.POLL_CLOSED)
 		if not Player.alive then break end
 		pcall(Player.poll)
