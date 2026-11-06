@@ -10,10 +10,9 @@
       * Conta Spotify Premium (exigência do Spotify para controlar a reprodução).
       * Spotify aberto em algum aparelho seu.
       * Executor com request/http_request. (writefile + getcustomasset só servem para as capas.)
-    TOKEN: o token de acesso dura ~1 hora e precisa dos escopos
-      user-read-playback-state, user-modify-playback-state, user-read-currently-playing (+ user-top-read).
-      Quando expirar o script avisa. Para renovar sozinho, preencha SPOTIFY_CLIENT_ID,
-      SPOTIFY_CLIENT_SECRET e SPOTIFY_REFRESH_TOKEN abaixo.
+    LOGIN: preencha CFG.SPOTIFY_AUTH_CODE com o código do login (uma vez). O script troca por um
+      token com as permissões certas, guarda o refresh token em AngelMusic/spotify.json e renova
+      o acesso sozinho (o token de acesso do Spotify dura só ~1 hora).
     SEGURANÇA: token, client id e secret dão acesso à sua conta/app. Não compartilhe este arquivo
     com eles preenchidos.
 ]]
@@ -21,10 +20,12 @@
 ---------------------------------------------------------------- CFG
 local CFG = {
 	LOGO = "rbxassetid://115128671335258",
-	SPOTIFY_TOKEN = "BQBT2mJBY08TJTc4HG0_kp9nTGDImAukSfy9CAIP0QjWsvBTm5hLUDgMivU_UFqG86cyaMXVXqYSLjvWLPCvqzlWWQM0s9BHSsMYui-_jlO7fSxf_zF-Ld4ZNTwZobsVM8JvQHnce6KJ90ePq4xGtdtU-JU-LWUQ9NWPYnWo1D6qiiiBlTCwaj5ZUfGndPTeJR8ZnEmCgqbKenF6BWcDve4iWvwKTliEsmJEBJZ0CBAPLZmD6dTwIV5t4LoI9grnjaHd_1IHi9nQlIaomgwS-C8Fg6gnhTq5twfUF-jDoxLFFiZyvUlFoURdyKV2qLqme5S01GV8HBWDmqISTQJ4",
-	SPOTIFY_CLIENT_ID = "8550ba80140745349e0fbf930d8dc690", -- ATENÇÃO: confirme se este código é o Client ID (se for o Secret, mova p/ SPOTIFY_CLIENT_SECRET)
-	SPOTIFY_CLIENT_SECRET = "",
-	SPOTIFY_REFRESH_TOKEN = "",  -- opcional: com os 3 campos preenchidos o token é renovado sozinho
+	SPOTIFY_CLIENT_ID = "c06041f7743c455f8cb9a30498f94984",
+	SPOTIFY_CLIENT_SECRET = "8550ba80140745349e0fbf930d8dc690",
+	SPOTIFY_REDIRECT_URI = "https://api.spotify.com/:",  -- tem que ser IGUAL ao cadastrado no painel do app
+	SPOTIFY_AUTH_CODE = "AQACuGTnwoxaIlVZnXQEEzY3uKVCV0jnZM3fAT-9ipuJS9O263eYlms0jej2f2fcIC39SVW1qm8HPo96wdRrWk4XMi1l9QnT5A9x2W3wQqxCgtkP4GDUYIBI1456634iZogcDpwIID9TWemalJuUs-FgjGpCp0ZC8EKit_TwT4MkJ8DfJEf6mI7vagSO57CtB_nJjO3PbfOYskkJBF72OINLRid5vc8tEPnYWGznrmtbImZinNgVmNqHfPvkf43DpETSVYuHzDRFGCv-hzxo0FEmmcupF_lbxCZFIwaTMqv4A8CsR6T7Abqz3hAL2S6vPd-iSTu3X15GaWHRMMvmUTGWLgoOJGT5meXR65-jw8kavrsuHVmhI270OoSg86_4yBfVwlCZOAmbTs2XjnSIzrJkffiCoUyIkGx24D6U_X5se-hILUqVwDhfSz0t9J4XgRXEtgU",   -- cole aqui o código (code=...) do login, UMA vez; depois o script guarda e renova sozinho
+	SPOTIFY_TOKEN = "",       -- opcional (token manual, dura ~1h). Deixe vazio usando o código acima
+	SPOTIFY_REFRESH_TOKEN = "", -- opcional: o script salva o dele em AngelMusic/spotify.json
 	MARKET = "BR",
 	POLL_OPEN = 2,          -- segundos entre leituras do estado do Spotify (janela aberta)
 	POLL_CLOSED = 5,
@@ -126,7 +127,7 @@ end
 local Errors = {
 	NOHTTP = "Seu executor não suporta requisições HTTP.",
 	NETWORK = "Falha de conexão. Verifique a internet.",
-	TOKEN = "Token do Spotify expirou. Cole um novo em CFG.SPOTIFY_TOKEN.",
+	TOKEN = "Login do Spotify ausente/expirado. Gere um código novo em CFG.SPOTIFY_AUTH_CODE.",
 	SCOPE = "Token sem permissão de controle (faltam escopos do player).",
 	PREMIUM = "Controlar a reprodução exige Spotify Premium.",
 	FORBIDDEN = "O Spotify recusou (limite do app em modo de desenvolvimento).",
@@ -173,7 +174,10 @@ function Sp.refresh()
 		local s2, d = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
 		if s2 and type(d) == "table" and type(d.access_token) == "string" then
 			Sp.token = d.access_token
-			if type(d.refresh_token) == "string" and d.refresh_token ~= "" then Sp.refreshToken = d.refresh_token end
+			if type(d.refresh_token) == "string" and d.refresh_token ~= "" then
+				Sp.refreshToken = d.refresh_token
+				if Sp.onRefreshToken then Sp.onRefreshToken(Sp.refreshToken) end
+			end
 			ok = true
 		end
 	end
@@ -1803,9 +1807,54 @@ volFill.Size = UDim2.fromScale(Store.data.volume, 1)
 Bus.fire("mode")
 refreshPlay()
 
+-- Login do Spotify: troca o código (1 vez) por refresh token, guarda em arquivo e renova sozinho
+local AUTH_PATH = CFG.FOLDER .. "/spotify.json"
+local function authLoad()
+	if type(readfile) ~= "function" or not (type(isfile) == "function" and fsOk(isfile, AUTH_PATH)) then return {} end
+	local ok, d = pcall(function() return HttpService:JSONDecode(readfile(AUTH_PATH)) end)
+	return (ok and type(d) == "table") and d or {}
+end
+local function authSave(d)
+	if type(writefile) ~= "function" then return end
+	ensureFolders()
+	pcall(writefile, AUTH_PATH, HttpService:JSONEncode(d))
+end
+local savedAuth = authLoad()
+Sp.onRefreshToken = function(rt) savedAuth.refresh_token = rt; authSave(savedAuth) end
+
+function Sp.exchange(code)
+	local res = Http.req("POST", "https://accounts.spotify.com/api/token", {
+		Authorization = "Basic " .. b64(CFG.SPOTIFY_CLIENT_ID .. ":" .. CFG.SPOTIFY_CLIENT_SECRET),
+		["Content-Type"] = "application/x-www-form-urlencoded",
+	}, "grant_type=authorization_code&code=" .. HttpService:UrlEncode(code) .. "&redirect_uri=" .. HttpService:UrlEncode(CFG.SPOTIFY_REDIRECT_URI))
+	if not res then return nil, "NETWORK" end
+	local ok, d = pcall(HttpService.JSONDecode, HttpService, res.Body or "")
+	if res.StatusCode == 200 and ok and type(d) == "table" and type(d.access_token) == "string" then return d end
+	return nil, (ok and type(d) == "table" and (d.error_description or d.error)) or ("HTTP_" .. tostring(res.StatusCode))
+end
+function Sp.boot()
+	if Sp.refreshToken == "" and type(savedAuth.refresh_token) == "string" then Sp.refreshToken = savedAuth.refresh_token end
+	local code = CFG.SPOTIFY_AUTH_CODE
+	if code ~= "" and savedAuth.used_code ~= code and CFG.SPOTIFY_CLIENT_ID ~= "" and CFG.SPOTIFY_CLIENT_SECRET ~= "" then
+		local d, err = Sp.exchange(code)
+		if d then
+			Sp.token = d.access_token
+			if type(d.refresh_token) == "string" then Sp.refreshToken = d.refresh_token end
+			savedAuth.refresh_token, savedAuth.used_code = Sp.refreshToken, code
+			authSave(savedAuth)
+			if type(setclipboard) == "function" then pcall(setclipboard, Sp.refreshToken) end
+			Bus.fire("toast", "Spotify conectado! Login salvo.", false)
+			return
+		end
+		Bus.fire("toast", "Código do Spotify inválido ou expirado: " .. tostring(err), true)
+	end
+	if Sp.refreshToken ~= "" then Sp.refresh() end
+end
+
 -- Verificação real do Spotify (só mostra "conectado" após resposta válida)
 task.spawn(function()
 	if not httpRequest then setConn("err", "Sem suporte HTTP") return end
+	pcall(Sp.boot)
 	local me, e = Sp.call("GET", "/v1/me")
 	if type(me) == "table" then
 		setConn("ok", "Spotify · " .. tostring(me.display_name or me.id or "conectado"))
