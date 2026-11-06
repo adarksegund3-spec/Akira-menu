@@ -1,6 +1,6 @@
 --[[
     ANGEL MUSIC — Audius music player for Roblox (Luau, client-side executor)
-    Módulos (tudo em um arquivo): CFG, Maid, Util, Http, Api, Audio, Img, Store, Player, UI, Pages, App
+    Criador: Angel
     Requisitos do executor:
       * request/http_request (HTTP)            -> pesquisa e metadados
       * writefile + getcustomasset/getsynasset -> reprodução de áudio e capas
@@ -22,7 +22,10 @@ local CFG = {
 	FOLDER = "AngelMusic",
 	CACHE_LIMIT = 20,       -- faixas de áudio em disco
 	SEARCH_TTL = 300,
-	WIN_W = 360, WIN_H = 540, PLAYER_H = 112,
+	WIN_W = 296, WIN_H = 392,       -- tamanho inicial (pequeno p/ mobile)
+	MIN_W = 250, MIN_H = 300,       -- limites do redimensionar (seta no canto)
+	MAX_W = 460, MAX_H = 620,
+	PLAYER_H = 100,
 }
 
 local Players = game:GetService("Players")
@@ -39,6 +42,11 @@ local C = {
 	aqua = Color3.fromHex("#55FFD0"), white = Color3.fromHex("#F4FFF8"),
 	gray = Color3.fromHex("#91A49A"), red = Color3.fromHex("#FF5C6C"),
 }
+
+local function cl(x, a, b) -- clamp seguro (não dá erro se b < a)
+	if b < a then return a end
+	return math.max(a, math.min(b, x))
+end
 
 ---------------------------------------------------------------- Maid / Util
 local Maid = { items = {} }
@@ -77,6 +85,9 @@ local function tween(o, t, props, style, dir)
 end
 local function clearList(sc)
 	for _, c in ipairs(sc:GetChildren()) do if c:IsA("GuiObject") then c:Destroy() end end
+end
+local function isPress(i)
+	return i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1
 end
 
 local Bus = { h = {} }
@@ -182,29 +193,138 @@ function Api.trending(limit)
 	if not d then return nil, e end
 	return normList(d)
 end
-function Api.searchTracks(text)
-	local key = "t:" .. text:lower()
+-- Texto: normalização, similaridade e filtro (só fica o que tem a frase ou algo parecido)
+local Txt = {}
+local ACC = {
+	["á"]="a",["à"]="a",["â"]="a",["ã"]="a",["ä"]="a",["Á"]="a",["À"]="a",["Â"]="a",["Ã"]="a",["Ä"]="a",
+	["é"]="e",["è"]="e",["ê"]="e",["ë"]="e",["É"]="e",["È"]="e",["Ê"]="e",["Ë"]="e",
+	["í"]="i",["ì"]="i",["î"]="i",["ï"]="i",["Í"]="i",["Ì"]="i",["Î"]="i",["Ï"]="i",
+	["ó"]="o",["ò"]="o",["ô"]="o",["õ"]="o",["ö"]="o",["Ó"]="o",["Ò"]="o",["Ô"]="o",["Õ"]="o",["Ö"]="o",
+	["ú"]="u",["ù"]="u",["û"]="u",["ü"]="u",["Ú"]="u",["Ù"]="u",["Û"]="u",["Ü"]="u",
+	["ç"]="c",["Ç"]="c",["ñ"]="n",["Ñ"]="n",
+}
+function Txt.norm(str)
+	str = tostring(str or ""):gsub("[\192-\255][\128-\191]*", function(ch) return ACC[ch] or ch end)
+	str = str:lower():gsub("[^%w\128-\255]+", " ")
+	return (str:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+function Txt.words(str)
+	local out = {}
+	for w in str:gmatch("%S+") do table.insert(out, w) end
+	return out
+end
+function Txt.lev(a, b, maxd)
+	local la, lb = #a, #b
+	if math.abs(la - lb) > maxd then return maxd + 1 end
+	local prev = {}
+	for j = 0, lb do prev[j] = j end
+	for i = 1, la do
+		local cur = { [0] = i }
+		local rowmin = i
+		for j = 1, lb do
+			local cost = a:byte(i) == b:byte(j) and 0 or 1
+			local v = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+			cur[j] = v
+			if v < rowmin then rowmin = v end
+		end
+		if rowmin > maxd then return maxd + 1 end
+		prev = cur
+	end
+	return prev[lb]
+end
+-- 0 = não combina; maior = mais parecido
+function Txt.score(query, hayRaw, primaryRaw)
+	local qn = Txt.norm(query)
+	if qn == "" then return 1 end
+	local h = Txt.norm(hayRaw)
+	local pr = Txt.norm(primaryRaw or hayRaw)
+	if pr == qn then return 120 end
+	if pr:sub(1, #qn) == qn then return 110 end
+	if h:find(qn, 1, true) then return 100 end
+	local hw = Txt.words(h)
+	local total, fuzzy = 0, false
+	for _, t in ipairs(Txt.words(qn)) do
+		local hit = false
+		if #t <= 2 then
+			for _, w in ipairs(hw) do if w:sub(1, #t) == t then hit = true break end end
+		else
+			hit = h:find(t, 1, true) ~= nil
+		end
+		if hit then
+			total += 1
+		else
+			local k = #t >= 7 and 2 or (#t >= 4 and 1 or 0)
+			local ok = false
+			if k > 0 then
+				for _, w in ipairs(hw) do if Txt.lev(t, w, k) <= k then ok = true break end end
+			end
+			if not ok then return 0 end
+			fuzzy = true; total += 0.6
+		end
+	end
+	return (fuzzy and 55 or 85) + total
+end
+function Txt.filter(list, query, hayFn, primFn)
+	local arr = {}
+	for i, it in ipairs(list or {}) do
+		local sc = Txt.score(query, hayFn(it), primFn and primFn(it) or nil)
+		if sc > 0 then table.insert(arr, { it = it, sc = sc, i = i }) end
+	end
+	table.sort(arr, function(x, y) if x.sc ~= y.sc then return x.sc > y.sc end return x.i < y.i end)
+	local out = {}
+	for _, e in ipairs(arr) do table.insert(out, e.it) end
+	return out
+end
+
+local function cached(key, fn)
 	local c = Api.cache[key]
 	if c and os.clock() - c.t < CFG.SEARCH_TTL then return c.v end
-	local d, e = Http.json("/v1/tracks/search", { query = text, limit = 25 })
-	if not d then return nil, e end
-	local v = normList(d)
+	local v, e = fn()
+	if not v then return nil, e end
 	Api.cache[key] = { t = os.clock(), v = v }
 	return v
 end
-function Api.searchPlaylists(text)
-	local d, e = Http.json("/v1/playlists/search", { query = text, limit = 6 })
+function Api.searchTracks(text)
+	return cached("t:" .. text:lower(), function()
+		local d, e = Http.json("/v1/tracks/search", { query = text, limit = 50 })
+		if not d then return nil, e end
+		return normList(d)
+	end)
+end
+function Api.searchUsers(text)
+	return cached("u:" .. text:lower(), function()
+		local d, e = Http.json("/v1/users/search", { query = text, limit = 25 })
+		if not d then return nil, e end
+		local out = {}
+		for _, u in ipairs(type(d) == "table" and d or {}) do
+			if type(u) == "table" and u.id then
+				table.insert(out, { id = tostring(u.id), name = tostring(u.name or u.handle or "Artista"),
+					handle = tostring(u.handle or ""), followers = tonumber(u.follower_count) or 0 })
+			end
+		end
+		return out
+	end)
+end
+function Api.userTracks(id)
+	local d, e = Http.json("/v1/users/" .. HttpService:UrlEncode(id) .. "/tracks", { limit = 40 })
 	if not d then return nil, e end
-	local out = {}
-	for _, p in ipairs(d) do
-		if p.id then table.insert(out, {
-			id = tostring(p.id), name = tostring(p.playlist_name or "Playlist"),
-			owner = type(p.user) == "table" and tostring(p.user.name or "") or "",
-			count = tonumber(p.track_count) or 0,
-			art = type(p.artwork) == "table" and (p.artwork["150x150"] or p.artwork["480x480"]) or nil,
-		}) end
-	end
-	return out
+	return normList(d)
+end
+-- playlists e álbuns vêm do mesmo endpoint (is_album separa os dois)
+function Api.searchPlaylists(text)
+	return cached("p:" .. text:lower(), function()
+		local d, e = Http.json("/v1/playlists/search", { query = text, limit = 40 })
+		if not d then return nil, e end
+		local out = {}
+		for _, p in ipairs(type(d) == "table" and d or {}) do
+			if type(p) == "table" and p.id then table.insert(out, {
+				id = tostring(p.id), name = tostring(p.playlist_name or "Playlist"),
+				owner = type(p.user) == "table" and tostring(p.user.name or "") or "",
+				count = tonumber(p.track_count) or 0, isAlbum = p.is_album == true,
+			}) end
+		end
+		return out
+	end)
 end
 function Api.playlistTracks(id)
 	local d, e = Http.json("/v1/playlists/" .. HttpService:UrlEncode(id) .. "/tracks", {})
@@ -420,7 +540,7 @@ function Player.toggle()
 		sound:Resume()
 		local my = Player.token
 		task.spawn(function()
-			local p0 = sound.TimePosition; task.wait(0.4)
+			task.wait(0.4)
 			if my == Player.token and Player.state == "PAUSED" then
 				if sound.IsPlaying then Player.setState("PLAYING") else Player.setState("ERROR", errText("NOSTART")) end
 			end
@@ -479,20 +599,54 @@ local gui = Maid.add(new("ScreenGui", {
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling, DisplayOrder = 999, Parent = container,
 }))
 
+local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+local function viewport()
+	local s = gui.AbsoluteSize
+	if s.X > 100 and s.Y > 100 then return s end
+	return vp
+end
+
 local function label(props)
 	local p = { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextColor3 = C.white, TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }
 	for k, v in pairs(props) do p[k] = v end
 	return new("TextLabel", p)
 end
+
+-- toque "limpo": só dispara se o dedo não arrastou (não conflita com rolagem)
+local function tap(hit, cb)
+	local startPos
+	hit.InputBegan:Connect(function(i)
+		if isPress(i) then startPos = Vector2.new(i.Position.X, i.Position.Y) end
+	end)
+	hit.InputEnded:Connect(function(i)
+		if startPos and isPress(i) then
+			local d = (Vector2.new(i.Position.X, i.Position.Y) - startPos).Magnitude
+			startPos = nil
+			if d < 10 then cb() end
+		end
+	end)
+end
+
 local function button(props, cb)
 	local p = { BackgroundColor3 = C.dgreen, BackgroundTransparency = 0.2, Font = Enum.Font.GothamBold, TextColor3 = C.white,
-		TextSize = 13, AutoButtonColor = true, BorderSizePixel = 0 }
-	for k, v in pairs(props) do p[k] = v end
-	local b = new("TextButton", p, { corner(8) })
-	if cb then Maid.add(b.Activated:Connect(cb)) end
+		TextSize = 12, AutoButtonColor = true, BorderSizePixel = 0 }
+	local tapMode, rad = props.Tap, props.Radius or 8
+	for k, v in pairs(props) do if k ~= "Tap" and k ~= "Radius" then p[k] = v end end
+	local b = new("TextButton", p, { corner(rad) })
+	if cb then
+		if tapMode then tap(b, cb) else b.Activated:Connect(cb) end
+	end
 	return b
 end
+
+-- Feedback de toque (encolhe levemente ao pressionar)
+local function pressFx(b)
+	local sc = new("UIScale", { Parent = b })
+	b.InputBegan:Connect(function(i) if isPress(i) then tween(sc, 0.07, { Scale = 0.88 }) end end)
+	b.InputEnded:Connect(function(i) if isPress(i) then tween(sc, 0.12, { Scale = 1 }) end end)
+end
+
 local function shimmerGradient()
 	return new("UIGradient", {
 		Color = ColorSequence.new({
@@ -510,6 +664,61 @@ local function startShimmer(grad, period)
 	local tw = TweenService:Create(grad, TweenInfo.new(period, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1), { Rotation = 360 })
 	tw:Play()
 	return Maid.add(tw)
+end
+
+-- Arrastar genérico: o delta vem do próprio dedo (sem salto, sem atraso)
+local function dragger(hit, onStart, onMove, onEnd)
+	local active, inp, s = false, nil, nil
+	Maid.add(hit.InputBegan:Connect(function(i)
+		if active or not isPress(i) then return end
+		active, inp = true, i
+		s = Vector2.new(i.Position.X, i.Position.Y)
+		onStart()
+	end))
+	Maid.add(UIS.InputChanged:Connect(function(i)
+		if not active then return end
+		if inp.UserInputType == Enum.UserInputType.Touch then
+			if i ~= inp then return end
+		elseif i.UserInputType ~= Enum.UserInputType.MouseMovement then
+			return
+		end
+		onMove(Vector2.new(i.Position.X, i.Position.Y) - s)
+	end))
+	Maid.add(UIS.InputEnded:Connect(function(i)
+		if not active then return end
+		if i == inp or (inp.UserInputType == Enum.UserInputType.MouseButton1 and i.UserInputType == Enum.UserInputType.MouseButton1) then
+			active = false
+			if onEnd then onEnd() end
+		end
+	end))
+end
+
+---------------------------------------------------------------- Ícones desenhados (sem caracteres que podem bugar)
+local function mkIcon(parent, w, h, z)
+	local ic = { parts = {}, strokes = {}, texts = {} }
+	ic.frame = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(w, h), AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5), ZIndex = z or 9, Parent = parent })
+	return ic
+end
+local function icRect(ic, x, y, w, h, rot, centered)
+	local f = new("Frame", { Size = UDim2.fromOffset(w, h), BackgroundColor3 = C.white, BorderSizePixel = 0,
+		ZIndex = ic.frame.ZIndex, Rotation = rot or 0, Parent = ic.frame })
+	if centered then f.AnchorPoint = Vector2.new(0.5, 0.5) end
+	f.Position = UDim2.fromOffset(x, y)
+	table.insert(ic.parts, f)
+	return f
+end
+local function icTri(ic, x, y, w, h, right) -- triângulo por faixas de 1px
+	for i = 0, h - 1 do
+		local t = 1 - math.abs((2 * i + 1) / h - 1)
+		local sw = math.max(1, math.floor(w * t + 0.5))
+		icRect(ic, right and x or (x + w - sw), y + i, sw, 1)
+	end
+end
+local function icSet(ic, col)
+	for _, p in ipairs(ic.parts) do p.BackgroundColor3 = col end
+	for _, s in ipairs(ic.strokes) do s.Color = col end
+	for _, t in ipairs(ic.texts) do t.TextColor3 = col end
 end
 
 ---------------------------------------------------------------- Toast
@@ -531,10 +740,13 @@ function Toast(msg, isErr)
 	end)
 end
 
----------------------------------------------------------------- Janela
-local vp = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
+---------------------------------------------------------------- Janela (pequena + redimensionável)
+local PH = CFG.PLAYER_H
+local winW = cl(CFG.WIN_W, 200, viewport().X - 12)
+local winH = cl(CFG.WIN_H, 240, viewport().Y - 12)
+local winCenter = viewport() / 2
 
-local bubbleSize = 56
+local bubbleSize = 52
 local bubble = new("Frame", {
 	Name = "Bubble", AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(bubbleSize, bubbleSize),
 	Position = UDim2.fromOffset(40, math.floor(vp.Y * 0.4)), BackgroundColor3 = C.black, Active = true, ZIndex = 50, Parent = gui,
@@ -548,20 +760,24 @@ local bubbleGrad = shimmerGradient(); bubbleGrad.Parent = bubbleStroke
 startShimmer(bubbleGrad, 5)
 
 local window = new("Frame", {
-	Name = "Window", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
-	Size = UDim2.fromOffset(CFG.WIN_W, CFG.WIN_H), BackgroundTransparency = 1, Visible = false, ZIndex = 5, Parent = gui,
+	Name = "Window", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(winCenter.X, winCenter.Y),
+	Size = UDim2.fromOffset(winW, winH), BackgroundTransparency = 1, Visible = false, ZIndex = 5, Parent = gui,
 })
-local uiScale = new("UIScale", { Parent = window })
-local function rescale()
-	local v = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize or vp
-	vp = v
-	uiScale.Scale = math.clamp(math.min((v.X - 16) / CFG.WIN_W, (v.Y - 16) / CFG.WIN_H), 0.5, 1.15)
+
+local function applyWin()
+	local v = viewport()
+	local maxW = math.max(200, math.min(CFG.MAX_W, v.X - 12))
+	local maxH = math.max(240, math.min(CFG.MAX_H, v.Y - 12))
+	winW = cl(winW, math.min(CFG.MIN_W, maxW), maxW)
+	winH = cl(winH, math.min(CFG.MIN_H, maxH), maxH)
+	winCenter = Vector2.new(cl(winCenter.X, winW / 2 + 4, v.X - winW / 2 - 4), cl(winCenter.Y, winH / 2 + 4, v.Y - winH / 2 - 4))
+	window.Size = UDim2.fromOffset(winW, winH)
+	window.Position = UDim2.fromOffset(winCenter.X, winCenter.Y)
 end
-rescale()
-if Workspace.CurrentCamera then Maid.add(Workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)) end
+applyWin()
 
 local body = new("CanvasGroup", { Name = "Body", Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.black,
-	BorderSizePixel = 0, GroupTransparency = 1, Parent = window }, { corner(18) })
+	BorderSizePixel = 0, GroupTransparency = 1, Parent = window }, { corner(14) })
 -- Degradê: centro verde-água -> verde escuro -> bordas pretas
 local glow = new("Frame", { Name = "CenterGlow", Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.aqua,
 	BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1, Parent = body }, {
@@ -577,22 +793,27 @@ local vignette = new("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 =
 	new("UIGradient", { Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9),
 		NumberSequenceKeypoint.new(0.5, 1), NumberSequenceKeypoint.new(1, 0.85) }) }) })
 
-local border = new("Frame", { Name = "Border", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 20, Parent = window }, { corner(18) })
+local border = new("Frame", { Name = "Border", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 20, Parent = window }, { corner(14) })
 local borderBase = new("UIStroke", { Color = C.aqua, Thickness = 1, Transparency = 0.75, Parent = border })
-local border2 = new("Frame", { Name = "Shimmer", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 21, Parent = window }, { corner(18) })
-local shimmerStroke = new("UIStroke", { Color = C.aqua, Thickness = 2.5, Parent = border2 })
+local border2 = new("Frame", { Name = "Shimmer", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 21, Parent = window }, { corner(14) })
+local shimmerStroke = new("UIStroke", { Color = C.aqua, Thickness = 2, Parent = border2 })
 local winGrad = shimmerGradient(); winGrad.Parent = shimmerStroke
 local winShimmerTween = startShimmer(winGrad, 4)
 winShimmerTween:Pause()
 
--- Cabeçalho
-local header = new("Frame", { Size = UDim2.new(1, 0, 0, 44), BackgroundTransparency = 1, ZIndex = 3, Parent = body })
-new("ImageLabel", { BackgroundTransparency = 1, Image = CFG.LOGO, Size = UDim2.fromOffset(28, 28), Position = UDim2.fromOffset(12, 8), ZIndex = 4, Parent = header })
-label({ Text = "ANGEL MUSIC", Font = Enum.Font.GothamBlack, TextSize = 15, Size = UDim2.fromOffset(110, 18), Position = UDim2.fromOffset(46, 6), ZIndex = 4, Parent = header })
-local statusDot = new("Frame", { Size = UDim2.fromOffset(7, 7), Position = UDim2.fromOffset(48, 29), BackgroundColor3 = C.gray, ZIndex = 4, Parent = header }, { corner(4) })
-local statusText = label({ Text = "Verificando…", TextSize = 10, TextColor3 = C.gray, Size = UDim2.fromOffset(150, 12), Position = UDim2.fromOffset(60, 26), ZIndex = 4, Parent = header })
-local btnMin = button({ Text = "–", Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -74, 0, 9), ZIndex = 4, Parent = header })
-local btnClose = button({ Text = "✕", Size = UDim2.fromOffset(30, 26), Position = UDim2.new(1, -40, 0, 9), ZIndex = 4, Parent = header })
+-- Cabeçalho (arrastar por aqui move a janela)
+local header = new("Frame", { Size = UDim2.new(1, 0, 0, 34), BackgroundTransparency = 1, Active = true, ZIndex = 3, Parent = body })
+new("ImageLabel", { BackgroundTransparency = 1, Image = CFG.LOGO, Size = UDim2.fromOffset(24, 24), Position = UDim2.fromOffset(8, 5), ZIndex = 4, Parent = header })
+label({ Text = "ANGEL MUSIC", Font = Enum.Font.GothamBlack, TextSize = 13, Size = UDim2.fromOffset(94, 16), Position = UDim2.fromOffset(38, 3), ZIndex = 4, Parent = header })
+label({ Text = "Criador: Angel", TextSize = 9, TextColor3 = C.gray, TextTransparency = 0.3, Size = UDim2.new(1, -(136 + 62), 0, 12),
+	Position = UDim2.fromOffset(136, 6), ZIndex = 4, Parent = header })
+local statusDot = new("Frame", { Size = UDim2.fromOffset(6, 6), Position = UDim2.fromOffset(40, 22), BackgroundColor3 = C.gray, ZIndex = 4, Parent = header }, { corner(3) })
+local statusText = label({ Text = "Verificando…", TextSize = 9, TextColor3 = C.gray, Size = UDim2.new(1, -110, 0, 12), Position = UDim2.fromOffset(50, 19), ZIndex = 4, Parent = header })
+
+local btnMin = button({ Text = "", Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -56, 0, 5), ZIndex = 4, Radius = 12, Parent = header })
+local icMin = mkIcon(btnMin, 12, 12, 5); icRect(icMin, 0, 5, 12, 2); icSet(icMin, C.white)
+local btnClose = button({ Text = "", Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -30, 0, 5), ZIndex = 4, Radius = 12, Parent = header })
+local icClose = mkIcon(btnClose, 12, 12, 5); icRect(icClose, 6, 6, 15, 2, 45, true); icRect(icClose, 6, 6, 15, 2, -45, true); icSet(icClose, C.white)
 
 local function setConn(kind, text)
 	statusText.Text = text
@@ -600,49 +821,102 @@ local function setConn(kind, text)
 	statusDot.BackgroundColor3 = col; statusText.TextColor3 = col
 end
 
--- Navegação
+-- Navegação (rolável na horizontal, cabe em qualquer largura)
 local NAV = { "Início", "Busca", "Biblioteca", "Favoritos", "Playlists", "Fila" }
-local nav = new("Frame", { Size = UDim2.new(1, -16, 0, 30), Position = UDim2.fromOffset(8, 46), BackgroundTransparency = 1, ZIndex = 3, Parent = body },
-	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 3) }) })
-local content = new("Frame", { Size = UDim2.new(1, -16, 1, -(80 + CFG.PLAYER_H + 8)), Position = UDim2.fromOffset(8, 80),
+local nav = new("ScrollingFrame", { Size = UDim2.new(1, -12, 0, 26), Position = UDim2.fromOffset(6, 36), BackgroundTransparency = 1,
+	BorderSizePixel = 0, ScrollBarThickness = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.X,
+	ScrollingDirection = Enum.ScrollingDirection.X, ZIndex = 3, Parent = body },
+	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
+		VerticalAlignment = Enum.VerticalAlignment.Center }) })
+local content = new("Frame", { Size = UDim2.new(1, -12, 1, -(66 + PH + 10)), Position = UDim2.fromOffset(6, 66),
 	BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 3, Parent = body })
-toastLabel = new("TextLabel", { Size = UDim2.new(0.8, 0, 0, 24), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -4),
-	BackgroundColor3 = C.black, BackgroundTransparency = 1, TextTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 11,
-	TextColor3 = C.aqua, ZIndex = 30, Visible = false, Text = "", Parent = content }, { corner(12) })
+toastLabel = new("TextLabel", { Size = UDim2.new(0.86, 0, 0, 22), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -(PH + 12)),
+	BackgroundColor3 = C.black, BackgroundTransparency = 1, TextTransparency = 1, Font = Enum.Font.GothamMedium, TextSize = 10,
+	TextColor3 = C.aqua, ZIndex = 60, Visible = false, Text = "", Parent = body }, { corner(11) })
 
----------------------------------------------------------------- Linhas de faixa
-local pickPlaylist -- definida adiante
+---------------------------------------------------------------- Listas / folhas de ação
+local function newScroll(parent, pos, size)
+	return new("ScrollingFrame", { Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 2, ScrollBarImageColor3 = C.aqua, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = parent },
+		{ new("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }) })
+end
+local function infoLabel(parent, text, col)
+	return label({ Text = text, TextColor3 = col or C.gray, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center,
+		Size = UDim2.new(1, -4, 0, 40), TextSize = 11, LayoutOrder = -1, Parent = parent })
+end
 
+local function sheet(title, items)
+	local ov = new("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.black, BackgroundTransparency = 0.4, Text = "",
+		AutoButtonColor = false, ZIndex = 40, Parent = body })
+	local h = math.min(#items * 33 + 44, math.max(120, body.AbsoluteSize.Y - 40))
+	local panel = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(0.88, 0, 0, h),
+		BackgroundColor3 = C.black2, Active = true, ZIndex = 41, Parent = ov }, { corner(14), new("UIStroke", { Color = C.aqua, Transparency = 0.5 }) })
+	label({ Text = title, Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, -20, 0, 22), Position = UDim2.fromOffset(10, 6), Parent = panel })
+	local sc = newScroll(panel, UDim2.fromOffset(8, 30), UDim2.new(1, -16, 1, -38))
+	Maid.add(ov.Activated:Connect(function() ov:Destroy() end))
+	for i, it in ipairs(items) do
+		button({ Text = it[1], Size = UDim2.new(1, -4, 0, 30), LayoutOrder = i, TextSize = 11, TextColor3 = it[3] or C.white, Tap = true, Parent = sc },
+			function() ov:Destroy(); it[2]() end)
+	end
+	return ov
+end
+
+local pickPlaylist, openTrackMenu
+function pickPlaylist(track)
+	local items = {}
+	for _, pl in ipairs(Store.data.playlists) do
+		table.insert(items, { pl.name, function()
+			Toast(Store.playlistAdd(pl, track) and ("Adicionado a " .. pl.name) or "Já está na playlist")
+		end })
+	end
+	table.insert(items, { "+ Nova playlist", function()
+		local pl = Store.newPlaylist("Playlist " .. (#Store.data.playlists + 1))
+		Store.playlistAdd(pl, track); Toast("Adicionado a " .. pl.name)
+	end, C.green })
+	sheet("Adicionar à playlist", items)
+end
+function openTrackMenu(track, ctx)
+	local items = {
+		{ "Tocar agora", ctx.play, C.green },
+		{ "Adicionar à fila", function() Player.enqueue(track); Toast("Adicionado à fila") end },
+		{ Store.isFav(track.id) and "Remover dos favoritos" or "Adicionar aos favoritos", function()
+			local on = Store.toggleFav(track)
+			if ctx.after then ctx.after() end
+			Toast(on and "Adicionado aos favoritos" or "Removido dos favoritos")
+		end },
+		{ "Adicionar à playlist", function() pickPlaylist(track) end },
+	}
+	if ctx.onRemove then table.insert(items, { "Remover desta lista", ctx.onRemove, C.red }) end
+	sheet(track.title, items)
+end
+
+---------------------------------------------------------------- Linhas de faixa (toque na linha = tocar)
 local function trackRow(parent, track, ctx)
 	local isCur = ctx.highlight
-	local row = new("Frame", { Size = UDim2.new(1, -4, 0, 52), BackgroundColor3 = isCur and C.dgreen or C.black2,
+	local row = new("Frame", { Size = UDim2.new(1, -4, 0, 44), BackgroundColor3 = isCur and C.dgreen or C.black2,
 		BackgroundTransparency = isCur and 0.1 or 0.35, BorderSizePixel = 0, LayoutOrder = ctx.order or 0, Parent = parent },
 		{ corner(10) })
-	local cover = new("ImageLabel", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(6, 6), BackgroundColor3 = C.black,
+	local cover = new("ImageLabel", { Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(5, 5), BackgroundColor3 = C.black,
 		Image = CFG.LOGO, ScaleType = Enum.ScaleType.Crop, Parent = row }, { corner(6) })
 	Img.apply(cover, track)
-	local nb = ctx.onRemove and 5 or 4
-	local bw = nb * 27
-	label({ Text = track.title, Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, -(56 + bw), 0, 18),
-		Position = UDim2.fromOffset(52, 8), TextTransparency = track.streamable and 0 or 0.5, Parent = row })
-	label({ Text = track.artist .. "  ·  " .. fmt(track.duration) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 10,
-		TextColor3 = C.gray, Size = UDim2.new(1, -(56 + bw), 0, 14), Position = UDim2.fromOffset(52, 27), Parent = row })
-	local btns = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(bw, 40), AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -4, 0.5, 0), Parent = row },
-		{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 2) }) })
-	local function mini(text, cb, col)
-		return button({ Text = text, Size = UDim2.fromOffset(25, 30), TextSize = 14, TextColor3 = col or C.white, Parent = btns }, cb)
-	end
-	mini("▶", function() ctx.play() end, C.green)
-	local fav = mini(Store.isFav(track.id) and "♥" or "♡", nil, C.aqua)
-	Maid.add(fav.Activated:Connect(function()
-		local on = Store.toggleFav(track)
-		fav.Text = on and "♥" or "♡"
+	local bw = 56
+	label({ Text = track.title, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = isCur and C.aqua or C.white,
+		Size = UDim2.new(1, -(45 + bw + 4), 0, 16), Position = UDim2.fromOffset(45, 5), TextTransparency = track.streamable and 0 or 0.5, Parent = row })
+	label({ Text = track.artist .. "  ·  " .. fmt(track.duration) .. (track.streamable and "" or "  ·  indisponível"), TextSize = 9,
+		TextColor3 = C.gray, Size = UDim2.new(1, -(45 + bw + 4), 0, 13), Position = UDim2.fromOffset(45, 23), Parent = row })
+	local hit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -(bw + 4), 1, 0), Parent = row })
+	tap(hit, ctx.play)
+	local fav = button({ Text = Store.isFav(track.id) and "♥" or "♡", Size = UDim2.fromOffset(26, 30), BackgroundTransparency = 1, TextSize = 15,
+		TextColor3 = C.aqua, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -30, 0.5, 0), Parent = row })
+	local function setHeart() fav.Text = Store.isFav(track.id) and "♥" or "♡" end
+	tap(fav, function()
+		local on = Store.toggleFav(track); setHeart()
 		Toast(on and "Adicionado aos favoritos" or "Removido dos favoritos")
-	end))
-	mini("+", function() Player.enqueue(track); Toast("Adicionado à fila") end)
-	mini("≡", function() pickPlaylist(track) end)
-	if ctx.onRemove then mini("✕", ctx.onRemove, C.red) end
+	end)
+	local more = button({ Text = "•••", Size = UDim2.fromOffset(26, 30), BackgroundTransparency = 1, TextSize = 10,
+		TextColor3 = C.gray, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -4, 0.5, 0), Parent = row })
+	tap(more, function() openTrackMenu(track, { play = ctx.play, onRemove = ctx.onRemove, after = setHeart }) end)
 	return row
 end
 
@@ -657,17 +931,6 @@ local function renderTracks(scroll, tracks, opts)
 	end
 end
 
-local function newScroll(parent, pos, size)
-	return new("ScrollingFrame", { Position = pos, Size = size, BackgroundTransparency = 1, BorderSizePixel = 0,
-		ScrollBarThickness = 3, ScrollBarImageColor3 = C.aqua, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = parent },
-		{ new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }) })
-end
-local function infoLabel(parent, text, col)
-	return label({ Text = text, TextColor3 = col or C.gray, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Center,
-		Size = UDim2.new(1, -4, 0, 40), TextSize = 12, LayoutOrder = -1, Parent = parent })
-end
-
 ---------------------------------------------------------------- Páginas
 local Pages = {}
 local function makePage(name)
@@ -676,28 +939,30 @@ local function makePage(name)
 	return Pages[name]
 end
 local function headerBar(parent, title, actions)
-	local h = new("Frame", { Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, Parent = parent })
-	label({ Text = title, Font = Enum.Font.GothamBold, TextSize = 14, Size = UDim2.new(0.5, 0, 1, 0), Parent = h })
+	local h = new("Frame", { Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Parent = parent })
+	local total = 0
+	for _, a in ipairs(actions) do total += (a[3] or 60) + 4 end
+	label({ Text = title, Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, -(total + 4), 1, 0), Parent = h })
 	local x = 0
 	for i = #actions, 1, -1 do
 		local a = actions[i]
-		button({ Text = a[1], Size = UDim2.fromOffset(a[3] or 78, 26), AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -x - 2, 0.5, 0), TextSize = 11, Parent = h }, a[2])
-		x += (a[3] or 78) + 4
+		button({ Text = a[1], Size = UDim2.fromOffset(a[3] or 60, 24), AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -x - 2, 0.5, 0), TextSize = 10, Radius = 12, Parent = h }, a[2])
+		x += (a[3] or 60) + 4
 	end
 	return h
 end
 local function listPage(name, title, actions)
 	local p = makePage(name)
 	headerBar(p.frame, title, actions)
-	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 34), UDim2.new(1, 0, 1, -34))
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 31), UDim2.new(1, 0, 1, -31))
 	return p
 end
 
 -- INÍCIO (trending real da Audius)
 do
-	local p = listPage("Início", "Em alta na Audius", { { "Atualizar", function() Pages["Início"].load(true) end, 72 },
-		{ "Tocar tudo", function() if Pages["Início"].tracks and #Pages["Início"].tracks > 0 then Player.playQueue(Pages["Início"].tracks, 1) end end, 78 } })
+	local p = listPage("Início", "Em alta na Audius", { { "Atualizar", function() Pages["Início"].load(true) end, 58 },
+		{ "Tocar tudo", function() if Pages["Início"].tracks and #Pages["Início"].tracks > 0 then Player.playQueue(Pages["Início"].tracks, 1) end end, 64 } })
 	function p.load(force)
 		if p.tracks and not force then return end
 		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
@@ -713,71 +978,183 @@ do
 	p.show = function() p.load(false) end
 end
 
--- BUSCA
+-- BUSCA (mini abas: Tudo | Músicas | Cantores | Playlists | Álbuns)
 do
 	local p = makePage("Busca")
-	local box = new("TextBox", { Size = UDim2.new(1, -74, 0, 32), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Música, artista, playlist…",
-		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = p.frame }, { corner(8), new("UIPadding", { PaddingLeft = UDim.new(0, 10) }) })
-	local go = button({ Text = "Buscar", Size = UDim2.fromOffset(68, 32), Position = UDim2.new(1, -68, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, Parent = p.frame })
-	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 38), UDim2.new(1, 0, 1, -38))
+	local box = new("TextBox", { Size = UDim2.new(1, -62, 0, 30), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Música, cantor, playlist, álbum…",
+		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = p.frame }, { corner(15), new("UIPadding", { PaddingLeft = UDim.new(0, 12) }) })
+	local go = button({ Text = "Buscar", Size = UDim2.fromOffset(56, 30), Position = UDim2.new(1, -56, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, TextSize = 11, Radius = 15, Parent = p.frame })
+	local chips = new("ScrollingFrame", { Size = UDim2.new(1, 0, 0, 24), Position = UDim2.fromOffset(0, 34), BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.X, ScrollingDirection = Enum.ScrollingDirection.X, Parent = p.frame },
+		{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 62), UDim2.new(1, 0, 1, -62))
+
+	local MODES = { "Tudo", "Músicas", "Cantores", "Playlists", "Álbuns" }
+	local mode = "Tudo"            -- padrão: pesquisa tudo
+	local res = nil                -- últimos resultados (já filtrados por relevância)
 	local token = 0
-	local function showPlaylist(pl)
+	local chipBtns = {}
+	local renderResults, search
+
+	local function paintChips()
+		for n, b in pairs(chipBtns) do
+			local on = n == mode
+			b.BackgroundColor3 = on and C.green or C.dgreen
+			b.TextColor3 = on and C.black or C.white
+		end
+	end
+	local function fmtNum(n)
+		if n >= 1000000 then return string.format("%.1fM", n / 1000000) end
+		if n >= 1000 then return string.format("%.1fk", n / 1000) end
+		return tostring(n)
+	end
+	local function sectionTitle(text, order)
+		label({ Text = text, Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = C.aqua, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = order, Parent = p.scroll })
+	end
+	local function infoRow(order, title, sub, btnText, cb)
+		local row = new("Frame", { Size = UDim2.new(1, -4, 0, 40), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = order, Parent = p.scroll }, { corner(10) })
+		label({ Text = title, Font = Enum.Font.GothamBold, TextSize = 11, Size = UDim2.new(1, -76, 0, 16), Position = UDim2.fromOffset(10, 4), Parent = row })
+		label({ Text = sub, TextColor3 = C.gray, TextSize = 9, Size = UDim2.new(1, -76, 0, 13), Position = UDim2.fromOffset(10, 21), Parent = row })
+		button({ Text = btnText, Size = UDim2.fromOffset(52, 26), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 10, Radius = 13, Tap = true, Parent = row }, cb)
+	end
+
+	-- abre uma lista de faixas (playlist, álbum ou músicas de um cantor)
+	local function showTracksView(fetch)
 		token += 1; local my = token
-		clearList(p.scroll); infoLabel(p.scroll, "Carregando playlist…")
+		clearList(p.scroll); infoLabel(p.scroll, "Carregando…")
 		task.spawn(function()
-			local tr, err = Api.playlistTracks(pl.id)
+			local tr, err = fetch()
 			if my ~= token then return end
 			clearList(p.scroll)
-			button({ Text = "← Voltar aos resultados   |   Tocar playlist", Size = UDim2.new(1, -4, 0, 30), LayoutOrder = 0, TextSize = 11, Parent = p.scroll },
+			local bar = new("Frame", { Size = UDim2.new(1, -4, 0, 28), BackgroundTransparency = 1, LayoutOrder = 0, Parent = p.scroll },
+				{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }) })
+			button({ Text = "← Resultados", Size = UDim2.fromOffset(86, 26), TextSize = 10, Radius = 13, Parent = bar }, function() renderResults() end)
+			button({ Text = "Tocar tudo", Size = UDim2.fromOffset(76, 26), TextSize = 10, Radius = 13, Parent = bar },
 				function() if tr and #tr > 0 then Player.playQueue(tr, 1) end end)
 			if not tr then infoLabel(p.scroll, errText(err), C.red) return end
-			if #tr == 0 then infoLabel(p.scroll, "Playlist vazia.") return end
+			if #tr == 0 then infoLabel(p.scroll, "Nada por aqui.") return end
 			renderTracks(p.scroll, tr, { baseOrder = 1 })
 		end)
 	end
-	local lastResult
-	local function render(tracks, pls)
+
+	function renderResults()
+		token += 1
 		clearList(p.scroll)
-		if #tracks == 0 and #pls == 0 then infoLabel(p.scroll, "Nenhum resultado encontrado.") return end
-		renderTracks(p.scroll, tracks, { baseOrder = 0 })
-		if #pls > 0 then
-			label({ Text = "Playlists", Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 100, Parent = p.scroll })
-			for i, pl in ipairs(pls) do
-				local row = new("Frame", { Size = UDim2.new(1, -4, 0, 44), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = 100 + i, Parent = p.scroll }, { corner(10) })
-				label({ Text = pl.name, Font = Enum.Font.GothamBold, Size = UDim2.new(1, -90, 0, 18), Position = UDim2.fromOffset(10, 5), Parent = row })
-				label({ Text = (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", TextColor3 = C.gray, TextSize = 10,
-					Size = UDim2.new(1, -90, 0, 14), Position = UDim2.fromOffset(10, 24), Parent = row })
-				button({ Text = "Abrir", Size = UDim2.fromOffset(60, 28), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 11, Parent = row },
-					function() showPlaylist(pl) end)
+		if not res then return end
+		local all = mode == "Tudo"
+		local lim = all and 5 or 1000
+		local shown = 0
+		local function slice(list, n)
+			if #list <= n then return list end
+			local o = {}
+			for i = 1, n do o[i] = list[i] end
+			return o
+		end
+		if all or mode == "Músicas" then
+			local list = slice(res.tracks, all and 6 or 1000)
+			if #list > 0 then
+				shown += #list
+				if all then sectionTitle("Músicas", 0) end
+				renderTracks(p.scroll, list, { baseOrder = 1 })
 			end
 		end
+		if all or mode == "Cantores" then
+			local list = slice(res.artists, all and 3 or 1000)
+			if #list > 0 then
+				shown += #list
+				sectionTitle("Cantores", 1000)
+				for i, u in ipairs(list) do
+					infoRow(1000 + i, u.name, (u.handle ~= "" and ("@" .. u.handle .. " · ") or "") .. fmtNum(u.followers) .. " seguidores", "Abrir",
+						function() showTracksView(function() return Api.userTracks(u.id) end) end)
+				end
+			end
+		end
+		if all or mode == "Playlists" then
+			local list = slice(res.playlists, all and 3 or 1000)
+			if #list > 0 then
+				shown += #list
+				sectionTitle("Playlists", 2000)
+				for i, pl in ipairs(list) do
+					infoRow(2000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", "Abrir",
+						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
+				end
+			end
+		end
+		if all or mode == "Álbuns" then
+			local list = slice(res.albums, all and 3 or 1000)
+			if #list > 0 then
+				shown += #list
+				sectionTitle("Álbuns", 3000)
+				for i, pl in ipairs(list) do
+					infoRow(3000 + i, pl.name, (pl.owner ~= "" and pl.owner .. " · " or "") .. pl.count .. " faixas", "Abrir",
+						function() showTracksView(function() return Api.playlistTracks(pl.id) end) end)
+				end
+			end
+		end
+		if shown == 0 then infoLabel(p.scroll, "Nada com “" .. res.q .. "”. Tente outra palavra ou outra aba.") end
 	end
-	local function search()
+
+	function search()
 		local text = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
 		if text == "" then return end
 		token += 1; local my = token
 		clearList(p.scroll); infoLabel(p.scroll, "Buscando…")
 		go.Text = "…"
 		task.spawn(function()
-			local tracks, err = Api.searchTracks(text)
-			local pls = Api.searchPlaylists(text) or {}
+			local out, errs, pending = {}, {}, 3
+			local function job(key, fn)
+				task.spawn(function()
+					local v, e = fn()
+					out[key], errs[key] = v, e
+					pending -= 1
+				end)
+			end
+			job("tracks", function() return Api.searchTracks(text) end)
+			job("users", function() return Api.searchUsers(text) end)
+			job("pls", function() return Api.searchPlaylists(text) end)
+			local t0 = os.clock()
+			while pending > 0 and os.clock() - t0 < 25 do task.wait(0.05) end
 			if my ~= token then return end -- resposta antiga ignorada
 			go.Text = "Buscar"
-			if not tracks then clearList(p.scroll); infoLabel(p.scroll, errText(err), C.red) return end
-			lastResult = { tracks, pls }
-			render(tracks, pls)
+			if not out.tracks and not out.users and not out.pls then
+				clearList(p.scroll); infoLabel(p.scroll, errText(errs.tracks or errs.users or errs.pls or "NETWORK"), C.red) return
+			end
+			-- pesquisa afiada: só fica o que contém a frase (ou algo bem parecido)
+			local albums, pls = {}, {}
+			for _, x in ipairs(out.pls or {}) do table.insert(x.isAlbum and albums or pls, x) end
+			res = {
+				q = text,
+				tracks = Txt.filter(out.tracks, text, function(t) return t.title .. " " .. t.artist end, function(t) return t.title end),
+				artists = Txt.filter(out.users, text, function(u) return u.name .. " " .. u.handle end, function(u) return u.name end),
+				playlists = Txt.filter(pls, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
+				albums = Txt.filter(albums, text, function(x) return x.name .. " " .. x.owner end, function(x) return x.name end),
+			}
+			renderResults()
 		end)
 	end
-	Maid.add(go.Activated:Connect(search))
-	Maid.add(box.FocusLost:Connect(function(enter) if enter then search() end end))
+
+	for i, n in ipairs(MODES) do
+		local b = button({ Text = n, Size = UDim2.new(0, 0, 1, -2), AutomaticSize = Enum.AutomaticSize.X, TextSize = 10, LayoutOrder = i, Radius = 12, Tap = true, Parent = chips },
+			function()
+				mode = n; paintChips()
+				if res then renderResults() elseif box.Text ~= "" then search() end
+			end)
+		new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), Parent = b })
+		chipBtns[n] = b
+	end
+	paintChips()
+
+	go.Activated:Connect(search)
+	box.FocusLost:Connect(function(enter) if enter then search() end end)
 	p.show = function() end
 end
 
 -- BIBLIOTECA (reproduzidas recentemente)
 do
-	local p = listPage("Biblioteca", "Tocadas recentemente", { { "Tocar tudo", function() if #Store.data.recent > 0 then Player.playQueue(Store.data.recent, 1) end end, 78 },
-		{ "Limpar", function() Store.data.recent = {}; Store.save(); Pages["Biblioteca"].show() end, 56 } })
+	local p = listPage("Biblioteca", "Tocadas recentemente", { { "Tocar tudo", function() if #Store.data.recent > 0 then Player.playQueue(Store.data.recent, 1) end end, 64 },
+		{ "Limpar", function() Store.data.recent = {}; Store.save(); Pages["Biblioteca"].show() end, 46 } })
 	function p.show()
 		clearList(p.scroll)
 		if #Store.data.recent == 0 then infoLabel(p.scroll, "Nada tocado ainda. Reproduza uma música para ela aparecer aqui.") return end
@@ -787,12 +1164,12 @@ end
 
 -- FAVORITOS
 do
-	local p = listPage("Favoritos", "Favoritos", { { "Tocar", function() if #Store.data.fav > 0 then Player.playQueue(Store.data.fav, 1) end end, 54 },
+	local p = listPage("Favoritos", "Favoritos", { { "Tocar", function() if #Store.data.fav > 0 then Player.playQueue(Store.data.fav, 1) end end, 46 },
 		{ "Aleatório", function()
 			local f = Store.data.fav
 			if #f == 0 then return end
 			Player.shuffle = true; Bus.fire("mode"); Player.playQueue(f, math.random(#f))
-		end, 72 } })
+		end, 60 } })
 	function p.show()
 		clearList(p.scroll)
 		if #Store.data.fav == 0 then infoLabel(p.scroll, "Nenhum favorito. Toque em ♡ em qualquer faixa.") return end
@@ -803,10 +1180,10 @@ end
 
 -- FILA
 do
-	local p = listPage("Fila", "Fila de reprodução", { { "Limpar fila", function() Player.clear() end, 80 } })
+	local p = listPage("Fila", "Fila de reprodução", { { "Limpar fila", function() Player.clear() end, 70 } })
 	function p.show()
 		clearList(p.scroll)
-		if #Player.queue == 0 then infoLabel(p.scroll, "A fila está vazia. Use + em uma faixa para adicionar.") return end
+		if #Player.queue == 0 then infoLabel(p.scroll, "A fila está vazia. Use ••• em uma faixa para adicionar.") return end
 		renderTracks(p.scroll, Player.queue, {
 			highlight = function(i) return i == Player.index end,
 			onPlay = function(i) Player.playIndex(i) end,
@@ -819,75 +1196,54 @@ end
 -- PLAYLISTS
 do
 	local p = makePage("Playlists")
-	local box = new("TextBox", { Size = UDim2.new(1, -74, 0, 32), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Nome da playlist",
-		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = p.frame }, { corner(8), new("UIPadding", { PaddingLeft = UDim.new(0, 10) }) })
-	local create = button({ Text = "Criar", Size = UDim2.fromOffset(68, 32), Position = UDim2.new(1, -68, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, Parent = p.frame })
-	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 38), UDim2.new(1, 0, 1, -38))
+	local box = new("TextBox", { Size = UDim2.new(1, -62, 0, 30), BackgroundColor3 = C.black2, TextColor3 = C.white, PlaceholderText = "Nome da playlist",
+		PlaceholderColor3 = C.gray, Text = "", ClearTextOnFocus = false, Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = p.frame }, { corner(15), new("UIPadding", { PaddingLeft = UDim.new(0, 12) }) })
+	local create = button({ Text = "Criar", Size = UDim2.fromOffset(56, 30), Position = UDim2.new(1, -56, 0, 0), BackgroundColor3 = C.green, TextColor3 = C.black, TextSize = 11, Radius = 15, Parent = p.frame })
+	p.scroll = newScroll(p.frame, UDim2.fromOffset(0, 35), UDim2.new(1, 0, 1, -35))
 	local open -- playlist aberta (ou nil)
 	local function list()
 		open = nil; box.PlaceholderText = "Nome da playlist"; create.Text = "Criar"
 		clearList(p.scroll)
 		if #Store.data.playlists == 0 then infoLabel(p.scroll, "Nenhuma playlist. Digite um nome e toque em Criar.") return end
 		for i, pl in ipairs(Store.data.playlists) do
-			local row = new("Frame", { Size = UDim2.new(1, -4, 0, 44), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = i, Parent = p.scroll }, { corner(10) })
-			label({ Text = pl.name, Font = Enum.Font.GothamBold, Size = UDim2.new(1, -90, 0, 18), Position = UDim2.fromOffset(10, 5), Parent = row })
-			label({ Text = #pl.tracks .. " faixas", TextColor3 = C.gray, TextSize = 10, Size = UDim2.new(1, -90, 0, 14), Position = UDim2.fromOffset(10, 24), Parent = row })
-			button({ Text = "Abrir", Size = UDim2.fromOffset(60, 28), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 11, Parent = row },
+			local row = new("Frame", { Size = UDim2.new(1, -4, 0, 40), BackgroundColor3 = C.black2, BackgroundTransparency = 0.35, LayoutOrder = i, Parent = p.scroll }, { corner(10) })
+			label({ Text = pl.name, Font = Enum.Font.GothamBold, TextSize = 11, Size = UDim2.new(1, -76, 0, 16), Position = UDim2.fromOffset(10, 4), Parent = row })
+			label({ Text = #pl.tracks .. " faixas", TextColor3 = C.gray, TextSize = 9, Size = UDim2.new(1, -76, 0, 13), Position = UDim2.fromOffset(10, 21), Parent = row })
+			button({ Text = "Abrir", Size = UDim2.fromOffset(52, 26), AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), TextSize = 10, Radius = 13, Tap = true, Parent = row },
 				function() p.openPlaylist(pl) end)
 		end
 	end
 	function p.openPlaylist(pl)
 		open = pl; box.Text = ""; box.PlaceholderText = "Novo nome…"; create.Text = "Renomear"
 		clearList(p.scroll)
-		local bar = new("Frame", { Size = UDim2.new(1, -4, 0, 30), BackgroundTransparency = 1, LayoutOrder = 0, Parent = p.scroll },
+		local bar = new("Frame", { Size = UDim2.new(1, -4, 0, 28), BackgroundTransparency = 1, LayoutOrder = 0, Parent = p.scroll },
 			{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4) }) })
-		local function b(t, cb, w) return button({ Text = t, Size = UDim2.fromOffset(w, 28), TextSize = 11, Parent = bar }, cb) end
-		b("← Voltar", list, 64)
-		b("Tocar", function() if #pl.tracks > 0 then Player.playQueue(pl.tracks, 1) end end, 52)
-		b("Aleatório", function() if #pl.tracks > 0 then Player.shuffle = true; Bus.fire("mode"); Player.playQueue(pl.tracks, math.random(#pl.tracks)) end end, 70)
+		local function b(t, cb, w) return button({ Text = t, Size = UDim2.fromOffset(w, 26), TextSize = 10, Radius = 13, Parent = bar }, cb) end
+		b("← Voltar", list, 56)
+		b("Tocar", function() if #pl.tracks > 0 then Player.playQueue(pl.tracks, 1) end end, 44)
+		b("Aleatório", function() if #pl.tracks > 0 then Player.shuffle = true; Bus.fire("mode"); Player.playQueue(pl.tracks, math.random(#pl.tracks)) end end, 58)
 		b("Excluir", function()
 			for i, x in ipairs(Store.data.playlists) do if x == pl then table.remove(Store.data.playlists, i) break end end
 			Store.save(); list()
-		end, 56)
-		label({ Text = pl.name, Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 1, Parent = p.scroll })
+		end, 48)
+		label({ Text = pl.name, Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 1, Parent = p.scroll })
 		if #pl.tracks == 0 then
-			label({ Text = "Vazia. Use ≡ em uma faixa para adicionar aqui.", TextColor3 = C.gray, TextSize = 11, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = 2, Parent = p.scroll })
+			label({ Text = "Vazia. Use ••• em uma faixa para adicionar aqui.", TextColor3 = C.gray, TextSize = 10, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = 2, Parent = p.scroll })
 			return
 		end
 		renderTracks(p.scroll, pl.tracks, { baseOrder = 2, onRemove = function(i)
 			table.remove(pl.tracks, i); Store.save(); p.openPlaylist(pl)
 		end })
 	end
-	Maid.add(create.Activated:Connect(function()
+	create.Activated:Connect(function()
 		local name = box.Text:gsub("^%s+", ""):gsub("%s+$", "")
 		if name == "" then Toast("Digite um nome", true) return end
 		if open then open.name = name; Store.save(); box.Text = ""; p.openPlaylist(open); Toast("Playlist renomeada")
 		else Store.newPlaylist(name); box.Text = ""; list(); Toast("Playlist criada") end
-	end))
+	end)
 	p.show = function() if open then p.openPlaylist(open) else list() end end
 	Bus.on("playlists", function() if p.frame.Visible and not open then list() end end)
-end
-
----------------------------------------------------------------- Popup "adicionar à playlist"
-function pickPlaylist(track)
-	local ov = new("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = C.black, BackgroundTransparency = 0.35, Text = "", AutoButtonColor = false, ZIndex = 40, Parent = body })
-	local panel = new("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45), Size = UDim2.fromOffset(280, 260),
-		BackgroundColor3 = C.black2, ZIndex = 41, Parent = ov }, { corner(14), new("UIStroke", { Color = C.aqua, Transparency = 0.5 }) })
-	label({ Text = "Adicionar à playlist", Font = Enum.Font.GothamBold, TextSize = 14, Size = UDim2.new(1, -20, 0, 26), Position = UDim2.fromOffset(12, 6), ZIndex = 42, Parent = panel })
-	local sc = newScroll(panel, UDim2.fromOffset(10, 36), UDim2.new(1, -20, 1, -82))
-	local function close() ov:Destroy() end
-	local function add(pl)
-		Toast(Store.playlistAdd(pl, track) and ("Adicionado a " .. pl.name) or "Já está na playlist")
-		close()
-	end
-	for i, pl in ipairs(Store.data.playlists) do
-		button({ Text = pl.name, Size = UDim2.new(1, -4, 0, 30), LayoutOrder = i, TextSize = 12, ZIndex = 42, Parent = sc }, function() add(pl) end)
-	end
-	button({ Text = "+ Nova playlist", Size = UDim2.new(1, -4, 0, 30), LayoutOrder = 999, BackgroundColor3 = C.green, TextColor3 = C.black, ZIndex = 42, Parent = sc },
-		function() add(Store.newPlaylist("Playlist " .. (#Store.data.playlists + 1))) end)
-	button({ Text = "Cancelar", Size = UDim2.new(1, -20, 0, 28), Position = UDim2.new(0, 10, 1, -36), ZIndex = 42, Parent = panel }, close)
-	for _, d in ipairs(panel:GetDescendants()) do if d:IsA("GuiObject") then d.ZIndex = math.max(d.ZIndex, 42) end end
 end
 
 ---------------------------------------------------------------- Barra de navegação
@@ -903,64 +1259,155 @@ local function selectTab(name)
 	if Pages[name].show then Pages[name].show() end
 end
 for i, n in ipairs(NAV) do
-	navBtns[n] = button({ Text = n, Size = UDim2.new(1 / #NAV, -3, 1, 0), TextSize = 10, LayoutOrder = i, Parent = nav }, function() selectTab(n) end)
+	local b = button({ Text = n, Size = UDim2.new(0, 0, 1, -2), AutomaticSize = Enum.AutomaticSize.X, TextSize = 10, LayoutOrder = i, Radius = 13, Tap = true, Parent = nav },
+		function() selectTab(n) end)
+	new("UIPadding", { PaddingLeft = UDim.new(0, 11), PaddingRight = UDim.new(0, 11), Parent = b })
+	navBtns[n] = b
 end
 
----------------------------------------------------------------- Player UI
-local pbar = new("Frame", { Size = UDim2.new(1, -16, 0, CFG.PLAYER_H), Position = UDim2.new(0, 8, 1, -(CFG.PLAYER_H + 6)),
-	BackgroundColor3 = C.black, BackgroundTransparency = 0.25, ZIndex = 6, Parent = body }, { corner(12), new("UIStroke", { Color = C.aqua, Transparency = 0.8 }) })
-local pCover = new("ImageLabel", { Size = UDim2.fromOffset(40, 40), Position = UDim2.fromOffset(8, 7), Image = CFG.LOGO, BackgroundColor3 = C.black,
-	ScaleType = Enum.ScaleType.Crop, ZIndex = 7, Parent = pbar }, { corner(6) })
-local pTitle = label({ Text = "Nada tocando", Font = Enum.Font.GothamBold, TextSize = 13, Size = UDim2.new(1, -62, 0, 16), Position = UDim2.fromOffset(54, 6), ZIndex = 7, Parent = pbar })
-local pArtist = label({ Text = "—", TextColor3 = C.gray, TextSize = 11, Size = UDim2.new(1, -62, 0, 14), Position = UDim2.fromOffset(54, 22), ZIndex = 7, Parent = pbar })
-local pState = label({ Text = "IDLE", TextColor3 = C.aqua, Font = Enum.Font.GothamBold, TextSize = 9, Size = UDim2.new(1, -62, 0, 12), Position = UDim2.fromOffset(54, 36), ZIndex = 7, Parent = pbar })
-local tCur = label({ Text = "0:00", TextSize = 10, TextColor3 = C.gray, Size = UDim2.fromOffset(32, 12), Position = UDim2.fromOffset(8, 52), ZIndex = 7, Parent = pbar })
-local tDur = label({ Text = "0:00", TextSize = 10, TextColor3 = C.gray, TextXAlignment = Enum.TextXAlignment.Right, Size = UDim2.fromOffset(32, 12), Position = UDim2.new(1, -40, 0, 52), ZIndex = 7, Parent = pbar })
-local barHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -88, 0, 16), Position = UDim2.fromOffset(44, 50), ZIndex = 8, Parent = pbar })
+---------------------------------------------------------------- Player UI (estilo app)
+local pbar = new("Frame", { Size = UDim2.new(1, -12, 0, PH), Position = UDim2.new(0, 6, 1, -(PH + 6)),
+	BackgroundColor3 = C.black, BackgroundTransparency = 0.2, ZIndex = 6, Parent = body }, { corner(14), new("UIStroke", { Color = C.aqua, Transparency = 0.8 }) })
+local pCover = new("ImageLabel", { Size = UDim2.fromOffset(36, 36), Position = UDim2.fromOffset(7, 7), Image = CFG.LOGO, BackgroundColor3 = C.black,
+	ScaleType = Enum.ScaleType.Crop, ZIndex = 7, Parent = pbar }, { corner(7) })
+local pTitle = label({ Text = "Nada tocando", Font = Enum.Font.GothamBold, TextSize = 12, Size = UDim2.new(1, -(47 + 36), 0, 15), Position = UDim2.fromOffset(49, 6), ZIndex = 7, Parent = pbar })
+local pArtist = label({ Text = "—", TextColor3 = C.gray, TextSize = 10, Size = UDim2.new(1, -(47 + 36), 0, 12), Position = UDim2.fromOffset(49, 21), ZIndex = 7, Parent = pbar })
+local pState = label({ Text = "PARADO", TextColor3 = C.aqua, Font = Enum.Font.GothamBold, TextSize = 8, Size = UDim2.new(1, -(47 + 36), 0, 10), Position = UDim2.fromOffset(49, 34), ZIndex = 7, Parent = pbar })
+
+-- botão de volume (abre mini slider)
+local volBtn = button({ Text = "", Size = UDim2.fromOffset(26, 26), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 9),
+	BackgroundTransparency = 1, ZIndex = 8, Radius = 13, Parent = pbar })
+local icVol = mkIcon(volBtn, 14, 14, 9)
+icRect(icVol, 0, 4, 4, 6); icTri(icVol, 4, 0, 6, 14, false)
+icRect(icVol, 12, 7, 2, 2) -- ponto de som
+icSet(icVol, C.gray)
+
+local tCur = label({ Text = "0:00", TextSize = 9, TextColor3 = C.gray, Size = UDim2.fromOffset(28, 12), Position = UDim2.fromOffset(7, 47), ZIndex = 7, Parent = pbar })
+local tDur = label({ Text = "0:00", TextSize = 9, TextColor3 = C.gray, TextXAlignment = Enum.TextXAlignment.Right, Size = UDim2.fromOffset(28, 12), Position = UDim2.new(1, -35, 0, 47), ZIndex = 7, Parent = pbar })
+local barHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -76, 0, 18), Position = UDim2.fromOffset(38, 44), ZIndex = 8, Parent = pbar })
 local barTrack = new("Frame", { Size = UDim2.new(1, 0, 0, 4), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), BackgroundColor3 = C.dgreen, BorderSizePixel = 0, ZIndex = 8, Parent = barHit }, { corner(2) })
 local barFill = new("Frame", { Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.aqua, BorderSizePixel = 0, ZIndex = 9, Parent = barTrack }, { corner(2) })
+new("Frame", { Size = UDim2.fromOffset(10, 10), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(1, 0.5), BackgroundColor3 = C.white, BorderSizePixel = 0, ZIndex = 10, Parent = barFill }, { corner(5) })
 
 local function slider(hit, onChange)
 	local dragging = false
 	local function upd(x) onChange(math.clamp((x - hit.AbsolutePosition.X) / math.max(hit.AbsoluteSize.X, 1), 0, 1)) end
 	Maid.add(hit.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; upd(i.Position.X) end
+		if isPress(i) then dragging = true; upd(i.Position.X) end
 	end))
 	Maid.add(UIS.InputChanged:Connect(function(i)
 		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then upd(i.Position.X) end
 	end))
 	Maid.add(UIS.InputEnded:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = false end
+		if isPress(i) then dragging = false end
 	end))
 end
-slider(barHit, function(r) Player.seek(r) end)
-
-local ctrl = new("Frame", { Size = UDim2.new(1, -110, 0, 36), Position = UDim2.fromOffset(6, 70), BackgroundTransparency = 1, ZIndex = 7, Parent = pbar },
-	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 5) }) })
-local function cbtn(t, w, cb, props)
-	local p = { Text = t, Size = UDim2.fromOffset(w, 30), TextSize = 14, ZIndex = 8, Parent = ctrl }
-	for k, v in pairs(props or {}) do p[k] = v end
-	return button(p, cb)
+local function refreshProgress()
+	local len = sound.TimeLength
+	if len > 0 then
+		barFill.Size = UDim2.fromScale(math.clamp(sound.TimePosition / len, 0, 1), 1)
+		tCur.Text = fmt(sound.TimePosition); tDur.Text = fmt(len)
+	end
 end
-local bShuffle = cbtn("⤮", 32, function() Player.shuffle = not Player.shuffle; Bus.fire("mode") end)
-cbtn("⏮", 32, function() Player.prev() end)
-local bPlay = cbtn("▶", 40, function() Player.toggle() end, { BackgroundColor3 = C.green, TextColor3 = C.black, TextSize = 16, Size = UDim2.fromOffset(40, 32) })
-cbtn("⏭", 32, function() Player.next(false) end)
-local bRepeat = cbtn("⟲", 32, function() Player.repeatMode = (Player.repeatMode + 1) % 3; Bus.fire("mode") end)
+slider(barHit, function(r)
+	Player.seek(r)
+	if sound.TimeLength > 0 and (Player.state == "PLAYING" or Player.state == "PAUSED") then
+		barFill.Size = UDim2.fromScale(r, 1); tCur.Text = fmt(r * sound.TimeLength)
+	end
+end)
 
-label({ Text = "VOL", TextSize = 9, TextColor3 = C.gray, Size = UDim2.fromOffset(22, 12), Position = UDim2.new(1, -92, 0, 80), ZIndex = 7, Parent = pbar })
-local volHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(62, 20), Position = UDim2.new(1, -68, 0, 76), ZIndex = 8, Parent = pbar })
-local volTrack = new("Frame", { Size = UDim2.new(1, 0, 0, 4), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), BackgroundColor3 = C.dgreen, BorderSizePixel = 0, ZIndex = 8, Parent = volHit }, { corner(2) })
-local volFill = new("Frame", { Size = UDim2.fromScale(Store.data.volume, 1), BackgroundColor3 = C.green, BorderSizePixel = 0, ZIndex = 9, Parent = volTrack }, { corner(2) })
-slider(volHit, function(r) Player.setVolume(r) end)
+-- Controles
+local ctrl = new("Frame", { Size = UDim2.new(1, 0, 0, 38), Position = UDim2.fromOffset(0, 61), BackgroundTransparency = 1, ZIndex = 7, Parent = pbar },
+	{ new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }) })
+local function ctrlBtn(size, order, cb)
+	local b = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.fromOffset(size, size), LayoutOrder = order,
+		AutoButtonColor = false, ZIndex = 8, Parent = ctrl })
+	pressFx(b)
+	b.Activated:Connect(cb)
+	return b
+end
+
+local bShuffle = ctrlBtn(30, 1, function() Player.shuffle = not Player.shuffle; Bus.fire("mode") end)
+local icShuf = mkIcon(bShuffle, 20, 16, 9)
+icRect(icShuf, 9, 8, 16, 2, 28, true); icRect(icShuf, 9, 8, 16, 2, -28, true)
+icTri(icShuf, 15, 1, 4, 6, true); icTri(icShuf, 15, 9, 4, 6, true)
+icShuf.frame.Position = UDim2.new(0.5, 0, 0.5, -2)
+local dotShuf = new("Frame", { Size = UDim2.fromOffset(4, 4), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -1),
+	BackgroundColor3 = C.green, BorderSizePixel = 0, Visible = false, ZIndex = 9, Parent = bShuffle }, { corner(2) })
+
+local bPrev = ctrlBtn(34, 2, function() Player.prev() end)
+local icPrev = mkIcon(bPrev, 14, 14, 9)
+icRect(icPrev, 0, 0, 3, 14); icTri(icPrev, 4, 0, 10, 14, false); icSet(icPrev, C.white)
+
+local bPlay = ctrlBtn(42, 3, function() Player.toggle() end)
+bPlay.BackgroundTransparency = 0; bPlay.BackgroundColor3 = C.white
+new("UICorner", { CornerRadius = UDim.new(1, 0), Parent = bPlay })
+new("UIStroke", { Color = C.aqua, Thickness = 1, Transparency = 0.6, Parent = bPlay })
+local icPlay = mkIcon(bPlay, 13, 16, 9)
+icTri(icPlay, 0, 0, 13, 16, true); icSet(icPlay, C.black)
+icPlay.frame.Position = UDim2.new(0.5, 2, 0.5, 0)
+local icPause = mkIcon(bPlay, 12, 16, 9)
+icRect(icPause, 0, 0, 4, 16); icRect(icPause, 8, 0, 4, 16); icSet(icPause, C.black)
+icPause.frame.Visible = false
+local spinner = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(20, 20), AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.5), Visible = false, ZIndex = 9, Parent = bPlay }, { corner(10) })
+local spinStroke = new("UIStroke", { Color = C.black, Thickness = 2.5, Parent = spinner })
+local spinGrad = new("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(0.6, 1), NumberSequenceKeypoint.new(1, 1) }), Parent = spinStroke })
+
+local bNext = ctrlBtn(34, 4, function() Player.next(false) end)
+local icNext = mkIcon(bNext, 14, 14, 9)
+icTri(icNext, 0, 0, 10, 14, true); icRect(icNext, 11, 0, 3, 14); icSet(icNext, C.white)
+
+local bRepeat = ctrlBtn(30, 5, function() Player.repeatMode = (Player.repeatMode + 1) % 3; Bus.fire("mode") end)
+local icRep = mkIcon(bRepeat, 18, 14, 9)
+do
+	local outline = new("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(16, 10), Position = UDim2.fromOffset(1, 3), ZIndex = 9, Parent = icRep.frame },
+		{ corner(4) })
+	table.insert(icRep.strokes, new("UIStroke", { Thickness = 1.5, Color = C.white, Parent = outline }))
+	icTri(icRep, 11, 0, 4, 6, true)
+end
+icRep.frame.Position = UDim2.new(0.5, 0, 0.5, -2)
+local repOne = new("TextLabel", { BackgroundTransparency = 1, Text = "1", Font = Enum.Font.GothamBlack, TextSize = 8, TextColor3 = C.white,
+	Size = UDim2.fromOffset(10, 10), Position = UDim2.fromOffset(4, 3), Visible = false, ZIndex = 10, Parent = icRep.frame })
+table.insert(icRep.texts, repOne)
+local dotRep = new("Frame", { Size = UDim2.fromOffset(4, 4), AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -1),
+	BackgroundColor3 = C.green, BorderSizePixel = 0, Visible = false, ZIndex = 9, Parent = bRepeat }, { corner(2) })
+
+-- Volume (mini popup)
+local volPop = new("Frame", { Size = UDim2.fromOffset(130, 30), AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -8, 1, -(PH + 10)),
+	BackgroundColor3 = C.black2, Visible = false, ZIndex = 45, Parent = body }, { corner(15), new("UIStroke", { Color = C.aqua, Transparency = 0.5 }) })
+local volHit = new("TextButton", { Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, -24, 0, 22), Position = UDim2.fromOffset(12, 4), ZIndex = 46, Parent = volPop })
+local volTrack = new("Frame", { Size = UDim2.new(1, 0, 0, 4), AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.fromScale(0, 0.5), BackgroundColor3 = C.dgreen, BorderSizePixel = 0, ZIndex = 46, Parent = volHit }, { corner(2) })
+local volFill = new("Frame", { Size = UDim2.fromScale(Store.data.volume, 1), BackgroundColor3 = C.green, BorderSizePixel = 0, ZIndex = 47, Parent = volTrack }, { corner(2) })
+new("Frame", { Size = UDim2.fromOffset(10, 10), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(1, 0.5), BackgroundColor3 = C.white, BorderSizePixel = 0, ZIndex = 48, Parent = volFill }, { corner(5) })
+local volTok = 0
+local function armVol()
+	volTok += 1
+	local my = volTok
+	task.delay(3, function() if my == volTok and volPop.Parent then volPop.Visible = false; icSet(icVol, C.gray) end end)
+end
+volBtn.Activated:Connect(function()
+	volPop.Visible = not volPop.Visible
+	icSet(icVol, volPop.Visible and C.aqua or C.gray)
+	if volPop.Visible then armVol() end
+end)
+slider(volHit, function(r) Player.setVolume(r); armVol() end)
 Bus.on("volume", function() volFill.Size = UDim2.fromScale(Store.data.volume, 1) end)
 
 local STATE_TXT = { IDLE = "PARADO", LOADING = "CARREGANDO…", PLAYING = "REPRODUZINDO", PAUSED = "PAUSADO", FINISHED = "FINALIZADO" }
+local function refreshPlay()
+	local s = Player.state
+	icPlay.frame.Visible = not (s == "PLAYING" or s == "LOADING")
+	icPause.frame.Visible = s == "PLAYING"
+	spinner.Visible = s == "LOADING"
+end
 Bus.on("state", function()
 	local s = Player.state
 	pState.Text = s == "ERROR" and ("ERRO — " .. Player.msg) or (STATE_TXT[s] or s)
 	pState.TextColor3 = s == "ERROR" and C.red or C.aqua
-	bPlay.Text = s == "PLAYING" and "⏸" or "▶"
+	refreshPlay()
 	if s == "ERROR" then Toast(Player.msg, true) end
 end)
 Bus.on("track", function()
@@ -971,25 +1418,53 @@ Bus.on("track", function()
 	tDur.Text = fmt(t.duration); tCur.Text = "0:00"; barFill.Size = UDim2.fromScale(0, 1)
 end)
 Bus.on("mode", function()
-	bShuffle.BackgroundColor3 = Player.shuffle and C.green or C.dgreen
-	bShuffle.TextColor3 = Player.shuffle and C.black or C.white
-	bRepeat.Text = Player.repeatMode == 2 and "⟲1" or "⟲"
-	bRepeat.BackgroundColor3 = Player.repeatMode > 0 and C.green or C.dgreen
-	bRepeat.TextColor3 = Player.repeatMode > 0 and C.black or C.white
+	icSet(icShuf, Player.shuffle and C.green or C.gray); dotShuf.Visible = Player.shuffle
+	icSet(icRep, Player.repeatMode > 0 and C.green or C.gray); dotRep.Visible = Player.repeatMode > 0
+	repOne.Visible = Player.repeatMode == 2
 end)
 
 local acc, windowOpen = 0, false
 Maid.add(RunService.Heartbeat:Connect(function(dt)
+	if spinner.Visible then spinGrad.Rotation = (os.clock() * 360) % 360 end
 	acc += dt
 	if acc < 0.2 then return end
 	acc = 0
-	if not windowOpen or Player.state ~= "PLAYING" then return end
-	local len = sound.TimeLength
-	if len > 0 then
-		barFill.Size = UDim2.fromScale(math.clamp(sound.TimePosition / len, 0, 1), 1)
-		tCur.Text = fmt(sound.TimePosition); tDur.Text = fmt(len)
-	end
+	if windowOpen and Player.state == "PLAYING" then refreshProgress() end
 end))
+
+---------------------------------------------------------------- Seta de redimensionar (canto inferior direito)
+do
+	local grip = new("TextButton", { Text = "", Size = UDim2.fromOffset(24, 24), AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -1, 1, -1),
+		BackgroundColor3 = C.black2, BackgroundTransparency = 0.15, AutoButtonColor = false, ZIndex = 30, Parent = window }, { corner(12) })
+	local ic = mkIcon(grip, 12, 12, 31)
+	icRect(ic, 6, 6, 15, 2, 45, true)
+	icRect(ic, 5, 10, 7, 2); icRect(ic, 10, 5, 2, 7) -- ponta inferior direita
+	icRect(ic, 0, 0, 7, 2); icRect(ic, 0, 0, 2, 7)   -- ponta superior esquerda
+	icSet(ic, C.aqua)
+	local sw, sh, tl
+	dragger(grip, function()
+		sw, sh = winW, winH
+		tl = winCenter - Vector2.new(winW, winH) / 2
+	end, function(d)
+		local v = viewport()
+		local maxW = math.max(200, math.min(CFG.MAX_W, v.X - 12 - math.max(tl.X - 6, 0) * 0))
+		local maxH = math.max(240, math.min(CFG.MAX_H, v.Y - 12))
+		winW = cl(sw + d.X, math.min(CFG.MIN_W, maxW), maxW)
+		winH = cl(sh + d.Y, math.min(CFG.MIN_H, maxH), maxH)
+		winCenter = tl + Vector2.new(winW, winH) / 2 -- canto superior esquerdo fica parado
+		window.Size = UDim2.fromOffset(winW, winH)
+		window.Position = UDim2.fromOffset(winCenter.X, winCenter.Y)
+	end, function() applyWin() end)
+end
+
+-- Mover a janela pelo cabeçalho
+do
+	local startC
+	dragger(header, function() startC = winCenter end, function(d)
+		winCenter = startC + d
+		applyWin()
+	end)
+end
 
 ---------------------------------------------------------------- Abrir / fechar com animação
 local animating = false
@@ -998,9 +1473,10 @@ local function bubbleCenter() return bubble.AbsolutePosition + bubble.AbsoluteSi
 local function openWindow()
 	if animating or windowOpen then return end
 	animating = true
+	applyWin()
 	local bc = bubbleCenter()
 	window.Position = UDim2.fromOffset(bc.X, bc.Y)
-	window.Size = UDim2.fromOffset(CFG.WIN_W * 0.35, CFG.WIN_H * 0.35)
+	window.Size = UDim2.fromOffset(winW * 0.35, winH * 0.35)
 	body.GroupTransparency = 1; glow.BackgroundTransparency = 1; border2.Visible = true
 	shimmerStroke.Transparency = 1; borderBase.Transparency = 1
 	window.Visible = true; windowOpen = true
@@ -1008,10 +1484,10 @@ local function openWindow()
 	tween(glow, 0.9, { BackgroundTransparency = 0 })                       -- degradê surge progressivamente
 	tween(body, 0.35, { GroupTransparency = 0 })
 	tween(shimmerStroke, 0.5, { Transparency = 0 }); tween(borderBase, 0.5, { Transparency = 0.75 })
-	tween(window, 0.45, { Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(CFG.WIN_W, CFG.WIN_H) }, Enum.EasingStyle.Back)
+	tween(window, 0.4, { Position = UDim2.fromOffset(winCenter.X, winCenter.Y), Size = UDim2.fromOffset(winW, winH) }, Enum.EasingStyle.Quint)
 	tween(bubble, 0.25, { BackgroundTransparency = 1 })
 	bubble.Visible = false
-	task.delay(0.5, function() animating = false end)
+	task.delay(0.45, function() animating = false; if windowOpen then applyWin() end end)
 	if not currentTab then selectTab("Início") end
 end
 local function closeWindow()
@@ -1019,49 +1495,46 @@ local function closeWindow()
 	animating = true
 	local bc = bubbleCenter()
 	bubble.Visible = true; bubble.BackgroundTransparency = 0
+	volPop.Visible = false
 	tween(body, 0.3, { GroupTransparency = 1 })
 	tween(shimmerStroke, 0.25, { Transparency = 1 }); tween(borderBase, 0.25, { Transparency = 1 })
-	tween(window, 0.3, { Position = UDim2.fromOffset(bc.X, bc.Y), Size = UDim2.fromOffset(CFG.WIN_W * 0.2, CFG.WIN_H * 0.2) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	tween(window, 0.3, { Position = UDim2.fromOffset(bc.X, bc.Y), Size = UDim2.fromOffset(winW * 0.2, winH * 0.2) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 	task.delay(0.32, function()
 		window.Visible = false; windowOpen = false; animating = false
 		winShimmerTween:Pause()  -- sem animação de borda enquanto minimizado
 	end)
 end
-Maid.add(btnMin.Activated:Connect(closeWindow))
-Maid.add(btnClose.Activated:Connect(function()
+btnMin.Activated:Connect(closeWindow)
+btnClose.Activated:Connect(function()
 	Player.token += 1; sound:Stop()
 	Maid.clean() -- destrói sons, conexões, tweens e a GUI
+end)
+
+-- Mudança de tela/rotação: mantém tudo dentro da tela
+Maid.add(gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	vp = viewport()
+	if windowOpen and not animating then applyWin() end
+	local v = viewport()
+	local r = bubbleSize / 2
+	local c = bubble.AbsolutePosition + bubble.AbsoluteSize / 2
+	bubble.Position = UDim2.fromOffset(cl(c.X, r, v.X - r), cl(c.Y, r, v.Y - r))
 end))
 
----------------------------------------------------------------- Arrastar a bolinha (distingue clique de arraste)
+---------------------------------------------------------------- Arrastar a bolinha (100% colada no dedo)
 do
-	local dragging, moved, dragInput, startInput, startPos = false, false, nil, nil, nil
-	Maid.add(bubble.InputBegan:Connect(function(i)
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			dragging, moved, dragInput = true, false, i
-			startInput = i.Position; startPos = bubble.AbsolutePosition + bubble.AbsoluteSize / 2
-		end
-	end))
-	Maid.add(UIS.InputChanged:Connect(function(i)
-		if not dragging then return end
-		local ok = (dragInput.UserInputType == Enum.UserInputType.Touch and i == dragInput)
-			or (dragInput.UserInputType == Enum.UserInputType.MouseButton1 and i.UserInputType == Enum.UserInputType.MouseMovement)
-		if not ok then return end
-		local d = Vector3.new(i.Position.X - startInput.X, i.Position.Y - startInput.Y, 0)
-		if not moved and d.Magnitude < 8 then return end -- limiar de arraste
-		moved = true
+	local startCenter, moved = Vector2.zero, false
+	dragger(bubble, function()
+		startCenter = bubbleCenter()
+		moved = false
+	end, function(d)
+		if d.Magnitude > 6 then moved = true end
+		local v = viewport()
 		local r = bubbleSize / 2
-		local x = math.clamp(startPos.X + d.X, r, vp.X - r)
-		local y = math.clamp(startPos.Y + d.Y, r, vp.Y - r)
-		bubble.Position = UDim2.fromOffset(x, y)
-	end))
-	Maid.add(UIS.InputEnded:Connect(function(i)
-		if not dragging then return end
-		if i == dragInput or (i.UserInputType == Enum.UserInputType.MouseButton1 and dragInput.UserInputType == Enum.UserInputType.MouseButton1) then
-			dragging = false
-			if not moved then openWindow() end
-		end
-	end))
+		-- posição = centro inicial + deslocamento exato do dedo (sem limiar, sem salto)
+		bubble.Position = UDim2.fromOffset(cl(startCenter.X + d.X, r, v.X - r), cl(startCenter.Y + d.Y, r, v.Y - r))
+	end, function()
+		if not moved then openWindow() end
+	end)
 end
 
 ---------------------------------------------------------------- Inicialização
@@ -1069,6 +1542,7 @@ Store.load()
 sound.Volume = Store.data.volume
 volFill.Size = UDim2.fromScale(Store.data.volume, 1)
 Bus.fire("mode")
+refreshPlay()
 
 -- Verificação real da API/credenciais (só mostra "conectado" após resposta válida)
 task.spawn(function()
