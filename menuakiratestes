@@ -1,416 +1,1526 @@
-local WindUI = loadstring(game:HttpGet("https://article-hub-studio.github.io/WindUI-Skibidi/main.lua"))()
-pcall(function() WindUI:SetTheme("Purple") end)
-pcall(function() WindUI:SetTheme("Amethyst") end)
+--[[
+    ANGEL EXECUTOR  -  interface própria (PT-BR) com o ARCEUS dentro
+    • Logo "A" arrastável  → toque abre/fecha o menu
+    • Menu central arrastável (pelo cabeçalho)
+    • 14 temas (cada um com layout/cores/animações próprios), aba "Temas"
+    • Abas: Início, Editor, Arceus, Jogador, Temas, Registro
+    • Aba "Arceus": acha a interface do Arceus e traz a janela original dela
+      (todas as abas e funções) para dentro deste menu, já no tema escolhido,
+      em PT-BR e com o título "Angel executor"
+    • Tecla RightShift abre/fecha (PC)
+]]
 
-local Window = WindUI:CreateWindow({
-    Título = "DRIP TAF",
-    TypeWindow = "modern",
-    Ícone = "chapéu de formatura",
-    ToggleKey = "RightShift",
-    Arrastável = verdadeiro,
-})
+----------------------------------------------------------------
+-- Serviços
+----------------------------------------------------------------
+local cloneref = cloneref or function(x) return x end
+local function svc(n) return cloneref(game:GetService(n)) end
 
-função local CopiarTexto(Texto)
-    sucesso local = falso
-    if setclipboard then pcall(setclipboard, Texto) sucesso = true
-    elseif toclipboard then pcall(toclipboard, Texto) sucesso = true
-    senão se set_clipboard então pcall(set_clipboard, Texto) sucesso = verdadeiro
-    fim
-    
-    Se tiver sucesso, então
-        WindUI:Notify({ Type = "Originalmente", Title = "Copiado!", Content = "Texto copiado." })
-    outro
-        WindUI:Notify({ Type = "Originalmente", Title = "Erro", Content = "Seu executor não suporta copiar." })
-    fim
-fim
+local Players      = svc("Players")
+local UIS          = svc("UserInputService")
+local TweenService = svc("TweenService")
+local RunService   = svc("RunService")
+local CoreGui      = svc("CoreGui")
+local Stats        = svc("Stats")
+local Market       = svc("MarketplaceService")
+local VirtualUser  = svc("VirtualUser")
 
--- =========================================
--- PRINCIPAL ABA
--- =========================================
-local TabPrincipal = Window:Tab({ Title = "Principal", Icon = "home" })
-TabPrincipal:Select()
+if not game:IsLoaded() then game.Loaded:Wait() end
+local LP = Players.LocalPlayer
+while not LP do task.wait() LP = Players.LocalPlayer end
 
-local SecCreditos = TabPrincipal:Section({ Title = "Créditos", TextXAligment = "Left" })
-SecCreditos:Paragraph({ Title = "Criador: Falouzin antigo\nServidor: gotejamento", Desc = "Agradecimentos especiais ao servidor." })
+local env = (getgenv and getgenv()) or _G
+if env.AngelSkin and env.AngelSkin.Destroy then pcall(env.AngelSkin.Destroy) end     -- remove o skin antigo
+if env.AngelExecutor and env.AngelExecutor.Destroy then pcall(env.AngelExecutor.Destroy) end
 
-local SecSelecao = TabPrincipal:Section({ Title = "Seleção de TAF", TextXAlignment = "Left" })
-local AbasCriadas = {}
+----------------------------------------------------------------
+-- Temas / versões
+----------------------------------------------------------------
+local C = Color3.fromRGB
+local Themes = {
+    {
+        id = "v1", cmd = "Color blue v1", name = "Azul Neon",
+        desc = "Menu lateral à esquerda. Visual limpo e suave.",
+        layout = "side_left", tabStyle = "bar",
+        w = 470, h = 290, headerH = 54, radius = 14, titleSize = 24, center = false,
+        bg0 = C(3, 8, 24), bg1 = C(10, 72, 165), bgRot = 35, bgT = 0.08,
+        accent = C(45, 155, 255), onAccent = C(255, 255, 255),
+        card = C(6, 18, 44), cardT = 0.25, line = C(40, 115, 210),
+        animBorder = false, glow = false, press = false, shine = false, corners = false,
+    },
+    {
+        id = "v2", cmd = "Color red v2", name = "Vermelho Carmim",
+        desc = "Abas no topo, quinas retas e borda animada.",
+        layout = "top", tabStyle = "underline",
+        w = 540, h = 310, headerH = 54, radius = 4, titleSize = 26, center = false,
+        bg0 = C(0, 0, 0), bg1 = C(150, 0, 25), bgRot = 20, bgT = 0.06,
+        accent = C(235, 30, 55), onAccent = C(255, 255, 255),
+        card = C(18, 0, 5), cardT = 0.2, line = C(200, 20, 45),
+        animBorder = true, glow = false, press = false, shine = false, corners = true,
+    },
+    {
+        id = "v3", cmd = "Color purple v3", name = "Roxo Vazio",
+        desc = "Menu lateral à direita, brilho neon e cliques animados.",
+        layout = "side_right", tabStyle = "pill",
+        w = 470, h = 300, headerH = 56, radius = 22, titleSize = 26, center = true,
+        bg0 = C(8, 0, 20), bg1 = C(85, 0, 135), bgRot = 55, bgT = 0.05,
+        accent = C(175, 85, 255), onAccent = C(255, 255, 255),
+        card = C(18, 4, 40), cardT = 0.2, line = C(150, 70, 230),
+        bodyFont = Enum.Font.Gotham,
+        animBorder = true, glow = true, press = true, shine = false, corners = false,
+    },
+    {
+        id = "v4", cmd = "Color gold v4", name = "Ouro Elite",
+        desc = "Dock inferior, reflexo dourado e título maior.",
+        layout = "dock", tabStyle = "dock",
+        w = 540, h = 330, headerH = 62, radius = 12, titleSize = 30, center = true,
+        bg0 = C(0, 0, 0), bg1 = C(80, 52, 0), bgRot = 70, bgT = 0.04,
+        accent = C(255, 197, 60), onAccent = C(15, 10, 0),
+        card = C(18, 12, 0), cardT = 0.15, line = C(220, 165, 40),
+        animBorder = true, glow = true, press = true, shine = true, corners = true,
+    },
+    {
+        id = "v5", cmd = "Color green v5", name = "Verde Esmeralda",
+        desc = "Menu lateral à esquerda, brilho suave e visual natural.",
+        layout = "side_left", tabStyle = "bar",
+        w = 480, h = 300, radius = 12, titleSize = 24, center = false,
+        bg0 = C(0, 10, 6), bg1 = C(0, 100, 58), bgRot = 40,
+        accent = C(40, 215, 130), onAccent = C(0, 20, 10),
+        animBorder = false, glow = true, press = true, shine = false, corners = false,
+    },
+    {
+        id = "v6", cmd = "Color cyan v6", name = "Ciano Glacial",
+        desc = "Abas no topo, reflexo gelado e borda animada.",
+        layout = "top", tabStyle = "underline",
+        w = 540, h = 310, radius = 8, titleSize = 26, center = true,
+        bg0 = C(0, 10, 18), bg1 = C(0, 115, 140), bgRot = 25,
+        accent = C(60, 225, 235), onAccent = C(0, 18, 24),
+        animBorder = true, glow = false, press = true, shine = true, corners = false,
+    },
+    {
+        id = "v7", cmd = "Color pink v7", name = "Rosa Sakura",
+        desc = "Menu à direita, cantos bem arredondados e brilho rosado.",
+        layout = "side_right", tabStyle = "pill",
+        w = 470, h = 300, headerH = 56, radius = 22, titleSize = 26, center = true,
+        bg0 = C(22, 0, 14), bg1 = C(160, 30, 95), bgRot = 55,
+        accent = C(255, 110, 175), onAccent = C(35, 0, 18),
+        bodyFont = Enum.Font.Gotham,
+        animBorder = true, glow = true, press = true, shine = false, corners = false,
+    },
+    {
+        id = "v8", cmd = "Color orange v8", name = "Laranja Pôr do Sol",
+        desc = "Dock inferior com reflexo quente e brilho.",
+        layout = "dock", tabStyle = "dock",
+        w = 540, h = 330, headerH = 60, radius = 14, titleSize = 28, center = true,
+        bg0 = C(18, 4, 0), bg1 = C(160, 60, 0), bgRot = 65, bgT = 0.04,
+        accent = C(255, 140, 50), onAccent = C(25, 8, 0),
+        animBorder = false, glow = true, press = true, shine = true, corners = false,
+    },
+    {
+        id = "v9", cmd = "Color graphite v9", name = "Grafite Mono",
+        desc = "Minimalista em tons de cinza, abas no topo e quinas retas.",
+        layout = "top", tabStyle = "underline",
+        w = 540, h = 310, radius = 6, titleSize = 26, center = false,
+        bg0 = C(6, 6, 8), bg1 = C(52, 55, 64), bgRot = 30, bgT = 0.04,
+        accent = C(226, 229, 236), onAccent = C(10, 10, 14),
+        titleFont = Enum.Font.GothamBlack,
+        animBorder = false, glow = false, press = false, shine = false, corners = true,
+    },
+    {
+        id = "v10", cmd = "Color indigo v10", name = "Índigo Meia-Noite",
+        desc = "Lateral esquerda com borda animada azul-violeta.",
+        layout = "side_left", tabStyle = "bar",
+        w = 480, h = 300, radius = 16, titleSize = 24, center = false,
+        bg0 = C(2, 3, 20), bg1 = C(34, 40, 140), bgRot = 50,
+        accent = C(110, 125, 255), onAccent = C(255, 255, 255),
+        animBorder = true, glow = true, press = false, shine = false, corners = false,
+    },
+    {
+        id = "v11", cmd = "Color aurora v11", name = "Aurora Boreal",
+        desc = "Verde-água sobre roxo profundo, menu à direita com brilho.",
+        layout = "side_right", tabStyle = "pill",
+        w = 480, h = 300, headerH = 56, radius = 20, titleSize = 26, center = true,
+        bg0 = C(3, 8, 24), bg1 = C(70, 24, 130), bgRot = 60,
+        accent = C(70, 235, 195), onAccent = C(0, 24, 20),
+        bodyFont = Enum.Font.Gotham,
+        animBorder = true, glow = true, press = true, shine = false, corners = false,
+    },
+    {
+        id = "v12", cmd = "Color wine v12", name = "Vinho Real",
+        desc = "Dock inferior elegante com quinas marcadas e reflexo.",
+        layout = "dock", tabStyle = "dock",
+        w = 540, h = 330, headerH = 60, radius = 10, titleSize = 28, center = true,
+        bg0 = C(10, 0, 4), bg1 = C(100, 0, 45), bgRot = 75, bgT = 0.04,
+        accent = C(225, 75, 120), onAccent = C(255, 255, 255),
+        animBorder = true, glow = false, press = true, shine = true, corners = true,
+    },
+    {
+        id = "v13", cmd = "Color platinum v13", name = "Platina Gelada",
+        desc = "Prata azulada, abas no topo e acabamento limpo.",
+        layout = "top", tabStyle = "underline",
+        w = 540, h = 310, radius = 10, titleSize = 26, center = true,
+        bg0 = C(6, 8, 12), bg1 = C(62, 76, 100), bgRot = 35,
+        accent = C(175, 196, 224), onAccent = C(8, 12, 20),
+        titleFont = Enum.Font.GothamBlack,
+        animBorder = true, glow = false, press = true, shine = true, corners = false,
+    },
+    {
+        id = "v14", cmd = "Color lime v14", name = "Lima Elétrica",
+        desc = "Verde-limão vibrante, lateral esquerda e visual esportivo.",
+        layout = "side_left", tabStyle = "bar",
+        w = 480, h = 300, radius = 8, titleSize = 24, center = false,
+        bg0 = C(5, 10, 0), bg1 = C(70, 105, 0), bgRot = 30,
+        accent = C(190, 255, 60), onAccent = C(8, 16, 0),
+        animBorder = false, glow = true, press = true, shine = false, corners = true,
+    },
+}
 
-local CategoriaDropdown = SecSelecao:Dropdown({
-    Título = "Escolha o que quer",
-    Valores = { "BAC", "BFE", "BIP", "CIE", "REC-MEC", "BPE", "BI CAAT", "CIGS", "CYBER" },
-    Valor = nulo,
-    Multi = false,
-    AllowNone = true,
-    Callback = função(selecionado)
-        Se não estiver selecionado, retorne ao fim.
-        
-        se não AbasCriadas[selecionado] então
-            local NovaAba = Window:Tab({ Title = selected, Icon = "shield" })
-            AbasCriadas[selecionado] = NovaAba
-            NovaAba:Select()
-            task.wait(0.2)
-            
-            -- =========================================
-            -- ABA BAC
-            -- =========================================
-            Se selecionado == "BAC" então
-                local Sec3 = NovaAba:Section({ Title = "até o BAC", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Batalhão de Ações de Comandos (BAC) é uma unidade de elite do Exército, especializada em operações de alto risco, sabotagens e ações diretas atrás das linhas inimigas.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Batalhão de Ações de Comandos (BAC) é uma unidade de elite do Exército, especializada em operações de alto risco, sabotagens e ações diretas atrás das linhas inimigas.") end })
+-- valores padrão e derivados (cada tema só precisa informar o que é diferente)
+for _, th in ipairs(Themes) do
+    th.onAccent  = th.onAccent or C(255, 255, 255)
+    th.headerH   = th.headerH or 54
+    th.cardT     = th.cardT or 0.2
+    th.card      = th.card or th.bg0:Lerp(th.bg1, 0.18)
+    th.line      = th.line or th.accent:Lerp(C(0, 0, 0), 0.2)
+    th.bodyFont  = th.bodyFont or Enum.Font.GothamMedium
+    th.boldFont  = th.boldFont or Enum.Font.GothamBold
+    th.titleFont = th.titleFont or Enum.Font.Michroma
+    th.bgT       = th.bgT or 0.06
+    th.bgRot     = th.bgRot or 35
+    local h, s   = th.accent:ToHSV()
+    th.h         = h
+    th.accF      = math.clamp(s / 0.6, 0, 1)           -- 0 = tema cinza, 1 = tema colorido
+    th.tintS     = th.tintS or math.clamp(s * 0.95, 0.05, 0.88)
+    th.vMul      = th.vMul or 1
+    th.rScale    = math.clamp(th.radius / 10, 0.3, 2.2)
+    th.light     = th.accent:Lerp(C(255, 255, 255), 0.25)
+end
 
-                local SecNomes = NovaAba:Section({ Title = "Nomes", TextXAligment = "Left" })
-                SecNomes:Paragraph({ Title = "DONO: MateusHgz", Desc = "" })
-                SecNomes:Button({ Title = "Copiar Doação", Icon = "copiar", Callback = function() CopiarTexto("MateusHgz") end })
-                SecNomes:Paragraph({ Title = "COMANDANTE: SasukeePro202", Desc = "" })
-                SecNomes:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("SasukeePro202") end })
-                SecNomes:Paragraph({ Title = "Subcomandante: banana_splite100", Desc = "" })
-                SecNomes:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("banana_splite100") end })
-                
-                local SecLema = NovaAba:Section({ Title = "Lema BAC", TextXAligment = "Left" })
-                SecLema:Paragraph({ Title = '"O máximo de confusão, morte e destruição na retaguarda do inimigo."', Desc = "" })
-                SecLema:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("O máximo de confusão, morte e destruição na retaguarda do inimigo.") end })
-                
-                local SecSaudações = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudações:Paragraph({ Title = "Saudações, senhor Comando.", Desc = "" })
-                SecSaudacoes:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Comando.") end })
-                SecSaudacoes:Paragraph({ Title = "Saudações, senhores Comandos.", Desc = "" })
-                SecSaudacoes:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Comandos.") end })
-                
-                local SecMarchas = NovaAba:Section({ Title = "MARCHAS", TextXAligment = "Left" })
-                marchas locais = { "ATENÇÃO PELOTÃO, PREPARAR PARA MARCHAR!", "PELOTÃO, MARCHE!", "PELOTÃO, AUTO!", "EM DIREÇÃO Á PRAIA!", "FORMEM UM OMBRO A OMBRO NO MAR!", "FORA DE FORMA!", "MARCHE!", "EM DIREÇÃO À ÁREA DE PARKOURS!" }
-                para i, texto em ipairs(marchas) do
-                    SecMarchas:Parágrafo({ Título = texto, Desc = "" })
-                    SecMarchas:Button({ Title = "Copiar Marcha "..i, Icon = "copy", Callback = function() CopiarTexto(texto) end })
-                fim
-            
-            -- =========================================
-            -- ABA BFE
-            -- =========================================
-            senão se selecionado == "BFE" então
-                local SecSobre = NovaAba:Section({ Title = "Sobre o BFE", TextXAlignment = "Left" })
-                SecSobre:Paragraph({ Title = "O Batalhão de Forças Especiais (BFE) é uma divisão de alta operação, responsável por preparar seus membros para operações, treinamentos, patrulhamentos e demais atividades, contribuindo para o funcionamento do Exército Brasileiro.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Batalhão de Forças Especiais (BFE) é uma divisão de alta operação, responsável por preparar seus membros para operações, treinamentos, patrulhamentos e demais atividades, contribuindo para o funcionamento do Exército Brasileiro.") end })
+local TABS = {
+    { id = "inicio",  label = "Início",  icon = "🏠" },
+    { id = "editor",  label = "Editor",  icon = "📝" },
+    { id = "arceus",  label = "Arceus",  icon = "🧩" },
+    { id = "jogador", label = "Jogador", icon = "🏃" },
+    { id = "temas",   label = "Temas",   icon = "🎨" },
+    { id = "registro",label = "Registro",icon = "📜" },
+}
 
-                local SecInfo = NovaAba:Section({ Title = "⚔️ Informações BFE", TextXAlignment = "Left" })
-                SecInfo:Paragraph({ Title = "Comandante: TILÁPIA_PROFISSIONAL", Desc = "" })
-                SecInfo:Button({ Title = "Copiar Comandante", Icon = "copiar", Callback = function() CopiarTexto("TILÁPIA_PROFISSIONAL") end })
-                SecInfo:Paragraph({ Title = "Subcomandante: nonezinz", Desc = "" })
-                SecInfo:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("nonezinz") end })
-                SecInfo:Paragraph({ Title = 'Lema: "Qualquer missão, em qualquer lugar, a qualquer hora, de qualquer maneira."', Desc = "" })
-                SecInfo:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Qualquer missão, em qualquer lugar, a qualquer hora, de qualquer maneira.") end })
-                SecInfo:Paragraph({ Title = "Criador: Kk7 (NATANHMELLO4)", Desc = "" })
-                SecInfo:Button({ Title = "Copiar Criador", Icon = "copiar", Callback = function() CopiarTexto("Kk7 (NATANHMELLO4)") end })
-                
-                local SecPerg1 = NovaAba:Section({ Title = "Pergunta 1", TextXAlignment = "Left" })
-                SecPerg1:Paragraph({ Title = "Qual o nome do instrutor responsável por este TAF?", Desc = "O nome do Roblox informado pelo instrutor no início." })
-                SecPerg1:Button({ Title = "Copiar Resposta 1", Icon = "copy", Callback = function() CopiarTexto("O nome do Roblox informado pelo instrutor no início.") end })
-                
-                local SecPerg2 = NovaAba:Section({ Title = "Pergunta 2", TextXAligment = "Left" })
-                SecPerg2:Paragraph({ Title = "Qual a importância do BFE?", Desc = "O BFEsp é importante por ser uma divisão de alta operação, responsável por preparar seus membros para operações, treinamentos, patrulhamentos e demais atividades, contribuindo para o funcionamento do Exército Brasileiro." })
-                SecPerg2:Button({ Title = "Copiar Resposta 2", Icon = "copy", Callback = function() CopiarTexto("O BFEsp é importante por ser uma divisão de alta operação, responsável por preparar seus membros para operações, treinamentos, patrulhamentos e demais atividades, contribuindo para o funcionamento do Exército Brasileiro.") end })
-                
-                local SecSaudacoesBFE = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudacoesBFE:Paragraph({ Title = "Saudações, Instrutor Fantasma.", Desc = "" })
-                SecSaudacoesBFE:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, Instrutor Fantasma.") end })
-                SecSaudacoesBFE:Paragraph({ Title = "Saudações, Auxiliar Fantasma.", Desc = "" })
-                SecSaudacoesBFE:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, Auxiliar Fantasma.") end })
-                SecSaudacoesBFE:Paragraph({ Title = "Com licença, senhor(es) Fantasma(s).", Desc = "" })
-                SecSaudacoesBFE:Button({ Title = "Copiar Saudação 3", Icon = "copy", Callback = function() CopiarTexto("Com licença, senhor(es) Fantasma(s).") end })
-                
-                local SecFinal1 = NovaAba:Section({ Title = "Final 1: O que é o BFE?", TextXAlignment = "Left" })
-                SecFinal1:Paragraph({ Title = "O que é o BFE?", Desc = "O BFE é a divisão responsável por realizar operações especiais, proteger o quartel e manter a ordem e a segurança do Exército." })
-                SecFinal1:Button({ Title = "Copiar Resposta", Icon = "copy", Callback = function() CopiarTexto("O BFE é a divisão responsável por realizar operações especiais, proteger o quartel e manter a ordem e a segurança do Exército.") end })
-                
-                local SecFinal2 = NovaAba:Section({ Title = "Final 2: Função do BFE", TextXAlignment = "Left" })
-                SecFinal2:Paragraph({ Title = "Qual a função do Batalhão de Forças Especiais?", Desc = "Formar militares de elite por meio de treinamentos, patrulhamentos e operações, mantendo a disciplina e a organização da divisão." })
-                SecFinal2:Button({ Title = "Copiar Resposta", Icon = "copy", Callback = function() CopiarTexto("Formar militares de elite por meio de treinamentos, patrulhamentos e operações, mantendo a disciplina e a organização da divisão.") end })
-                
-                local SecFinal3 = NovaAba:Section({ Title = "Final 3: Escudo do BFE", TextXAlignment = "Left" })
-                SecFinal3:Paragraph({ Title = "Quais as características do escudo do BFE?", Desc = "Fundo preto com bordas amarelas. No centro há um paraquedas branco junto de uma faca vermelha e, na parte inferior, a faixa “Forças Especiais”." })
-                SecFinal3:Button({ Title = "Copiar Resposta", Icon = "copy", Callback = function() CopiarTexto("Fundo preto com bordas amarelas. No centro há um paraquedas branco junto de uma faca vermelha e, na parte inferior, a faixa “Forças Especiais”.") end })
+----------------------------------------------------------------
+-- Estado
+----------------------------------------------------------------
+local State = {
+    themeIdx = 1, open = false, tab = "inicio",
+    winPos = nil, logoPos = UDim2.new(0, 18, 0.4, 0),
+    script = "-- Cole seu script aqui\nprint('Angel executor ativo!')",
+    status = "",
+    speed = nil, jump = nil, gravity = nil,
+    infJump = false, antiAfk = false, big = false,
+}
+local DEFAULT_GRAV = workspace.Gravity
+local conns = {}
+local function conn(c) conns[#conns + 1] = c return c end
 
-            -- =========================================
-            -- ABA BIP
-            -- =========================================
-            senão se selecionado == "BIP" então
-                local SecSobre = NovaAba:Section({ Title = "Sobre o BIP", TextXAlignment = "Left" })
-                SecSobre:Paragraph({ Title = "A Brigada de Infantaria Paraquedista (BIP) é uma tropa de elite que se desloca por via aérea, sendo capaz de realizar operações rápidas em qualquer terreno, ocorrendo como força de choque.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("A Brigada de Infantaria Paraquedista (BIP) é uma tropa de elite que se desloca por via aérea, sendo capaz de realizar operações rápidas em qualquer terreno, moderna como força de choque.") end })
+local T, W, H, ContentW, ContentH = nil, 540, 310, 300, 200   -- tema atual e medidas
+local Gui, Window, Body, BodyScale, Fit, Content, Logo
+local Spinners, Live, ShineFrame = {}, { fns = {} }, nil
+local tabSetters = {}
+local ord = 0
+local function nextOrd() ord += 1 return ord end
 
-                local SecInfoBIP = NovaAba:Section({ Title = "🪂 Informações BIP", TextXAlignment = "Left" })
-                SecInfoBIP:Paragraph({ Title = "Comandante: Ryan12332123", Desc = "" })
-                SecInfoBIP:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("Ryan12332123") end })
-                SecInfoBIP:Paragraph({ Title = "Subcomandante: Caiogg17", Desc = "" })
-                SecInfoBIP:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("Caiogg17") end })
-                
-                local SecLemaBIP = NovaAba:Section({ Title = "Lema do BIP", TextXAligment = "Left" })
-                SecLemaBIP:Paragraph({ Title = '"Do Céu à Missão, Do Alto Com Disciplina, Do Céu Cumprimos a Missão."', Desc = "" })
-                SecLemaBIP:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Do Céu à Missão, Do Alto Com Disciplina, Do Céu Cumprimos a Missão.") end })
+----------------------------------------------------------------
+-- Registro (log)
+----------------------------------------------------------------
+local Log = { lines = {}, hook = nil }
+local function log(msg)
+    local line = string.format("[%s] %s", os.date("%H:%M:%S"), tostring(msg))
+    Log.lines[#Log.lines + 1] = line
+    if #Log.lines > 80 then table.remove(Log.lines, 1) end
+    if writefile then pcall(writefile, "AngelExecutor_log.txt", table.concat(Log.lines, "\n")) end
+    if Log.hook then pcall(Log.hook) end
+end
 
-            -- =========================================
-            -- ABA CIE
-            -- =========================================
-            senão se selecionado == "CIE" então
-                local Secmen = NovaAba:Section({ Title = "até o CIE", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Centro de Inteligência do Exército (CIE) é o órgão responsável pela produção de conhecimentos de inteligência, fundamentais para a tomada de decisões e para a segurança das operações.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Centro de Inteligência do Exército (CIE) é o órgão responsável pela produção de conhecimentos de inteligência, fundamentais para a tomada de decisões e para a segurança das operações.") end })
+----------------------------------------------------------------
+-- Helpers de UI
+----------------------------------------------------------------
+local function mk(class, props, parent)
+    local o = Instance.new(class)
+    for k, v in pairs(props or {}) do o[k] = v end
+    if parent then o.Parent = parent end
+    return o
+end
+local function corner(o, r) return mk("UICorner", { CornerRadius = UDim.new(0, r) }, o) end
+local function stroke(o, col, th, tr)
+    return mk("UIStroke", { Color = col, Thickness = th or 1, Transparency = tr or 0,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, o)
+end
+local function grad(o, c0, c1, rot)
+    return mk("UIGradient", { Color = ColorSequence.new(c0, c1), Rotation = rot or 0 }, o)
+end
+local function tween(o, t, props, style, dir)
+    local tw = TweenService:Create(o, TweenInfo.new(t, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out), props)
+    tw:Play()
+    return tw
+end
+local function cr() return math.max(T.radius - 6, 3) end
 
-                local SecInfoCIE = NovaAba:Section({ Title = "🕵‍♂️ Informações CIE", TextXAlignment = "Left" })
-                SecInfoCIE:Paragraph({ Title = "Criador: vicofjgfhf", Desc = "" })
-                SecInfoCIE:Button({ Title = "Copiar Criador", Icon = "copy", Callback = function() CopiarTexto("vicofjgfhf") end })
-                SecInfoCIE:Paragraph({ Title = "Sub criador: RIP_dabfj8w", Desc = "" })
-                SecInfoCIE:Button({ Title = "Copiar Sub criador", Icon = "copy", Callback = function() CopiarTexto("RIP_dabfj8w") end })
-                SecInfoCIE:Paragraph({ Title = "Comandante: eriqurrr.", Desc = "" })
-                SecInfoCIE:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("eriqurrr.") end })
-                SecInfoCIE:Paragraph({ Title = "Subcomandante: Rodrigopao8", Desc = "" })
-                SecInfoCIE:Button({ Title = "Copiar Subcomandante", Icon = "copiar", Callback = function() CopiarTexto("Rodrigopao8") end })
-                
-                local SecSaudacoesCIE = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudacoesCIE:Paragraph({ Title = "Saudações, senhores Agentes.", Desc = "" })
-                SecSaudacoesCIE:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Agentes.") end })
-                SecSaudacoesCIE:Paragraph({ Title = "Saudações, senhores Fantasmas.", Desc = "" })
-                SecSaudacoesCIE:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Fantasmas.") end })
-                SecSaudacoesCIE:Paragraph({ Title = "Saudações, senhor Agente.", Desc = "" })
-                SecSaudacoesCIE:Button({ Title = "Copiar Saudação 3", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Agente.") end })
-                SecSaudacoesCIE:Paragraph({ Title = "Saudações, senhor Fantasma.", Desc = "" })
-                SecSaudacoesCIE:Button({ Title = "Copiar Saudação 4", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Fantasma.") end })
-                
-                local SecLemaCIE = NovaAba:Section({ Title = "Lema CIE", TextXAligment = "Left" })
-                SecLemaCIE:Paragraph({ Title = "Inteligência para Vitória & Saber para Prever.", Desc = "" })
-                SecLemaCIE:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Inteligência para Vitória & Saber para Prever.") end })
+local function text(parent, str, size, color, font, props)
+    local p = {
+        BackgroundTransparency = 1, Text = str, TextSize = size, TextColor3 = color or C(255, 255, 255),
+        Font = font or T.bodyFont, TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center, Size = UDim2.new(1, 0, 0, size + 6),
+        TextWrapped = true,
+    }
+    for k, v in pairs(props or {}) do p[k] = v end
+    return mk("TextLabel", p, parent)
+end
 
-            -- =========================================
-            -- ABA REC-MEC
-            -- =========================================
-            senão se selecionado == "REC-MEC" então
-                local Sec3 = NovaAba:Section({ Title = "sobre o REC-MEC", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Reconhecimento Mecanizado (REC-MEC) é a unidade de cavalaria blindada responsável por missões de reconhecimento, segurança e combate, utilizando veículos blindados para alta mobilidade.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Reconhecimento Mecanizado (REC-MEC) é a unidade de cavalaria blindada responsável por missões de reconhecimento, segurança e combate, utilizando veículos blindados para alta.") end })
+local SUB = C(190, 200, 220)
 
-                local SecInfoREC = NovaAba:Section({ Title = "🐎 Informações REC-MEC", TextXAlignment = "Left" })
-                SecInfoREC:Paragraph({ Title = "Comandante: terro_2433.", Desc = "" })
-                SecInfoREC:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("terro_2433.") end })
-                SecInfoREC:Paragraph({ Title = "Subcomandante: Contanum5bl", Desc = "" })
-                SecInfoREC:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("Contanum5bl") end })
-                
-                local SecLemaREC = NovaAba:Section({ Title = "Lema REC-MEC", TextXAligment = "Left" })
-                SecLemaREC:Paragraph({ Title = "Haverá sempre uma Cavalaria! Aço na mente, motor no peito e honra na missão!", Desc = "" })
-                SecLemaREC:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Haverá sempre uma Cavalaria! Aço na mente, motor no peito e honra na missão!") end })
-                
-                local SecSaudacoesREC = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudacoesREC:Paragraph({ Title = "Saudações, senhores Cavaleiros.", Desc = "" })
-                SecSaudacoesREC:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Cavaleiros.") end })
-                SecSaudacoesREC:Paragraph({ Title = "Saudações, senhor Cavaleiro.", Desc = "" })
-                SecSaudacoesREC:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Cavaleiro.") end })
-                
-                local SecLicencaREC = NovaAba:Section({ Title = "Licença", TextXAlignment = "Left" })
-                SecLicençaREC:Paragraph({ Title = "Licença, senhores Cavaleiros.", Desc = "" })
-                SecLicencaREC:Button({ Title = "Copiar Licença 1", Icon = "copiar", Callback = function() CopiarTexto("Licença, senhores Cavaleiros.") end })
-                SecLicençaREC:Paragraph({ Title = "Licença, senhor Cavaleiro.", Desc = "" })
-                SecLicencaREC:Button({ Title = "Copiar Licença 2", Icon = "copiar", Callback = function() CopiarTexto("Licença, senhor Cavaleiro.") end })
-                
-                local SecComLicençaREC = NovaAba:Section({ Title = "Com licença", TextXAlignment = "Left" })
-                SecComLicençaREC:Paragraph({ Title = "Com licença, senhores Cavaleiros.", Desc = "" })
-                SecComLicençaREC:Button({ Title = "Copiar Com licença 1", Icon = "copy", Callback = function() CopiarTexto("Com licença, senhores Cavaleiros.") end })
-                SecComLicençaREC:Paragraph({ Title = "Com licença, senhor Cavaleiro.", Desc = "" })
-                SecComLicençaREC:Button({ Title = "Copiar Com licença 2", Icon = "copy", Callback = function() CopiarTexto("Com licença, senhor Cavaleiro.") end })
-                
-                local SecMarchaTurno = NovaAba:Section({ Title = "Marcha (Turno)", TextXAlignment = "Left" })
-                SecMarchaTurno:Paragraph({ Title = "ATENÇÃO TURNO, PREPARAR PARA MARCHAR!", Desc = "" })
-                SecMarchaTurno:Button({ Title = "Copiar Marcha 1", Icon = "copiar", Callback = function() CopiarTexto("ATENÇÃO TURNO, PREPARAR PARA MARCHAR!") end })
-                SecMarchaTurno:Paragraph({ Title = "ATENÇÃO TURNO, MARCHEM!", Desc = "" })
-                SecMarchaTurno:Button({ Title = "Copiar Marcha 2", Icon = "copiar", Callback = function() CopiarTexto("ATENÇÃO TURNO, MARCHEM!") end })
-                
-                local SecMarchaPelotao = NovaAba:Section({ Title = "Marcha (Pelotão)", TextXAlignment = "Left" })
-                SecMarchaPelotao:Paragraph({ Title = "ATENÇÃO PELOTÃO, PREPARAR PARA MARCHAR!", Desc = "" })
-                SecMarchaPelotao:Button({ Title = "Copiar Marcha 1", Icon = "copiar", Callback = function() CopiarTexto("ATENÇÃO PELOTÃO, PREPARAR PARA MARCHAR!") end })
-                SecMarchaPelotao:Paragraph({ Title = "ATENÇÃO PELOTÃO, MARCHEM!", Desc = "" })
-                SecMarchaPelotao:Button({ Title = "Copiar Marcha 2", Icon = "copiar", Callback = function() CopiarTexto("ATENÇÃO PELOTÃO, MARCHEM!") end })
+local function card(parent, h)
+    local c = mk("Frame", { Size = UDim2.new(1, 0, 0, h), BackgroundColor3 = T.card,
+        BackgroundTransparency = T.cardT, BorderSizePixel = 0, LayoutOrder = nextOrd() }, parent)
+    corner(c, cr())
+    stroke(c, T.line, 1, 0.65)
+    return c
+end
 
-            -- =========================================
-            -- ABA BPE
-            -- =========================================
-            senão se selecionado == "BPE" então
-                local Sec3 = NovaAba:Section({ Title = "até o BPE", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Batalhão de Polícia do Exército (BPE) é responsável pela segurança das instalações, autoridades e pelo policiamento ostensivo militar, garantindo a disciplina e a ordem.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Batalhão de Polícia do Exército (BPE) é responsável pela segurança das instalações, autoridades e pelo policiamento ostensivo militar, garantindo a disciplina e a ordem.") end })
+local function button(parent, str, primary, cb, size)
+    local b = mk("TextButton", {
+        Size = size or UDim2.new(1, 0, 0, 38), BackgroundColor3 = primary and T.accent or T.card,
+        BackgroundTransparency = primary and 0.05 or 0.1, Text = str, Font = T.boldFont, TextSize = 15,
+        TextColor3 = primary and T.onAccent or C(255, 255, 255), AutoButtonColor = false,
+        BorderSizePixel = 0, LayoutOrder = nextOrd(),
+    }, parent)
+    corner(b, cr())
+    stroke(b, primary and T.accent or T.line, 1, primary and 0.2 or 0.5)
+    if T.press then
+        local sc = mk("UIScale", {}, b)
+        b.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+                tween(sc, 0.08, { Scale = 0.94 })
+            end
+        end)
+        b.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+                tween(sc, 0.12, { Scale = 1 }, Enum.EasingStyle.Back)
+            end
+        end)
+    end
+    b.Activated:Connect(function() pcall(cb) end)
+    return b
+end
 
-                local SecInfoBPE = NovaAba:Section({ Title = "👮‍♂️ Perguntas BPE", TextXAligment = "Left" })
-                pergunta local = {
-                    {q = "Quais características são fundamentais para um militar do BPE?", r = "Disciplina, responsabilidade, respeito, preparo físico, equilíbrio emocional e comprometimento com a missão."},
-                    {q = "Qual é a importância do planejamento antes de uma operação do BPE?", r = "Permite identificar riscos, organizar recursos, definir funções e aumentar as chances de sucesso da missão."},
-                    {q = "Como o BPE deve proceder diante de uma ocorrência envolvida em um militar indisciplinado?", r = "Agir com imparcialidade, conter a situação, registrar a ocorrência e encaminhá-lo ao superior responsável."},
-                    {q = "O que deve ser feito ao encontrar um objeto suspeito em uma instalação militar?", r = "Isolar a área, impedir a aproximação de pessoas e comunicar imediatamente ao comando para as providências possíveis."},
-                    {q = "Qual é a função do BPE no controle de acesso durante eventos militares?", r = "Fiscalizar a entrada e saída de pessoas e veículos, verificar autorizações e manter a segurança do local."},
-                    {q = "Por que o trabalho em equipe é essencial para o BPE?", r = "Porque permite melhor progressão, aumenta a eficiência das operações e fortalece a segurança da missão."},
-                    {q = "Qual é a missão principal do BPE em operações militares?", r = "Garantir a disciplina, a segurança e o cumprimento das ordens durante as operações."},
-                    {q = "Como o BPE deve agir ao receber uma ordem de um superior hierárquico?", r = "Deve cumprir a ordem de forma imediata, respeitosa e eficiente, desde que esteja de acordo com as normas e disposições."},
-                    {q = "Qual é a importância da disciplina para um militar do BPE?", r = "A disciplina garante organização, respeito à hierarquia, eficiência nas missões e o bom funcionamento da unidade."},
-                    {q = "Como o BPE atua na proteção de autoridades militares?", r = "Realiza escolas, controle de acesso, monitora o ambiente e medidas preventivas para garantir a segurança da autoridade."}
-                }
-                para i, item em ipairs(perguntas) do
-                    SecInfoBPE:Paragraph({ Title = i .. ". " .. item.q, Desc = "Resposta: " .. item.r })
-                    SecInfoBPE:Button({ Title = "Copiar Resposta "..i, Icon = "copy", Callback = function() CopiarTexto(item.r) end })
-                fim
-                
-                local SecOrgBPE = NovaAba:Section({ Title = "📋 Organização BPE", TextXAlignment = "Left" })
-                
-                SecOrgBPE:Paragraph({ Title = "Apresentação", Desc = "Todos os membros do TAF devem estar carecas, sem boina e sem nenhum equipamento." })
-                SecOrgBPE:Button({ Title = "Copiar Apresentação", Icon = "copy", Callback = function() CopiarTexto("Todos os membros do TAF devem estar carecas, sem boina e sem nenhum equipamento.") end })
-                
-                -- SAUDAÇÕES SEPARADAS:
-                SecOrgBPE:Paragraph({ Title = "Saudação 1", Desc = "Saudações, senhor Policial." })
-                SecOrgBPE:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Policial.") end })
-                
-                SecOrgBPE:Paragraph({ Title = "Saudação 2", Desc = "Saudações, senhores." })
-                SecOrgBPE:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores.") end })
-                
-                -- PARKOURS SEPARADOS:
-                SecOrgBPE:Paragraph({ Title = "Parkour 1", Desc = "4 segundos" })
-                SecOrgBPE:Button({ Title = "Copiar Parkour 1", Icon = "copy", Callback = function() CopiarTexto("4 segundos") end })
-                
-                SecOrgBPE:Paragraph({ Title = "Parkour 2", Desc = "7 segundos" })
-                SecOrgBPE:Button({ Title = "Copiar Parkour 2", Icon = "copy", Callback = function() CopiarTexto("7 segundos") end })
-                
-                SecOrgBPE:Paragraph({ Title = "Parkour 3", Desc = "5 segundos" })
-                SecOrgBPE:Button({ Title = "Copiar Parkour 3", Icon = "copy", Callback = function() CopiarTexto("5 segundos") end })
-                
-                SecOrgBPE:Paragraph({ Title = "Parkour 4", Desc = "4 segundos" })
-                SecOrgBPE:Button({ Title = "Copiar Parkour 4", Icon = "copy", Callback = function() CopiarTexto("4 segundos") end })
-                
-                SecOrgBPE:Paragraph({ Title = "Créditos", Desc = "@Rick&Morty" })
-                SecOrgBPE:Button({ Title = "Copiar Créditos", Icon = "copy", Callback = function() CopiarTexto("@Rick&Morty") end })
+local function row(parent, h)
+    local f = mk("Frame", { Size = UDim2.new(1, 0, 0, h), BackgroundTransparency = 1, LayoutOrder = nextOrd() }, parent)
+    mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder }, f)
+    return f
+end
 
-            -- =========================================
-            -- ABA BI CAAT
-            -- =========================================
-            senão se selecionado == "BI CAAT" então
-                local SecSobre = NovaAba:Section({ Title = "Sobre o BI CAAT", TextXAlignment = "Left" })
-                SecSobre:Paragraph({ Title = "O Batalhão de Infantaria de Caatinga (BI CAAT) é uma unidade especializada em operações no bioma da Caatinga, adaptando-se às condições adversárias do sertão e competitiva na defesa do território nacional.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Batalhão de Infantaria de Caatinga (BI CAAT) é uma unidade especializada em operações no bioma da Caatinga, adaptando-se às condições adversas do sertão e enfrentando na defesa do território nacional.") end })
+----------------------------------------------------------------
+-- Arrastar (global)
+----------------------------------------------------------------
+local Drag = { update = nil, finish = nil }
+conn(UIS.InputChanged:Connect(function(i)
+    if Drag.update and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        Drag.update(i.Position)
+    end
+end))
+conn(UIS.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        local f = Drag.finish
+        Drag.update, Drag.finish = nil, nil
+        if f then pcall(f) end
+    end
+end))
 
-                local SecInfoCAAT = NovaAba:Section({ Title = "🌵 Informações BI CAAT", TextXAlignment = "Left" })
-                SecInfoCAAT:Paragraph({ Title = "Comandante: gabrielcm04", Desc = "" })
-                SecInfoCAAT:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("gabrielcm04") end })
-                SecInfoCAAT:Paragraph({ Title = "Subcomandante: Plk_Ln17.", Desc = "" })
-                SecInfoCAAT:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("Plk_Ln17.") end })
-                
-                local SecLemaCAAT = NovaAba:Section({ Title = "Lema BI CAAT", TextXAlignment = "Left" })
-                SecLemaCAAT:Paragraph({ Title = "“O pai cria, a mãe educa e a Caatinga elimina.”", Desc = "" })
-                SecLemaCAAT:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("O pai cria, a mãe educa e a Caatinga elimina.") end })
-                
-                local SecSaudacoesCAAT = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudacoesCAAT:Paragraph({ Title = "Saudações, senhores Guardiões da Caatinga.", Desc = "" })
-                SecSaudacoesCAAT:Button({ Title = "Copiar Saudação 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Guardiões da Caatinga.") end })
-                SecSaudacoesCAAT:Paragraph({ Title = "Saudações, senhor Guardião da Caatinga.", Desc = "" })
-                SecSaudacoesCAAT:Button({ Title = "Copiar Saudação 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Guardião da Caatinga.") end })
-                
-                local SecPergCAAT = NovaAba:Section({ Title = "Perguntas BI CAAT", TextXAlignment = "Left" })
-                SecPergCAAT:Paragraph({ Title = "Por que você quer entrar no BI CAAT?", Desc = "Quero entrar no BI CAAT porque tenho interesse em fazer parte de uma unidade que valoriza a disciplina, o respeito, a responsabilidade e o trabalho em equipe." })
-                SecPergCAAT:Button({ Title = "Copiar Resposta 1", Icon = "copy", Callback = function() CopiarTexto("Quero entrar no BI CAAT porque tenho interesse em fazer parte de uma unidade que valoriza a disciplina, o respeito, a responsabilidade e o trabalho em equipe.") end })
-                
-                SecPergCAAT:Paragraph({ Title = "Por que a disciplina é importante dentro do BI CAAT?", Desc = "A disciplina é importante dentro do BI CAAT porque mantém a organização, o respeito à posição e o bom funcionamento da unidade" })
-                SecPergCAAT:Button({ Title = "Copiar Resposta 2", Icon = "copy", Callback = function() CopiarTexto("A disciplina é importante dentro do BI CAAT porque mantém a organização, o respeito à posição e o bom funcionamento da unidade") end })
-                
-                SecPergCAAT:Paragraph({ Title = "Qual a importância do BI CAAT no Exército Brasileiro?", Desc = "O BI CAAT é importante porque representa uma unidade de Infantaria de Caatinga que valoriza a disciplina, a responsabilidade, o respeito à hierarquia e o trabalho em equipe." })
-                SecPergCAAT:Button({ Title = "Copiar Resposta 3", Icon = "copy", Callback = function() CopiarTexto("O BI CAAT é importante porque representa uma unidade de Infantaria de Caatinga que valoriza a disciplina, a responsabilidade, o respeito à ordem e ao trabalho em equipe.") end })
+local function onScreen(obj)
+    local cam = workspace.CurrentCamera
+    if not cam then return true end
+    local vp = cam.ViewportSize
+    local c = obj.AbsolutePosition + obj.AbsoluteSize / 2
+    return c.X > 0 and c.X < vp.X and c.Y > 0 and c.Y < vp.Y
+end
 
-            -- =========================================
-            -- ABA CIGS
-            -- =========================================
-            senão se selecionado == "CIGS" então
-                local Secman = NovaAba:Section({ Title = "até o CIGS", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Centro de Instrução de Guerra na Selva (CIGS) é a unidade responsável por formar e especializar militares para atuar no bioma da Amazônia, com foco em operações de selva e sobrevivência em ambiente hostil.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Centro de Instrução de Guerra na Selva (CIGS) é a unidade responsável por formar e especializar militares para atuar no bioma da Amazônia, com foco em operações de selva e sobrevivência em ambiente hostil.") end })
+local function makeDraggable(handle, target, onTap, onMove, resetPos)
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            local start, sp, moved = i.Position, target.Position, false
+            Drag.update = function(p)
+                local d = p - start
+                if d.Magnitude > 6 then moved = true end
+                if moved then
+                    target.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+                end
+            end
+            Drag.finish = function()
+                if not moved then
+                    if onTap then onTap() end
+                    return
+                end
+                if not onScreen(target) then target.Position = resetPos end
+                if onMove then onMove(target.Position) end
+            end
+        end
+    end)
+end
 
-                local SecInfoCIGS = NovaAba:Section({ Title = "🐆 Informações CIGS", TextXAlignment = "Left" })
-                SecInfoCIGS:Paragraph({ Title = "Comandante: Sagas", Desc = "" })
-                SecInfoCIGS:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("Sagas") end })
-                SecInfoCIGS:Paragraph({ Title = "Subcomandante: Deselegant", Desc = "" })
-                SecInfoCIGS:Button({ Title = "Copiar Subcomandante", Icon = "copy", Callback = function() CopiarTexto("Deselegant") end })
-                
-                local SecLemaCIGS = NovaAba:Section({ Title = "Lema CIGS", TextXAligment = "Left" })
-                SecLemaCIGS:Paragraph({ Title = '"Treinar para resistir, Combater para vencer."', Desc = "" })
-                SecLemaCIGS:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Treinar para resistir, Combater para vencer.") end })
-                
-                local SecSaudacoesCIGS = NovaAba:Section({ Title = "Promomes (Saudações)", TextXAlignment = "Left" })
-                SecSaudacoesCIGS:Paragraph({ Title = "Saudações, senhor Guerreiro de Selva.", Desc = "" })
-                SecSaudacoesCIGS:Button({ Title = "Copiar Promome 1", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhor Guerreiro de Selva.") end })
-                SecSaudacoesCIGS:Paragraph({ Title = "Saudações, senhores Guerreiros de Selva.", Desc = "" })
-                SecSaudacoesCIGS:Button({ Title = "Copiar Promome 2", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Guerreiros de Selva.") end })
-                
-                local SecInicioCIGS = NovaAba:Section({ Title = "Início do TAF", TextXAlignment = "Left" })
-                SecInicioCIGS:Paragraph({ Title = "Retirar boina, dar saudações ao instrutor e passar pelos escudos.", Desc = "" })
-                SecInicioCIGS:Button({ Title = "Copiar Início", Icon = "copy", Callback = function() CopiarTexto("Retirar boina, dar saudações ao instrutor e passar pelos escudos.") end })
+----------------------------------------------------------------
+-- Funções do jogador
+----------------------------------------------------------------
+local function hum()
+    local ch = LP.Character
+    return ch and ch:FindFirstChildOfClass("Humanoid")
+end
+local function applyPlayer()
+    local h = hum()
+    if h then
+        if State.speed then h.WalkSpeed = State.speed end
+        if State.jump then h.UseJumpPower = true h.JumpPower = State.jump end
+    end
+    if State.gravity then workspace.Gravity = State.gravity end
+end
+conn(LP.CharacterAdded:Connect(function() task.wait(0.6) applyPlayer() end))
+conn(UIS.JumpRequest:Connect(function()
+    if State.infJump then
+        local h = hum()
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end))
+conn(LP.Idled:Connect(function()
+    if State.antiAfk then
+        pcall(function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end)
+    end
+end))
 
-            -- =========================================
-            -- ABA CYBER
-            -- =========================================
-            senão se selecionado == "CYBER" então
-                local SecSobre = NovaAba:Section({ Title = "Sobre o CYBER", TextXAligment = "Left" })
-                SecSobre:Paragraph({ Title = "O Comando de Defesa Cibernética (COMDCIBER) é o órgão responsável por proteger as redes e sistemas do Exército, garantindo a segurança no ciberespaço e a soberania nacional no ambiente digital.", Desc = "" })
-                SecSobre:Button({ Title = "Copiar Informação", Icon = "copy", Callback = function() CopiarTexto("O Comando de Defesa Cibernética (COMDCIBER) é o órgão responsável por proteger as redes e sistemas do Exército, garantindo a segurança no ciberespaço e a soberania nacional no ambiente digital.") end })
+local function runScript(src)
+    if src:gsub("%s", "") == "" then return false, "O editor está vazio." end
+    if not loadstring then return false, "Este executor não suporta loadstring." end
+    local fn, err = loadstring(src)
+    if not fn then return false, "Erro de sintaxe: " .. tostring(err) end
+    local ok, e = pcall(fn)
+    if not ok then return false, "Erro ao executar: " .. tostring(e) end
+    return true, "Script executado com sucesso."
+end
 
-                local SecInfoCYBER = NovaAba:Section({ Title = "🖥 Informações CYBER", TextXAlignment = "Left" })
-                SecInfoCYBER:Paragraph({ Title = "Criador: wAnTee16j5156.", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Criador", Icon = "copy", Callback = function() CopiarTexto("wAnTee16j5156.") end })
-                SecInfoCYBER:Paragraph({ Title = "Dono: MaxTheJp1.", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Dono 1", Icon = "copy", Callback = function() CopiarTexto("MaxTheJp1.") end })
-                SecInfoCYBER:Paragraph({ Title = "Dono: ItsMeLyrio.", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Dono 2", Icon = "copy", Callback = function() CopiarTexto("ItsMeLyrio.") end })
-                SecInfoCYBER:Paragraph({ Title = "Doação: Gabriel2444q.", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Dono 3", Icon = "copy", Callback = function() CopiarTexto("Gabriel2444q.") end })
-                SecInfoCYBER:Paragraph({ Title = "Comandante: highanddry98", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Comandante", Icon = "copy", Callback = function() CopiarTexto("highanddry98") end })
-                SecInfoCYBER:Paragraph({ Title = "Subcomandante: Não tem.", Desc = "" })
-                SecInfoCYBER:Button({ Title = "Copiar Subcomandante", Icon = "copiar", Callback = function() CopiarTexto("Não tem.") end })
-                
-                local SecSaudacoesCYBER = NovaAba:Section({ Title = "Saudações", TextXAlignment = "Left" })
-                SecSaudacoesCYBER:Paragraph({ Title = "Saudações, senhores Analistas.", Desc = "" })
-                SecSaudacoesCYBER:Button({ Title = "Copiar Saudação", Icon = "copy", Callback = function() CopiarTexto("Saudações, senhores Analistas.") end })
-                
-                local SecLemaCYBER = NovaAba:Section({ Title = "Lema CYBER", TextXAligment = "Left" })
-                SecLemaCYBER:Paragraph({ Title = "Segurança no ciberespaço, soberania para a Nação.", Desc = "" })
-                SecLemaCYBER:Button({ Title = "Copiar Lema", Icon = "copy", Callback = function() CopiarTexto("Segurança no ciberespaço, soberania para a Nação.") end })
-                
-                local SecJuramentoCYBER = NovaAba:Section({ Title = "Juramento", TextXAligment = "Left" })
-                SecJuramentoCYBER:Paragraph({ Title = "JURO GUARDAR SIGILO SOBRE TUDO QUE VER E OUVRIR NO COMDCIBER!", Desc = "" })
-                SecJuramentoCYBER:Button({ Title = "Copiar Juramento", Icon = "copy", Callback = function() CopiarTexto("JURO GUARDAR SIGILO SOBRE TUDO QUE VER E OUVRIR NO COMDCIBER!") end })
+----------------------------------------------------------------
+-- Componentes: toggle e slider
+----------------------------------------------------------------
+local function toggle(parent, label, get, set)
+    local c = card(parent, 44)
+    text(c, label, 15, nil, nil, { Position = UDim2.fromOffset(12, 0), Size = UDim2.new(1, -80, 1, 0) })
+    local sw = mk("TextButton", {
+        AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, 0), Size = UDim2.fromOffset(46, 24),
+        Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+        BackgroundColor3 = get() and T.accent or C(60, 62, 75),
+    }, c)
+    corner(sw, 12)
+    local knob = mk("Frame", {
+        Size = UDim2.fromOffset(18, 18), AnchorPoint = Vector2.new(0, 0.5), BorderSizePixel = 0,
+        Position = get() and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+        BackgroundColor3 = C(255, 255, 255),
+    }, sw)
+    corner(knob, 9)
+    sw.Activated:Connect(function()
+        local v = not get()
+        set(v)
+        tween(sw, 0.15, { BackgroundColor3 = v and T.accent or C(60, 62, 75) })
+        tween(knob, 0.15, { Position = v and UDim2.new(1, -21, 0.5, 0) or UDim2.new(0, 3, 0.5, 0) })
+    end)
+end
 
-            fim
-            
-            task.wait(0.2)
-            TabPrincipal:Select()
-            task.wait(0.1)
-            NovaAba:Select()
-            
-        outro
-            AbasCriadas[selecionado]:Selecionar()
-        fim
-    fim,
-})
+local function slider(parent, label, min, max, init, onChange)
+    local c = card(parent, 58)
+    text(c, label, 15, nil, nil, { Position = UDim2.fromOffset(12, 4), Size = UDim2.new(0.6, 0, 0, 22) })
+    local val = text(c, "", 15, T.accent, T.boldFont, {
+        Position = UDim2.new(0.5, 0, 0, 4), Size = UDim2.new(0.5, -12, 0, 22),
+        TextXAlignment = Enum.TextXAlignment.Right })
+    local track = mk("Frame", { Position = UDim2.new(0, 12, 0, 38), Size = UDim2.new(1, -24, 0, 8),
+        BackgroundColor3 = T.line, BackgroundTransparency = 0.6, BorderSizePixel = 0, Active = true }, c)
+    corner(track, 4)
+    local fill = mk("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = T.accent, BorderSizePixel = 0 }, track)
+    corner(fill, 4)
+    local knob = mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Size = UDim2.fromOffset(18, 18),
+        BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0 }, track)
+    corner(knob, 9)
+    stroke(knob, T.accent, 2, 0)
 
--- =========================================
--- TAG DE FPS
--- =========================================
-local FPSTag = Window:Tag({ Title = "FPS: 0", Color = Color3.fromRGB(100, 150, 255) })
-local RunService = jogo:GetService("RunService")
-local lastUpdate = tick()
-local frameCount = 0
+    local function setValue(v, silent)
+        v = math.clamp(math.floor(v + 0.5), min, max)
+        local a = (v - min) / (max - min)
+        fill.Size = UDim2.new(a, 0, 1, 0)
+        knob.Position = UDim2.new(a, 0, 0.5, 0)
+        val.Text = tostring(v)
+        if not silent then onChange(v) end
+    end
+    local function fromX(x)
+        local a = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
+        setValue(min + a * (max - min))
+    end
+    track.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            fromX(i.Position.X)
+            Drag.update = function(p) fromX(p.X) end
+            Drag.finish = nil
+        end
+    end)
+    setValue(init, true)
+    return setValue
+end
 
-RunService.RenderStepped:Connect(function()
-    Contagem de quadros = Contagem de quadros + 1
-    local agora = tick()
-    se agora - últimaAtualização >= 1 então
-        local fps = math.floor(frameCount / (agora - últimaAtualização))
-        FPSTag:SetTitle("FPS: " .. fps)
+----------------------------------------------------------------
+-- Páginas
+----------------------------------------------------------------
+local Pages = {}
+local rebuild, showPage, setOpen
 
-        se fps >= 50 então FPSTag:SetColor(Color3.fromRGB(0, 255, 0))
-        senão se fps >= 30 então FPSTag:SetColor(Color3.fromRGB(255, 200, 0))
-        senão FPSTag:SetColor(Color3.fromRGB(255, 0, 0)) fim
+----------------------------------------------------------------
+-- Ponte Arceus: acha a UI do Arceus e traz a janela inteira
+-- (todas as abas e funções dela) para dentro deste menu, já no tema
+----------------------------------------------------------------
+local Bridge = { roots = {}, en = {}, main = nil, cands = {}, ci = 1, o = nil, fit = nil, hide = false, scale = 1 }
 
-        frameCount = 0
-        últimaAtualização = agora
-    fim
-fim)
+do
+    local Parking
+
+    local function vpSize()
+        local cam = workspace.CurrentCamera
+        return cam and cam.ViewportSize or Vector2.new(800, 400)
+    end
+    local function approx(o)
+        local a = o.AbsoluteSize
+        if a.X > 1 and a.Y > 1 then return a end
+        local vp, s = vpSize(), o.Size
+        return Vector2.new(s.X.Scale * vp.X + s.X.Offset, s.Y.Scale * vp.Y + s.Y.Offset)
+    end
+
+    ------------------------------------------------------------
+    -- Visual (cores, bordas, PT-BR, título) aplicado na UI do Arceus
+    ------------------------------------------------------------
+    local SK = { on = false, token = 0, conns = {}, created = {} }
+    local function weakT() return setmetatable({}, { __mode = "k" }) end
+    SK.orig, SK.last, SK.sig, SK.pend, SK.titled = weakT(), weakT(), weakT(), weakT(), weakT()
+
+    local PT = {
+        ["execute"] = "Executar", ["execute script"] = "Executar script", ["executing"] = "Executando",
+        ["executed"] = "Executado", ["run"] = "Executar", ["clear"] = "Limpar", ["clear all"] = "Limpar tudo",
+        ["clear editor"] = "Limpar editor", ["paste"] = "Colar", ["copy"] = "Copiar", ["cut"] = "Recortar",
+        ["save"] = "Salvar", ["save file"] = "Salvar arquivo", ["save script"] = "Salvar script",
+        ["open"] = "Abrir", ["open file"] = "Abrir arquivo", ["load"] = "Carregar", ["load file"] = "Carregar arquivo",
+        ["loading"] = "Carregando", ["scripts"] = "Scripts", ["script"] = "Script", ["script hub"] = "Hub de scripts",
+        ["settings"] = "Configurações", ["setting"] = "Configuração", ["options"] = "Opções", ["option"] = "Opção",
+        ["search"] = "Buscar", ["search scripts"] = "Buscar scripts", ["home"] = "Início", ["editor"] = "Editor",
+        ["executor"] = "Executor", ["console"] = "Console", ["output"] = "Saída", ["logs"] = "Registros",
+        ["log"] = "Registro", ["cloud"] = "Nuvem", ["library"] = "Biblioteca", ["themes"] = "Temas",
+        ["theme"] = "Tema", ["appearance"] = "Aparência", ["language"] = "Idioma", ["close"] = "Fechar",
+        ["minimize"] = "Minimizar", ["maximize"] = "Maximizar", ["delete"] = "Excluir", ["remove"] = "Remover",
+        ["rename"] = "Renomear", ["new"] = "Novo", ["new file"] = "Novo arquivo", ["new tab"] = "Nova aba",
+        ["add tab"] = "Adicionar aba", ["add"] = "Adicionar", ["refresh"] = "Atualizar", ["apply"] = "Aplicar",
+        ["reset"] = "Redefinir", ["enable"] = "Ativar", ["disable"] = "Desativar", ["enabled"] = "Ativado",
+        ["disabled"] = "Desativado", ["on"] = "Ligado", ["off"] = "Desligado", ["info"] = "Informações",
+        ["information"] = "Informações", ["about"] = "Sobre", ["credits"] = "Créditos", ["welcome"] = "Bem-vindo",
+        ["favorites"] = "Favoritos", ["favourites"] = "Favoritos", ["recent"] = "Recentes", ["local"] = "Local",
+        ["inject"] = "Injetar", ["attach"] = "Conectar", ["attached"] = "Conectado", ["attaching"] = "Conectando",
+        ["auto execute"] = "Execução automática", ["auto-execute"] = "Execução automática",
+        ["autoexecute"] = "Execução automática", ["key"] = "Chave", ["support"] = "Suporte",
+        ["update"] = "Atualizar", ["updates"] = "Atualizações", ["version"] = "Versão", ["done"] = "Concluído",
+        ["cancel"] = "Cancelar", ["confirm"] = "Confirmar", ["yes"] = "Sim", ["no"] = "Não", ["back"] = "Voltar",
+        ["next"] = "Próximo", ["select"] = "Selecionar", ["upload"] = "Enviar", ["download"] = "Baixar",
+        ["share"] = "Compartilhar", ["edit"] = "Editar", ["tools"] = "Ferramentas", ["tool"] = "Ferramenta",
+        ["misc"] = "Diversos", ["general"] = "Geral", ["free"] = "Grátis", ["name"] = "Nome",
+        ["description"] = "Descrição", ["game"] = "Jogo", ["games"] = "Jogos", ["players"] = "Jogadores",
+        ["player"] = "Jogador", ["server"] = "Servidor", ["success"] = "Sucesso", ["error"] = "Erro",
+        ["failed"] = "Falhou", ["script executed"] = "Script executado", ["join discord"] = "Entrar no Discord",
+        ["copy script"] = "Copiar script", ["paste script"] = "Colar script", ["clipboard"] = "Área de transferência",
+        ["unlock fps"] = "Liberar FPS", ["fps unlocker"] = "Liberar FPS", ["explorer"] = "Explorador",
+        ["tabs"] = "Abas", ["tab"] = "Aba", ["files"] = "Arquivos", ["file"] = "Arquivo", ["folder"] = "Pasta",
+        ["workspace"] = "Espaço de trabalho",
+    }
+    local UPC = { ["ç"] = "Ç", ["ã"] = "Ã", ["õ"] = "Õ", ["á"] = "Á", ["à"] = "À", ["â"] = "Â", ["é"] = "É",
+        ["ê"] = "Ê", ["í"] = "Í", ["ó"] = "Ó", ["ô"] = "Ô", ["ú"] = "Ú" }
+    local function upperPT(s)
+        s = s:upper()
+        for a, b in pairs(UPC) do s = s:gsub(a, b) end
+        return s
+    end
+    local function translate(t)
+        if type(t) ~= "string" or #t > 40 then return nil end
+        local trimmed = t:match("^%s*(.-)%s*$")
+        if trimmed == "" then return nil end
+        local key = trimmed:lower()
+        local suffix, tr = "", PT[key]
+        if not tr then
+            local base, suf = key:match("^(.-)([:%.]+)$")
+            if base and PT[base] then tr, suffix = PT[base], suf end
+        end
+        if not tr then return nil end
+        tr = tr .. suffix
+        if trimmed:upper() == trimmed and trimmed:lower() ~= trimmed then
+            tr = upperPT(tr)
+        elseif trimmed:lower() == trimmed then
+            tr = tr:gsub("^%u", string.lower)
+        end
+        return tr
+    end
+    local function isTitle(t)
+        local l = t:lower():match("^%s*(.-)%s*$")
+        if l == "neo" then return true end
+        return #l <= 24 and l:find("arceus", 1, true) ~= nil
+    end
+
+    local function skTint(c, kind)
+        local h, s, v = c:ToHSV()
+        if s >= 0.25 then
+            local th = T.h
+            if h > 0.22 and h < 0.45 and not (th > 0.22 and th < 0.45) then return c end -- verde (status) fica
+            local nv = (kind == "text") and math.max(v, 0.85) or math.max(v, 0.5)
+            return Color3.fromHSV(th, math.clamp(s, 0.55, 1) * T.accF, math.min(nv, 1))
+        end
+        if kind ~= "bg" or v > 0.85 then return c end
+        return Color3.fromHSV(T.h, T.tintS, math.clamp(v * T.vMul, 0, 1))
+    end
+
+    local function skSet(inst, prop, val)
+        local o = SK.orig[inst]
+        if not o then o = {} SK.orig[inst] = o end
+        if o[prop] == nil then
+            local ok, old = pcall(function() return inst[prop] end)
+            if ok then o[prop] = old end
+        end
+        local l = SK.last[inst]
+        if not l then l = {} SK.last[inst] = l end
+        l[prop] = val
+        pcall(function() inst[prop] = val end)
+    end
+    local function skOrig(inst, prop)
+        local o = SK.orig[inst]
+        if o and o[prop] ~= nil then return o[prop] end
+        return inst[prop]
+    end
+
+    local skReprop
+    local function skWatch(inst, prop)
+        local ok, sig = pcall(function() return inst:GetPropertyChangedSignal(prop) end)
+        if not ok then return end
+        SK.conns[#SK.conns + 1] = sig:Connect(function()
+            if not SK.on then return end
+            local cur
+            pcall(function() cur = inst[prop] end)
+            local l = SK.last[inst]
+            if cur == nil or (l and l[prop] == cur) then return end
+            local p = SK.pend[inst]
+            if not p then p = {} SK.pend[inst] = p end
+            if p[prop] then return end
+            p[prop] = true
+            task.defer(function()
+                p[prop] = nil
+                if not SK.on or not inst.Parent then return end
+                local cur2
+                pcall(function() cur2 = inst[prop] end)
+                local l2 = SK.last[inst]
+                if cur2 == nil or (l2 and l2[prop] == cur2) then return end
+                if SK.orig[inst] then SK.orig[inst][prop] = cur2 end -- o Arceus mudou: vira o novo "original"
+                pcall(skReprop, inst, prop)
+            end)
+        end)
+    end
+
+    skReprop = function(inst, prop)
+        if prop == "BackgroundColor3" then
+            skSet(inst, prop, skTint(inst[prop], "bg"))
+        elseif prop == "TextColor3" then
+            if SK.titled[inst] then return end
+            skSet(inst, prop, skTint(inst[prop], "text"))
+        elseif prop == "ImageColor3" then
+            skSet(inst, prop, skTint(inst[prop], "image"))
+        elseif prop == "Text" then
+            local cur = inst.Text
+            if inst:IsA("TextLabel") and isTitle(cur) then
+                SK.titled[inst] = true
+                skSet(inst, "Text", "Angel executor")
+                skSet(inst, "Font", T.titleFont)
+                skSet(inst, "TextScaled", true)
+                skSet(inst, "TextColor3", T.light)
+            else
+                local tr = translate(cur)
+                if tr then skSet(inst, "Text", tr) end
+            end
+        end
+    end
+
+    local function skInst(inst)
+        if not SK.on or inst:GetAttribute("AngelOwned") then return end
+        if inst:IsA("UIStroke") then
+            skSet(inst, "Color", T.accent)
+        elseif inst:IsA("UIGradient") then
+            local o = skOrig(inst, "Color")
+            local pts = {}
+            for _, k in ipairs(o.Keypoints) do
+                pts[#pts + 1] = ColorSequenceKeypoint.new(k.Time, skTint(k.Value, "bg"))
+            end
+            if #pts >= 2 then skSet(inst, "Color", ColorSequence.new(pts)) end
+        elseif inst:IsA("UICorner") then
+            local o = skOrig(inst, "CornerRadius")
+            if o.Scale < 0.4 then
+                skSet(inst, "CornerRadius", UDim.new(o.Scale, math.clamp(math.floor(o.Offset * T.rScale + 0.5), 0, 40)))
+            end
+        elseif inst:IsA("GuiObject") then
+            local bt = skOrig(inst, "BackgroundTransparency")
+            if bt < 0.98 then
+                skSet(inst, "BackgroundColor3", skTint(skOrig(inst, "BackgroundColor3"), "bg"))
+                if (inst:IsA("Frame") or inst:IsA("ScrollingFrame")) and bt < 0.2 then
+                    local a = inst.AbsoluteSize
+                    if a.X > 120 and a.Y > 60 then skSet(inst, "BackgroundTransparency", 0.2) end
+                end
+            end
+            local isText = inst:IsA("TextLabel") or inst:IsA("TextButton")
+            if isText or inst:IsA("TextBox") then
+                local tc = skTint(skOrig(inst, "TextColor3"), "text")
+                if tc ~= skOrig(inst, "TextColor3") then skSet(inst, "TextColor3", tc) end
+                if isText then
+                    local cur = skOrig(inst, "Text")
+                    if inst:IsA("TextLabel") and isTitle(cur) then
+                        SK.titled[inst] = true
+                        skSet(inst, "Text", "Angel executor")
+                        skSet(inst, "Font", T.titleFont)
+                        skSet(inst, "TextScaled", true)
+                        skSet(inst, "TextColor3", T.light)
+                    else
+                        local tr = translate(cur)
+                        if tr then skSet(inst, "Text", tr) end
+                    end
+                else
+                    local tr = translate(skOrig(inst, "PlaceholderText"))
+                    if tr then skSet(inst, "PlaceholderText", tr) end
+                end
+            end
+            if inst:IsA("ImageLabel") or inst:IsA("ImageButton") then
+                local ic = skTint(skOrig(inst, "ImageColor3"), "image")
+                if ic ~= skOrig(inst, "ImageColor3") then skSet(inst, "ImageColor3", ic) end
+            end
+            if not SK.sig[inst] then
+                SK.sig[inst] = true
+                skWatch(inst, "BackgroundColor3")
+                if isText then
+                    skWatch(inst, "TextColor3") skWatch(inst, "Text")
+                elseif inst:IsA("TextBox") then
+                    skWatch(inst, "TextColor3")
+                end
+                if inst:IsA("ImageLabel") or inst:IsA("ImageButton") then skWatch(inst, "ImageColor3") end
+            end
+        end
+    end
+
+    function SK.apply(root)
+        SK.on = true
+        SK.token = SK.token + 1
+        local tok = SK.token
+        SK.conns[#SK.conns + 1] = root.DescendantAdded:Connect(function(d)
+            if not SK.on then return end
+            task.defer(function()
+                if d.Parent then pcall(skInst, d) end
+            end)
+        end)
+        task.spawn(function()
+            pcall(skInst, root)
+            local n = 0
+            for _, d in ipairs(root:GetDescendants()) do
+                if tok ~= SK.token then return end
+                pcall(skInst, d)
+                n = n + 1
+                if n % 150 == 0 then task.wait() end
+            end
+        end)
+    end
+
+    function SK.restore()
+        SK.token = SK.token + 1
+        SK.on = false
+        for _, c in ipairs(SK.conns) do pcall(function() c:Disconnect() end) end
+        SK.conns = {}
+        for inst, props in pairs(SK.orig) do
+            for prop, val in pairs(props) do pcall(function() inst[prop] = val end) end
+        end
+        for _, o in ipairs(SK.created) do pcall(function() o:Destroy() end) end
+        SK.created = {}
+        SK.orig, SK.last, SK.sig, SK.pend, SK.titled = weakT(), weakT(), weakT(), weakT(), weakT()
+    end
+
+    ------------------------------------------------------------
+    -- Detecção do Arceus
+    ------------------------------------------------------------
+    local BLACK = {
+        RobloxGui = true, TopBarApp = true, PlayerList = true, Chat = true, BubbleChat = true,
+        ThemeProvider = true, PurchasePromptApp = true, DevConsoleMaster = true,
+        RobloxNetworkPauseNotification = true, InGameMenu = true, ControlGui = true, TouchGui = true,
+        Freecam = true, ExperienceChat = true, VoiceChat = true, RobloxPromptGui = true,
+    }
+    local function huiC()
+        if gethui then
+            local ok, h = pcall(gethui)
+            if ok and h then return h end
+        end
+    end
+    local function containers()
+        local t, h = {}, huiC()
+        if h then t[#t + 1] = h end
+        t[#t + 1] = CoreGui
+        local pg = LP:FindFirstChild("PlayerGui")
+        if pg then t[#t + 1] = pg end
+        return t, h
+    end
+    local function arceusScore(gui)
+        local s, n = 0, gui.Name:lower()
+        for _, k in ipairs({ "arceus", "executor", "neo" }) do
+            if n:find(k, 1, true) then s = s + 3 break end
+        end
+        local c, hasBox, hasExec = 0, false, false
+        for _, d in ipairs(gui:GetDescendants()) do
+            c = c + 1
+            if c > 700 then break end
+            if d:IsA("TextBox") then
+                hasBox = true
+            elseif d:IsA("TextLabel") or d:IsA("TextButton") then
+                local t = d.Text:lower()
+                if t:find("arceus", 1, true) then s = s + 2
+                elseif t:find("execut", 1, true) then
+                    s = s + 1
+                    if d:IsA("TextButton") then hasExec = true end
+                elseif t == "neo" then s = s + 1 end
+            end
+        end
+        if hasBox and hasExec then s = s + 2 end
+        return s
+    end
+
+    function Bridge.scan(fallback)
+        local list, h = containers()
+        local function eligible(gui)
+            return gui:IsA("ScreenGui") and gui ~= Gui and not gui:GetAttribute("AngelOwned")
+                and not BLACK[gui.Name] and not Bridge.roots[gui]
+        end
+        for _, cont in ipairs(list) do
+            for _, gui in ipairs(cont:GetChildren()) do
+                if eligible(gui) then
+                    local ok, sc = pcall(arceusScore, gui)
+                    if ok and sc >= 3 then Bridge.roots[gui] = true end
+                end
+            end
+        end
+        -- plano B: nada com cara de Arceus; aceita a primeira UI de executor do gethui
+        if fallback and h and next(Bridge.roots) == nil then
+            for _, gui in ipairs(h:GetChildren()) do
+                if eligible(gui) and not gui.Name:lower():find("angel", 1, true) and #gui:GetDescendants() >= 8 then
+                    Bridge.roots[gui] = true
+                    break
+                end
+            end
+        end
+    end
+
+    function Bridge.refreshCands()
+        local vp, list = vpSize(), {}
+        for root in pairs(Bridge.roots) do
+            if root.Parent then
+                for _, d in ipairs(root:GetDescendants()) do
+                    if (d:IsA("Frame") or d:IsA("ImageLabel") or d:IsA("CanvasGroup")) and not d:GetAttribute("AngelOwned") then
+                        local a = approx(d)
+                        if a.X > 200 and a.Y > 120 and not (a.X >= vp.X * 0.97 and a.Y >= vp.Y * 0.97) then
+                            list[#list + 1] = { d = d, area = a.X * a.Y }
+                        end
+                    end
+                end
+            end
+        end
+        table.sort(list, function(x, y) return x.area > y.area end)
+        Bridge.cands = {}
+        for i = 1, math.min(#list, 6) do Bridge.cands[i] = list[i].d end
+    end
+
+    ------------------------------------------------------------
+    -- Janela do Arceus: pegar, encaixar, devolver
+    ------------------------------------------------------------
+    function Bridge.applyHide()
+        for root in pairs(Bridge.roots) do
+            if root.Parent then
+                if Bridge.en[root] == nil then Bridge.en[root] = root.Enabled end
+                if Bridge.hide then root.Enabled = false else root.Enabled = Bridge.en[root] end
+            end
+        end
+    end
+
+    function Bridge.setMain(m)
+        local a = approx(m)
+        Bridge.o = { parent = m.Parent, anchor = m.AnchorPoint, pos = m.Position, size = m.Size, vis = m.Visible }
+        Bridge.aw, Bridge.ah = math.max(a.X, 200), math.max(a.Y, 120)
+        Bridge.main = m
+        SK.apply(m)
+        Bridge.applyHide()
+    end
+
+    function Bridge.forget()
+        SK.restore()
+        Bridge.main, Bridge.fit = nil, nil
+    end
+
+    function Bridge.pick()
+        if Bridge.main then
+            if Bridge.main.Parent then return Bridge.main end
+            Bridge.forget()
+        end
+        Bridge.refreshCands()
+        local m = Bridge.cands[Bridge.ci] or Bridge.cands[1]
+        if m then Bridge.setMain(m) end
+        return Bridge.main
+    end
+
+    function Bridge.giveBack()
+        local m, o = Bridge.main, Bridge.o
+        SK.restore()
+        if m and m.Parent then
+            if Bridge.fit then pcall(function() Bridge.fit:Destroy() end) end
+            if o then
+                pcall(function()
+                    m.AnchorPoint = o.anchor
+                    m.Position = o.pos
+                    m.Size = o.size
+                    m.Visible = o.vis
+                    if o.parent and o.parent.Parent then m.Parent = o.parent end
+                end)
+            end
+        end
+        Bridge.main, Bridge.fit, Bridge.o = nil, nil, nil
+    end
+
+    function Bridge.nextCand()
+        Bridge.giveBack()
+        Bridge.refreshCands()
+        if #Bridge.cands > 0 then Bridge.ci = (Bridge.ci % #Bridge.cands) + 1 end
+        return Bridge.pick()
+    end
+
+    function Bridge.detach()
+        local m = Bridge.main
+        if m and m.Parent and m.Parent ~= Parking then
+            if not (Parking and Parking.Parent) then
+                Parking = Instance.new("Frame")
+                Parking.Name = "Estacionamento"
+                Parking.Visible = false
+                Parking.BackgroundTransparency = 1
+                Parking.Size = UDim2.fromOffset(1, 1)
+                Parking:SetAttribute("AngelOwned", true)
+                Parking.Parent = Gui
+            end
+            m.Parent = Parking
+        end
+    end
+
+    function Bridge.embed(host, hw, hh)
+        local m = Bridge.main
+        if not (m and m.Parent) then return false end
+        m.Parent = host
+        m.AnchorPoint = Vector2.new(0.5, 0.5)
+        m.Position = UDim2.fromScale(0.5, 0.5)
+        m.Size = UDim2.fromOffset(Bridge.aw, Bridge.ah)
+        m.Visible = true
+        if not (Bridge.fit and Bridge.fit.Parent == m) then
+            Bridge.fit = Instance.new("UIScale")
+            Bridge.fit.Name = "AngelFit"
+            Bridge.fit:SetAttribute("AngelOwned", true)
+            Bridge.fit.Parent = m
+        end
+        Bridge.fit.Scale = math.clamp(math.min(hw / Bridge.aw, hh / Bridge.ah, 1.3), 0.2, 1.3)
+        Bridge.scale = Bridge.fit.Scale
+        return true
+    end
+
+    function Bridge.center()
+        if Bridge.main then Bridge.main.Position = UDim2.fromScale(0.5, 0.5) end
+    end
+
+    function Bridge.retheme()
+        if Bridge.main then
+            SK.restore()
+            SK.apply(Bridge.main)
+        end
+    end
+
+    function Bridge.shutdown()
+        Bridge.giveBack()
+        for root, en in pairs(Bridge.en) do
+            pcall(function() root.Enabled = en end)
+        end
+    end
+
+    function Bridge.status()
+        if Bridge.main then
+            return string.format("Arceus conectado  ·  escala %d%%", math.floor(Bridge.scale * 100 + 0.5))
+        elseif next(Bridge.roots) then
+            return "Arceus achado, mas sem janela visível"
+        end
+        return "Arceus não encontrado ainda"
+    end
+
+    ------------------------------------------------------------
+    -- Página "Arceus"
+    ------------------------------------------------------------
+    Pages.arceus = function(p)
+        if not Bridge.main then Bridge.scan(true) end
+        local m = Bridge.pick()
+
+        local r = row(p, 30)
+        local bs = UDim2.new(0.25, -5, 1, 0)
+        button(r, "↻ Achar", false, function()
+            Bridge.scan(true)
+            task.defer(showPage, "arceus")
+        end, bs)
+        button(r, "⌖ Centro", false, function() Bridge.center() end, bs)
+        button(r, "⇄ Janela", false, function()
+            Bridge.nextCand()
+            task.defer(showPage, "arceus")
+        end, bs)
+        button(r, State.big and "⤡ Normal" or "⤢ Grande", false, function()
+            State.big = not State.big
+            task.defer(rebuild)
+        end, bs)
+
+        local sr = mk("Frame", { Size = UDim2.new(1, 0, 0, 18), BackgroundTransparency = 1, LayoutOrder = nextOrd() }, p)
+        local stLabel = text(sr, Bridge.status(), 12, SUB, nil, { Size = UDim2.new(1, -120, 1, 0), TextWrapped = false,
+            TextTruncate = Enum.TextTruncate.AtEnd })
+        local hb = mk("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, 0, 0.5, 0),
+            Size = UDim2.fromOffset(116, 18), BackgroundTransparency = 1, AutoButtonColor = false,
+            Text = Bridge.hide and "Mostrar original" or "Ocultar original", Font = T.boldFont,
+            TextSize = 12, TextColor3 = T.accent }, sr)
+        hb.Activated:Connect(function()
+            Bridge.hide = not Bridge.hide
+            Bridge.applyHide()
+            hb.Text = Bridge.hide and "Mostrar original" or "Ocultar original"
+        end)
+
+        local hostH = math.max(ContentH - 66, 90)
+        local host = mk("Frame", { Size = UDim2.new(1, 0, 0, hostH), BackgroundColor3 = T.card,
+            BackgroundTransparency = T.cardT, BorderSizePixel = 0, ClipsDescendants = true,
+            LayoutOrder = nextOrd() }, p)
+        corner(host, cr())
+        stroke(host, T.line, 1, 0.65)
+
+        if m and Bridge.embed(host, ContentW, hostH) then
+            -- ok: a janela original do Arceus agora vive aqui dentro
+        else
+            text(host, "Abra o Arceus uma vez e toque em ↻ Achar.\nAssim que ele aparecer, toda a interface dele entra aqui.",
+                14, SUB, nil, { Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center,
+                TextYAlignment = Enum.TextYAlignment.Center })
+        end
+
+        stLabel.Text = Bridge.status()
+
+        Live.fns[#Live.fns + 1] = function()
+            if not host.Parent then return end
+            if Bridge.main then
+                if not Bridge.main.Parent then
+                    Bridge.forget()
+                    task.defer(showPage, "arceus")
+                else
+                    Bridge.main.Visible = true
+                end
+            else
+                Bridge.scan(false)
+                if Bridge.pick() then task.defer(showPage, "arceus") end
+            end
+        end
+    end
+end
+
+
+Pages.inicio = function(p)
+    -- Boas-vindas
+    local c = card(p, 84)
+    local av = mk("ImageLabel", { Position = UDim2.fromOffset(10, 10), Size = UDim2.fromOffset(64, 64),
+        BackgroundColor3 = T.line, BackgroundTransparency = 0.6, BorderSizePixel = 0 }, c)
+    corner(av, 32)
+    stroke(av, T.accent, 2, 0)
+    task.spawn(function()
+        local ok, img = pcall(function()
+            return Players:GetUserThumbnailAsync(LP.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+        end)
+        if ok and av.Parent then av.Image = img end
+    end)
+    text(c, "Bem-vindo(a),", 13, SUB, nil, { Position = UDim2.fromOffset(84, 8), Size = UDim2.new(1, -92, 0, 18) })
+    text(c, LP.DisplayName, 21, nil, T.boldFont, { Position = UDim2.fromOffset(84, 24), Size = UDim2.new(1, -92, 0, 28) })
+    local exName = "Desconhecido"
+    pcall(function() if identifyexecutor then exName = tostring((identifyexecutor())) end end)
+    text(c, "Executando em: " .. exName, 13, T.accent, T.boldFont, { Position = UDim2.fromOffset(84, 54), Size = UDim2.new(1, -92, 0, 20) })
+
+    -- Jogo
+    local g = card(p, 58)
+    text(g, "Jogo atual", 13, SUB, nil, { Position = UDim2.fromOffset(12, 6), Size = UDim2.new(1, -24, 0, 18) })
+    local gname = text(g, "Carregando...", 16, nil, T.boldFont, { Position = UDim2.fromOffset(12, 26), Size = UDim2.new(1, -24, 0, 24), TextTruncate = Enum.TextTruncate.AtEnd })
+    task.spawn(function()
+        local ok, info = pcall(function() return Market:GetProductInfo(game.PlaceId) end)
+        if gname.Parent then gname.Text = (ok and info and info.Name) or ("Lugar " .. tostring(game.PlaceId)) end
+    end)
+
+    -- Estatísticas
+    local grid = mk("Frame", { Size = UDim2.new(1, 0, 0, 62), BackgroundTransparency = 1, LayoutOrder = nextOrd() }, p)
+    mk("UIGridLayout", { CellSize = UDim2.new(1 / 3, -6, 1, 0), CellPadding = UDim2.fromOffset(6, 0),
+        SortOrder = Enum.SortOrder.LayoutOrder }, grid)
+    local function stat(title)
+        local s = mk("Frame", { BackgroundColor3 = T.card, BackgroundTransparency = T.cardT, BorderSizePixel = 0, LayoutOrder = nextOrd() }, grid)
+        corner(s, cr()) stroke(s, T.line, 1, 0.65)
+        text(s, title, 12, SUB, nil, { Size = UDim2.new(1, 0, 0, 18), Position = UDim2.fromOffset(0, 6), TextXAlignment = Enum.TextXAlignment.Center })
+        return text(s, "-", 20, T.accent, T.boldFont, { Size = UDim2.new(1, 0, 0, 28), Position = UDim2.fromOffset(0, 26), TextXAlignment = Enum.TextXAlignment.Center })
+    end
+    local fpsL, pingL, plrL = stat("FPS"), stat("PING"), stat("JOGADORES")
+    local function refresh()
+        fpsL.Text = tostring(State.fps or 0)
+        local ping = "-"
+        pcall(function() ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) .. " ms" end)
+        pingL.Text = ping
+        plrL.Text = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
+    end
+    refresh()
+    Live.fns[#Live.fns + 1] = refresh
+
+    -- Tema
+    local t = card(p, 50)
+    text(t, "Tema ativo", 13, SUB, nil, { Position = UDim2.fromOffset(12, 4), Size = UDim2.new(1, -24, 0, 18) })
+    text(t, T.cmd .. "  ·  " .. T.name, 16, T.accent, T.boldFont, { Position = UDim2.fromOffset(12, 22), Size = UDim2.new(1, -24, 0, 24) })
+end
+
+Pages.editor = function(p)
+    local c = card(p, 138)
+    local box = mk("TextBox", {
+        Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundTransparency = 1,
+        Text = State.script, PlaceholderText = "-- Cole seu script aqui", PlaceholderColor3 = SUB,
+        TextColor3 = C(255, 255, 255), Font = Enum.Font.Code, TextSize = 14, MultiLine = true,
+        ClearTextOnFocus = false, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top, ClipsDescendants = true,
+    }, c)
+    box:GetPropertyChangedSignal("Text"):Connect(function() State.script = box.Text end)
+
+    local status = text(p, State.status ~= "" and State.status or "Pronto.", 14, SUB, nil,
+        { Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 0 })
+    local r = row(p, 40)
+    local sz = UDim2.new(1 / 3, -4, 1, 0)
+    button(r, "▶  Executar", true, function()
+        status.Text = "Executando..."
+        task.spawn(function()
+            local ok, msg = runScript(box.Text)
+            State.status = (ok and "✔ " or "✖ ") .. msg
+            log(msg)
+            if status.Parent then
+                status.Text = State.status
+                status.TextColor3 = ok and C(90, 235, 140) or C(255, 100, 100)
+            end
+        end)
+    end, sz)
+    button(r, "🗑  Limpar", false, function() box.Text = "" State.status = "" status.Text = "Editor limpo." end, sz)
+    button(r, "📋  Copiar", false, function()
+        if setclipboard then setclipboard(box.Text) status.Text = "Texto copiado." else status.Text = "Copiar não é suportado aqui." end
+    end, sz)
+    -- status vem antes dos botões na ordem
+    status.LayoutOrder = nextOrd()
+    status.Parent = nil status.Parent = p
+end
+
+Pages.jogador = function(p)
+    local h = hum()
+    local setSpeed = slider(p, "Velocidade", 16, 200, State.speed or (h and h.WalkSpeed) or 16, function(v) State.speed = v applyPlayer() end)
+    local setJump  = slider(p, "Força do pulo", 50, 300, State.jump or (h and h.JumpPower) or 50, function(v) State.jump = v applyPlayer() end)
+    local setGrav  = slider(p, "Gravidade", 0, 400, State.gravity or math.floor(workspace.Gravity), function(v) State.gravity = v applyPlayer() end)
+    toggle(p, "Pulo infinito", function() return State.infJump end, function(v) State.infJump = v log("Pulo infinito: " .. (v and "ligado" or "desligado")) end)
+    toggle(p, "Anti-AFK", function() return State.antiAfk end, function(v) State.antiAfk = v log("Anti-AFK: " .. (v and "ligado" or "desligado")) end)
+    button(p, "↺  Restaurar padrão", false, function()
+        State.speed, State.jump, State.gravity = nil, nil, nil
+        local hh = hum()
+        if hh then hh.WalkSpeed = 16 hh.JumpPower = 50 end
+        workspace.Gravity = DEFAULT_GRAV
+        setSpeed(16, true) setJump(50, true) setGrav(math.floor(DEFAULT_GRAV), true)
+        log("Valores do jogador restaurados.")
+    end)
+end
+
+local THEME_NEWS = {}
+Pages.temas = function(p)
+    text(p, "Escolha a versão do Angel executor. Cada uma muda cor, formato e animações, e vale também para o Arceus dentro do menu.", 13, SUB, nil,
+        { Size = UDim2.new(1, 0, 0, 34), LayoutOrder = nextOrd() })
+    for idx, th in ipairs(Themes) do
+        local c = card(p, 74)
+        local sw = mk("Frame", { Position = UDim2.fromOffset(10, 13), Size = UDim2.fromOffset(48, 48),
+            BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0 }, c)
+        corner(sw, th.radius > 12 and 24 or math.max(th.radius, 4))
+        grad(sw, th.bg0, th.accent, 45)
+        stroke(sw, th.accent, 2, 0)
+        text(c, th.cmd, 16, nil, T.boldFont, { Position = UDim2.fromOffset(68, 6), Size = UDim2.new(1, -150, 0, 22) })
+        text(c, th.name .. " — " .. th.desc, 12, SUB, nil,
+            { Position = UDim2.fromOffset(68, 28), Size = UDim2.new(1, -78, 0, 40), TextYAlignment = Enum.TextYAlignment.Top })
+        if idx == State.themeIdx then
+            local tag = text(c, "ATIVO", 12, T.onAccent, T.boldFont, {
+                AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -8, 0, 8), Size = UDim2.fromOffset(56, 20),
+                BackgroundTransparency = 0, BackgroundColor3 = T.accent, TextXAlignment = Enum.TextXAlignment.Center })
+            corner(tag, 10)
+        end
+        local hit = mk("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 5 }, c)
+        hit.Activated:Connect(function()
+            if State.themeIdx == idx then return end
+            State.themeIdx = idx
+            State.tab = "temas"
+            if writefile then pcall(writefile, "AngelExecutor_tema.txt", tostring(idx)) end
+            log("Tema alterado: " .. th.cmd)
+            task.defer(rebuild)
+        end)
+    end
+end
+
+Pages.registro = function(p)
+    local c = card(p, 150)
+    local sf = mk("ScrollingFrame", { Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16),
+        BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new() }, c)
+    local lab = mk("TextLabel", { Size = UDim2.new(1, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1, Font = Enum.Font.Code, TextSize = 13, TextColor3 = C(235, 240, 255),
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true, Text = "" }, sf)
+    local function upd()
+        lab.Text = #Log.lines > 0 and table.concat(Log.lines, "\n") or "Nenhum evento ainda."
+        sf.CanvasPosition = Vector2.new(0, 1e6)
+    end
+    upd()
+    Log.hook = upd
+    button(p, "🧹  Limpar registro", false, function() Log.lines = {} upd() end)
+    button(p, "⏻  Fechar Angel executor", true, function()
+        if env.AngelExecutor then env.AngelExecutor.Destroy() end
+    end)
+end
+
+----------------------------------------------------------------
+-- Navegação / construção
+----------------------------------------------------------------
+showPage = function(id)
+    Bridge.detach()
+    State.tab = id
+    Live.fns = {}
+    Log.hook = nil
+    ord = 0
+    for _, ch in ipairs(Content:GetChildren()) do
+        if not ch:IsA("UIListLayout") and not ch:IsA("UIPadding") then ch:Destroy() end
+    end
+    Content.CanvasPosition = Vector2.new()
+    local ok, err = pcall(Pages[id], Content)
+    if not ok then log("Erro na página " .. id .. ": " .. tostring(err)) end
+    for tid, setter in pairs(tabSetters) do setter(tid == id) end
+end
+
+local function makeTab(parent, def, size)
+    local style = T.tabStyle
+    local b = mk("TextButton", { Size = size, Text = "", AutoButtonColor = false, BorderSizePixel = 0,
+        BackgroundColor3 = T.accent, BackgroundTransparency = 1 }, parent)
+    local lab = mk("TextLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Font = T.boldFont,
+        TextSize = 14, TextColor3 = C(255, 255, 255) }, b)
+    local mark
+    if style == "bar" then
+        corner(b, 8)
+        lab.Text = "  " .. def.icon .. "  " .. def.label
+        lab.TextXAlignment = Enum.TextXAlignment.Left
+        mark = mk("Frame", { Size = UDim2.new(0, 3, 0.6, 0), Position = UDim2.new(0, 0, 0.2, 0),
+            BackgroundColor3 = T.accent, BorderSizePixel = 0 }, b)
+        corner(mark, 2)
+    elseif style == "underline" then
+        lab.Text = def.icon .. " " .. def.label
+        lab.TextSize = 13
+        mark = mk("Frame", { Size = UDim2.new(1, -12, 0, 2), Position = UDim2.new(0, 6, 1, -2),
+            BackgroundColor3 = T.accent, BorderSizePixel = 0 }, b)
+    elseif style == "pill" then
+        corner(b, 999)
+        lab.Text = def.icon .. "  " .. def.label
+    else -- dock
+        corner(b, 10)
+        lab.Text = def.icon .. "\n" .. def.label
+        lab.TextSize = 13
+    end
+    b.Activated:Connect(function() showPage(def.id) end)
+    return function(sel)
+        if style == "bar" then
+            b.BackgroundTransparency = sel and 0.72 or 1
+            mark.Visible = sel
+        elseif style == "underline" then
+            b.BackgroundTransparency = sel and 0.85 or 1
+            mark.Visible = sel
+        else
+            b.BackgroundColor3 = sel and T.accent or T.card
+            b.BackgroundTransparency = sel and 0.05 or 0.5
+            lab.TextColor3 = sel and T.onAccent or C(255, 255, 255)
+        end
+    end, b
+end
+
+local function fitUpdate()
+    local cam = workspace.CurrentCamera
+    if not (cam and Fit and T and W) then return end
+    local vp = cam.ViewportSize
+    Fit.Scale = math.clamp(math.min((vp.X - 24) / W, (vp.Y - 24) / H, 1.2), 0.45, 1.2)
+end
+
+local function cornerBrackets(body)
+    local function L(x, y, ax, ay)
+        local f = mk("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(16, 16),
+            AnchorPoint = Vector2.new(ax, ay), Position = UDim2.new(ax, ax == 0 and 6 or -6, ay, ay == 0 and 6 or -6) }, body)
+        mk("Frame", { Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, ay, ay == 0 and 0 or -2),
+            BackgroundColor3 = T.accent, BorderSizePixel = 0 }, f)
+        mk("Frame", { Size = UDim2.new(0, 2, 1, 0), Position = UDim2.new(ax, ax == 0 and 0 or -2, 0, 0),
+            BackgroundColor3 = T.accent, BorderSizePixel = 0 }, f)
+    end
+    L(0, 0, 0, 0) L(0, 0, 1, 1)
+end
+
+local function updateLogo()
+    if not Logo then return end
+    Logo.BackgroundColor3 = C(255, 255, 255)
+    local g = Logo:FindFirstChild("Fundo")
+    if g then g.Color = ColorSequence.new(T.bg0, T.bg1) end
+    local lab = Logo:FindFirstChild("A")
+    if lab then lab.TextColor3 = T.accent end
+    local st = Logo:FindFirstChildOfClass("UIStroke")
+    if st then
+        st.Color = T.accent
+        local sg = st:FindFirstChildOfClass("UIGradient")
+        if sg then
+            sg.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, T.accent),
+                ColorSequenceKeypoint.new(0.5, T.accent:Lerp(C(0, 0, 0), 0.85)),
+                ColorSequenceKeypoint.new(1, T.accent),
+            })
+        end
+    end
+end
+
+rebuild = function()
+    T = Themes[State.themeIdx]
+    local k = State.big and 1.4 or 1
+    W, H = math.floor(T.w * k), math.floor(T.h * k)
+    Spinners, Live, ShineFrame, tabSetters = {}, { fns = {} }, nil, {}
+    Log.hook = nil
+    Bridge.detach()
+    Bridge.retheme()
+    if Window then Window:Destroy() end
+
+    Window = mk("Frame", { Name = "Janela", AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = State.winPos or UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(W, H),
+        BackgroundTransparency = 1, Visible = State.open }, Gui)
+    Fit = mk("UIScale", {}, Window)
+    fitUpdate()
+
+    if T.glow then
+        local gl = mk("Frame", { Position = UDim2.fromOffset(-8, -8), Size = UDim2.new(1, 16, 1, 16),
+            BackgroundTransparency = 1 }, Window)
+        corner(gl, T.radius + 8)
+        stroke(gl, T.accent, 8, 0.86)
+    end
+
+    Body = mk("Frame", { Name = "Corpo", Size = UDim2.fromScale(1, 1), AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.fromScale(0.5, 0.5), BackgroundColor3 = C(255, 255, 255),
+        BackgroundTransparency = T.bgT, BorderSizePixel = 0, ClipsDescendants = true }, Window)
+    BodyScale = mk("UIScale", {}, Body)
+    corner(Body, T.radius)
+    grad(Body, T.bg0, T.bg1, T.bgRot)
+    local bst = stroke(Body, T.accent, 1.6, 0.1)
+    if T.animBorder then
+        local g = mk("UIGradient", { Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, T.accent),
+            ColorSequenceKeypoint.new(0.5, T.accent:Lerp(C(0, 0, 0), 0.85)),
+            ColorSequenceKeypoint.new(1, T.accent) }) }, bst)
+        Spinners[#Spinners + 1] = g
+        bst.Thickness = 2.2
+    end
+    if T.corners then cornerBrackets(Body) end
+
+    -- Cabeçalho
+    local header = mk("Frame", { Size = UDim2.new(1, 0, 0, T.headerH), BackgroundTransparency = 1,
+        Active = true, ClipsDescendants = true }, Body)
+    local mini = mk("Frame", { Position = UDim2.fromOffset(12, (T.headerH - 34) / 2), Size = UDim2.fromOffset(34, 34),
+        BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0 }, header)
+    corner(mini, T.radius > 8 and 17 or 6)
+    grad(mini, T.bg0, T.bg1, 45)
+    stroke(mini, T.accent, 1.6, 0)
+    text(mini, "A", 18, T.accent, T.titleFont, { Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center })
+
+    local title = text(header, "Angel executor", T.titleSize, C(255, 255, 255), T.titleFont, {
+        Position = UDim2.fromOffset(T.center and 56 or 56, 0), Size = UDim2.new(1, -112, 1, 0),
+        TextXAlignment = T.center and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
+        TextScaled = true, TextWrapped = false })
+    mk("UITextSizeConstraint", { MaxTextSize = T.titleSize, MinTextSize = 12 }, title)
+    grad(title, C(255, 255, 255), T.accent:Lerp(C(255, 255, 255), 0.25), 0)
+
+    local close = mk("TextButton", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0),
+        Size = UDim2.fromOffset(32, 32), BackgroundColor3 = C(220, 40, 60), BackgroundTransparency = 0.25,
+        Text = "✕", Font = T.boldFont, TextSize = 16, TextColor3 = C(255, 255, 255), AutoButtonColor = false,
+        BorderSizePixel = 0 }, header)
+    corner(close, T.radius > 8 and 16 or 5)
+    close.Activated:Connect(function() setOpen(false) end)
+
+    mk("Frame", { Position = UDim2.new(0, 10, 1, -2), Size = UDim2.new(1, -20, 0, T.id == "v2" and 2 or 1),
+        BackgroundColor3 = T.accent, BackgroundTransparency = T.id == "v2" and 0.1 or 0.6, BorderSizePixel = 0 }, header)
+
+    if T.shine then
+        ShineFrame = mk("Frame", { Size = UDim2.new(0, 46, 2, 0), AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, -80, 0.5, 0), Rotation = 20, BackgroundColor3 = C(255, 255, 255),
+            BorderSizePixel = 0, BackgroundTransparency = 0 }, header)
+        mk("UIGradient", { Transparency = NumberSequence.new({
+            NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.82), NumberSequenceKeypoint.new(1, 1) }) }, ShineFrame)
+    end
+
+    makeDraggable(header, Window, nil, function(pos) State.winPos = pos end, UDim2.fromScale(0.5, 0.5))
+
+    -- Layout: abas + conteúdo
+    local w, h, hh = W, H, T.headerH
+    local tabsHolder, contentPos, contentSize
+    local tabSizeV = UDim2.new(1, 0, 0, 36)
+
+    if T.layout == "side_left" or T.layout == "side_right" then
+        local tx = T.layout == "side_left" and 8 or (w - 128)
+        local cx = T.layout == "side_left" and 136 or 8
+        tabsHolder = mk("Frame", { Position = UDim2.fromOffset(tx, hh + 4), Size = UDim2.fromOffset(120, h - hh - 12),
+            BackgroundColor3 = T.card, BackgroundTransparency = T.cardT, BorderSizePixel = 0 }, Body)
+        corner(tabsHolder, math.max(T.radius - 4, 4)) stroke(tabsHolder, T.line, 1, 0.65)
+        mk("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, tabsHolder)
+        mk("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }, tabsHolder)
+        contentPos = UDim2.fromOffset(cx, hh + 4)
+        contentSize = UDim2.fromOffset(w - 144, h - hh - 12)
+        local th = math.clamp(math.floor((h - hh - 12 - 6 - (#TABS - 1) * 5) / #TABS), 28, 38)
+        tabSizeV = UDim2.new(1, 0, 0, th)
+    elseif T.layout == "top" then
+        tabsHolder = mk("Frame", { Position = UDim2.fromOffset(8, hh + 4), Size = UDim2.fromOffset(w - 16, 34),
+            BackgroundTransparency = 1 }, Body)
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 4),
+            SortOrder = Enum.SortOrder.LayoutOrder }, tabsHolder)
+        tabSizeV = UDim2.new(1 / #TABS, -4, 1, 0)
+        contentPos = UDim2.fromOffset(8, hh + 44)
+        contentSize = UDim2.fromOffset(w - 16, h - hh - 52)
+    else -- dock
+        local dockW = math.floor((w - 40 - (#TABS - 1) * 6) / #TABS)
+        tabsHolder = mk("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, h - 56),
+            Size = UDim2.fromOffset(#TABS * dockW + (#TABS - 1) * 6 + 12, 48), BackgroundColor3 = T.card,
+            BackgroundTransparency = 0.1, BorderSizePixel = 0 }, Body)
+        corner(tabsHolder, 14) stroke(tabsHolder, T.accent, 1.2, 0.35)
+        mk("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingLeft = UDim.new(0, 6) }, tabsHolder)
+        mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 6),
+            SortOrder = Enum.SortOrder.LayoutOrder }, tabsHolder)
+        tabSizeV = UDim2.new(0, dockW, 0, 40)
+        contentPos = UDim2.fromOffset(8, hh + 2)
+        contentSize = UDim2.fromOffset(w - 16, h - hh - 66)
+    end
+
+    ContentW, ContentH = contentSize.X.Offset - 6, contentSize.Y.Offset - 4
+
+    for i, def in ipairs(TABS) do
+        local setter, btn = makeTab(tabsHolder, def, tabSizeV)
+        btn.LayoutOrder = i
+        tabSetters[def.id] = setter
+    end
+
+    Content = mk("ScrollingFrame", { Position = contentPos, Size = contentSize, BackgroundTransparency = 1,
+        BorderSizePixel = 0, ScrollBarThickness = 3, ScrollBarImageColor3 = T.accent,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new() }, Body)
+    mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, Content)
+    mk("UIPadding", { PaddingRight = UDim.new(0, 6), PaddingBottom = UDim.new(0, 4) }, Content)
+
+    updateLogo()
+    showPage(State.tab)
+end
+
+setOpen = function(v)
+    State.open = v
+    if not Window then return end
+    Window.Visible = v
+    if v and BodyScale then
+        BodyScale.Scale = 0.86
+        tween(BodyScale, 0.28, { Scale = 1 }, Enum.EasingStyle.Back)
+    end
+end
+
+----------------------------------------------------------------
+-- Logo arrastável
+----------------------------------------------------------------
+local function buildLogo()
+    Logo = mk("Frame", { Name = "Logo", Size = UDim2.fromOffset(56, 56), Position = State.logoPos,
+        BackgroundColor3 = C(255, 255, 255), BorderSizePixel = 0, Active = true }, Gui)
+    corner(Logo, 28)
+    local bg = grad(Logo, Themes[1].bg0, Themes[1].bg1, 45)
+    bg.Name = "Fundo"
+    local st = stroke(Logo, Themes[1].accent, 2.5, 0)
+    local sg = mk("UIGradient", {}, st)
+    Spinners[#Spinners + 1] = sg
+    local a = text(Logo, "A", 28, Themes[1].accent, Enum.Font.Michroma, {
+        Name = "A", Size = UDim2.fromScale(1, 1), TextXAlignment = Enum.TextXAlignment.Center, TextWrapped = false })
+    mk("UIStroke", { Color = C(0, 0, 0), Thickness = 1, Transparency = 0.5 }, a)
+    makeDraggable(Logo, Logo, function() setOpen(not State.open) end,
+        function(pos) State.logoPos = pos end, UDim2.new(0, 18, 0.4, 0))
+end
+
+----------------------------------------------------------------
+-- Início
+----------------------------------------------------------------
+Gui = mk("ScreenGui", { Name = "AngelExecutor", ResetOnSpawn = false, IgnoreGuiInset = true,
+    DisplayOrder = 999, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
+pcall(function() if syn and syn.protect_gui then syn.protect_gui(Gui) end end)
+Gui:SetAttribute("AngelOwned", true)
+do
+    local parent
+    if gethui then local ok, h = pcall(gethui) if ok then parent = h end end
+    if not (parent and pcall(function() Gui.Parent = parent end)) then
+        if not pcall(function() Gui.Parent = CoreGui end) then Gui.Parent = LP:WaitForChild("PlayerGui") end
+    end
+end
+
+pcall(function()
+    if isfile and readfile and isfile("AngelExecutor_tema.txt") then
+        local n = tonumber(readfile("AngelExecutor_tema.txt"))
+        if n and Themes[n] then State.themeIdx = n end
+    end
+end)
+T = Themes[State.themeIdx]
+buildLogo()
+rebuild()
+log("Angel executor iniciado. Toque no logo A para abrir o menu.")
+
+-- FPS, animações e atualização ao vivo
+local frames, acc, spin = 0, 0, 0
+conn(RunService.Heartbeat:Connect(function(dt)
+    frames += 1
+    acc += dt
+    spin = (spin + dt * 90) % 360
+    for _, g in ipairs(Spinners) do g.Rotation = spin end
+    if ShineFrame then
+        local t = (os.clock() * 0.45) % 2.2
+        ShineFrame.Position = UDim2.new(t / 2.2, -60, 0.5, 0)
+    end
+    if acc >= 1 then
+        State.fps = frames
+        frames, acc = 0, 0
+        for _, f in ipairs(Live.fns) do pcall(f) end
+    end
+end))
+
+-- Ajuste de tela
+local function hookCamera()
+    local cam = workspace.CurrentCamera
+    if cam then conn(cam:GetPropertyChangedSignal("ViewportSize"):Connect(fitUpdate)) end
+end
+hookCamera()
+conn(workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function() hookCamera() fitUpdate() end))
+
+-- Tecla de atalho (PC)
+conn(UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Enum.KeyCode.RightShift then setOpen(not State.open) end
+end))
+
+env.AngelExecutor = {
+    Destroy = function()
+        for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+        Drag.update, Drag.finish = nil, nil
+        pcall(Bridge.shutdown)
+        if Gui then Gui:Destroy() end
+        env.AngelExecutor = nil
+    end,
+    Toggle = function() setOpen(not State.open) end,
+}
