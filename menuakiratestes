@@ -1,582 +1,1362 @@
 --[[
-	ANGEL MENU - feito sobre a Arceus X UI Library
-	A lib só tem SetTitle / SetIcon / AddButton (sem abas nativas),
-	então as 9 "abas" são seções com cabeçalho (━━ NOME ━━).
-	Tudo é local (só você vê). Toque de novo no botão = desliga.
+	ANGEL HUB  |  UI própria (sem library)  |  tudo client-side
+	Intro -> pílula arrastável no topo -> clique abre o menu
+	Clique num item = ele vai pro inventário (Tool). Segurou = aparece. Soltou = some.
 ]]
-local lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/AZYsGithub/Arceus-X-UI-Library/main/source.lua"))()
-lib:SetTitle("Angel Menu")
--- lib:SetIcon("http://www.roblox.com/asset/?id=SEU_ID")
-
-local Players  = game:GetService("Players")
-local RS       = game:GetService("RunService")
-local UIS      = game:GetService("UserInputService")
-local TS       = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RS = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local TS = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
-local Debris   = game:GetService("Debris")
-local lp  = Players.LocalPlayer
-local cam = workspace.CurrentCamera
+local Debris = game:GetService("Debris")
+local Workspace = game:GetService("Workspace")
+local lp = Players.LocalPlayer
+local cam = Workspace.CurrentCamera
+local mouse = lp:GetMouse()
+local M = Enum.Material
 
----------------------------------------------------------------- helpers
-local function char() return lp.Character end
-local function hrp() local c = char() return c and c:FindFirstChild("HumanoidRootPart") end
-local function hum() local c = char() return c and c:FindFirstChildOfClass("Humanoid") end
-local function torsoName() return char() and char():FindFirstChild("UpperTorso") and "UpperTorso" or "Torso" end
+local env = (getgenv and getgenv()) or _G
+if env.AngelHubKill then pcall(env.AngelHubKill) end
+local killers = {}
+env.AngelHubKill = function() for i = #killers, 1, -1 do pcall(killers[i]) end end
+local function onKill(f) killers[#killers + 1] = f end
 
-local function notify(t)
-	pcall(function()
-		game:GetService("StarterGui"):SetCore("SendNotification", {Title = "Angel Menu", Text = t, Duration = 2})
-	end)
+------------------------------------------------------------------ utilidades
+local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+local function rnd(a, b) return a + (b - a) * math.random() end
+local WHT, BLK = Color3.new(1, 1, 1), Color3.new(0.05, 0.05, 0.07)
+local function hum() return lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") end
+local function hrp() return lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") end
+local function tw(o, t, p, st, dr)
+	local x = TS:Create(o, TweenInfo.new(t, st or Enum.EasingStyle.Quint, dr or Enum.EasingDirection.Out), p)
+	x:Play() return x
+end
+local function new(c, p, par)
+	local o = Instance.new(c)
+	if p then for k, v in pairs(p) do o[k] = v end end
+	if par then o.Parent = par end
+	return o
+end
+local function corner(o, r) return new("UICorner", {CornerRadius = (r == "full") and UDim.new(1, 0) or UDim.new(0, r)}, o) end
+local function stroke(o, col, th, tr)
+	return new("UIStroke", {Color = col, Thickness = th or 1, Transparency = tr or 0, ApplyStrokeMode = Enum.ApplyStrokeMode.Border}, o)
+end
+local function grad(o, c0, c1, rot)
+	return new("UIGradient", {Color = ColorSequence.new(c0, c1), Rotation = rot or 0}, o)
 end
 
-local function bag()
-	local items = {}
-	local function add(x) items[#items + 1] = x return x end
-	local function clean()
-		for i = #items, 1, -1 do
-			local x, t = items[i], typeof(items[i])
+local C = {bg = rgb(11, 11, 18), card = rgb(22, 22, 34), a1 = rgb(150, 100, 255), a2 = rgb(0, 224, 255),
+	txt = rgb(240, 243, 255), dim = rgb(136, 142, 170), ok = rgb(90, 255, 170)}
+
+-- container de efeitos no mundo
+local junk = new("Folder", {Name = "AngelFX"}, Workspace)
+onKill(function() junk:Destroy() end)
+
+local gui = new("ScreenGui", {Name = "AngelHub", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 1000,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling})
+do
+	if syn and syn.protect_gui then pcall(syn.protect_gui, gui) end
+	local ok = pcall(function() gui.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+	if not ok or not gui.Parent then gui.Parent = lp:WaitForChild("PlayerGui") end
+end
+onKill(function() gui:Destroy() end)
+local blur = new("BlurEffect", {Size = 0}, Lighting)
+onKill(function() blur:Destroy() end)
+
+local toast = function() end
+
+-- peça ancorada no mundo
+local function wpart(size, col, mat, o)
+	local p = Instance.new("Part")
+	p.Size, p.Color, p.Material = size, col, mat or M.SmoothPlastic
+	p.Anchored, p.CanCollide, p.CanQuery, p.CanTouch, p.CastShadow = true, false, false, false, false
+	if o then for k, v in pairs(o) do p[k] = v end end
+	if not p.Parent then p.Parent = junk end
+	return p
+end
+local function dirCF(a, b)
+	local d = b - a
+	if d.Magnitude < 1e-4 then return CFrame.new(a) end
+	local up = math.abs(d.Unit.Y) > 0.99 and Vector3.zAxis or Vector3.yAxis
+	return CFrame.lookAt((a + b) / 2, b, up) * CFrame.Angles(0, math.pi / 2, 0)
+end
+local function triCF(a, b, c)
+	local ab, ac, bc = b - a, c - a, c - b
+	if ac:Cross(ab).Magnitude < 1e-3 then return end
+	local abd, acd, bcd = ab:Dot(ab), ac:Dot(ac), bc:Dot(bc)
+	if abd > acd and abd > bcd then c, a = a, c elseif acd > bcd and acd > abd then a, b = b, a end
+	ab, ac, bc = b - a, c - a, c - b
+	local right = ac:Cross(ab).Unit
+	local up = bc:Cross(right).Unit
+	local back = bc.Unit
+	local h = math.abs(ab:Dot(up))
+	return Vector3.new(0.03, h, math.abs(ab:Dot(back))), CFrame.fromMatrix((a + b) / 2, right, up, back),
+		Vector3.new(0.03, h, math.abs(ac:Dot(back))), CFrame.fromMatrix((a + c) / 2, -right, up, -back)
+end
+local function ring(pos, col, size, t)
+	t = t or 0.8
+	local p = wpart(Vector3.new(0.2, 1, 1), col, M.Neon, {Shape = Enum.PartType.Cylinder, CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.pi / 2), Transparency = 0.25})
+	tw(p, t, {Size = Vector3.new(0.2, size, size), Transparency = 1})
+	Debris:AddItem(p, t + 0.1)
+end
+local function shake(a)
+	local h = hum(); if not h then return end
+	task.spawn(function()
+		for _ = 1, 8 do h.CameraOffset = Vector3.new(rnd(-a, a), rnd(-a, a), 0); task.wait(0.025) end
+		h.CameraOffset = Vector3.zero
+	end)
+end
+local function fadeOut(inst, t)
+	for _, d in ipairs(inst:GetDescendants()) do if d:IsA("BasePart") then tw(d, t, {Transparency = 1}) end end
+	Debris:AddItem(inst, t + 0.1)
+end
+
+------------------------------------------------------------------ contexto de item
+local live = {}
+local function ctx(c)
+	local K = {c = c, items = {}, last = 0, parent = c}
+	K.rp = RaycastParams.new(); K.rp.FilterDescendantsInstances = {c}
+	live[K] = true
+	function K.add(x) K.items[#K.items + 1] = x return x end
+	function K.clean()
+		live[K] = nil
+		for i = #K.items, 1, -1 do
+			local x, t = K.items[i], typeof(K.items[i])
 			if t == "RBXScriptConnection" then x:Disconnect()
 			elseif t == "Instance" then x:Destroy()
 			elseif t == "function" then pcall(x) end
 		end
+		K.items = {}
 	end
-	return add, clean
-end
-
-local active = {}
-local function toggle(name, start)
-	if active[name] then
-		pcall(active[name]); active[name] = nil
-		notify(name .. " OFF") return
-	end
-	if not hrp() then notify("Personagem não encontrado") return end
-	local ok, off = pcall(start)
-	if not ok then warn(off) elseif off then active[name] = off; notify(name .. " ON") end
-end
-local function offAll() for k, f in pairs(active) do pcall(f); active[k] = nil end end
-lp.CharacterAdded:Connect(offAll)
-
-local function mk(parent, size, color, mat, class)
-	local p = Instance.new(class or "Part")
-	p.Size, p.Color = size, color
-	p.Material = mat or Enum.Material.SmoothPlastic
-	p.CanCollide, p.Massless, p.CastShadow = false, true, false
-	p.Parent = parent
-	return p
-end
-local function weld(a, b, c0)
-	local w = Instance.new("Weld"); w.Part0, w.Part1, w.C0 = a, b, c0; w.Parent = b
-	return w
-end
-local function onTap(fn)
-	return UIS.InputBegan:Connect(function(i, gp)
-		if gp then return end
-		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-			fn(cam:ScreenPointToRay(i.Position.X, i.Position.Y))
-		end
-	end)
-end
-local function ray(r, ignore)
-	local p = RaycastParams.new(); p.FilterDescendantsInstances = ignore
-	return workspace:Raycast(r.Origin, r.Direction * 300, p)
-end
-local function header(t) lib:AddButton("━━ " .. t .. " ━━", function() end) end
-
----------------------------------------------------------------- 1) ASAS
-local function deltaWing()
-	toggle("Asa Delta", function()
-		local add, clean = bag()
-		local r = hrp()
-		add(weld(r, add(mk(char(), Vector3.new(0.25, 0.25, 6), Color3.fromRGB(255, 255, 255), Enum.Material.Neon)), CFrame.new(0, 0.5, 2.5)))
-		for _, s in ipairs({-1, 1}) do
-			local p = add(mk(char(), Vector3.new(5, 0.12, 4.5), Color3.fromRGB(255, 70, 70), Enum.Material.Fabric))
-			weld(r, p, CFrame.new(s * 3, 0.8, 1.6) * CFrame.Angles(math.rad(12), 0, -s * math.rad(8)))
-		end
-		add(RS.Heartbeat:Connect(function()
-			local h, rr = hum(), hrp()
-			if not (h and rr) then return end
-			local v = rr.AssemblyLinearVelocity
-			if h.FloorMaterial == Enum.Material.Air and v.Y < 0 then
-				local look = cam.CFrame.LookVector * Vector3.new(1, 0, 1)
-				if look.Magnitude > 0 then look = look.Unit end
-				rr.AssemblyLinearVelocity = Vector3.new(look.X * 55, math.max(v.Y, -7), look.Z * 55)
-			end
-		end))
-		return clean
-	end)
-end
-
-local function angelWings()
-	toggle("Asas de Anjo", function()
-		local add, clean = bag()
-		local r, fe = hrp(), {}
-		for _, s in ipairs({-1, 1}) do
-			for i = 1, 6 do
-				local p = add(mk(char(), Vector3.new(0.25, 3 + i * 0.5, 0.08), Color3.new(1, 1, 1), Enum.Material.Neon))
-				fe[#fe + 1] = {w = weld(r, p, CFrame.new()), s = s, i = i}
-			end
-		end
+	function K.loop(f)
 		local t0 = os.clock()
-		add(RS.RenderStepped:Connect(function()
-			local f = math.sin((os.clock() - t0) * 3) * 12
-			for _, d in ipairs(fe) do
-				local ang = math.rad(25 + d.i * 11 + f)
-				d.w.C0 = CFrame.new(d.s * 0.7, 0.8 + d.i * 0.05, 0.6) * CFrame.Angles(0, 0, -d.s * ang) * CFrame.new(0, 1.5 + d.i * 0.25, 0)
-			end
-		end))
-		return clean
-	end)
-end
-
----------------------------------------------------------------- 2) DRONE
-local function drone(view)
-	toggle(view and "Drone Câmera" or "Drone Companheiro", function()
-		local add, clean = bag()
-		local body = add(mk(workspace, Vector3.new(1.4, 0.5, 1.4), Color3.fromRGB(30, 30, 35), Enum.Material.Metal))
-		local eye = add(mk(workspace, Vector3.new(0.5, 0.5, 0.5), Color3.fromRGB(255, 0, 60), Enum.Material.Neon))
-		eye.Shape = Enum.PartType.Ball
-		body.Anchored, eye.Anchored = true, true
-		Instance.new("PointLight", eye).Color = Color3.fromRGB(255, 0, 60)
-		local props = {}
-		for i = 1, 4 do
-			props[i] = add(mk(workspace, Vector3.new(1.1, 0.05, 0.2), Color3.fromRGB(200, 200, 200), Enum.Material.Neon))
-			props[i].Anchored = true
-		end
-		body.CFrame = hrp().CFrame
-		if view then
-			cam.CameraSubject = body
-			add(function() local h = hum() if h then cam.CameraSubject = h end end)
-		end
-		local t0 = os.clock()
-		add(RS.RenderStepped:Connect(function(dt)
-			local r = hrp(); if not r then return end
-			local t = os.clock() - t0
-			local target = view and (r.Position + Vector3.new(0, 16, 0))
-				or (r.Position + Vector3.new(math.cos(t) * 4, 4 + math.sin(t * 2) * 0.6, math.sin(t) * 4))
-			body.CFrame = CFrame.new(body.Position:Lerp(target, math.clamp(dt * 6, 0, 1))) * CFrame.Angles(math.sin(t * 2) * 0.15, 0, math.cos(t * 2) * 0.15)
-			eye.CFrame = body.CFrame * CFrame.new(0, -0.35, -0.5)
-			for i, p in ipairs(props) do
-				local a = (i - 1) * math.pi / 2 + math.pi / 4
-				p.CFrame = body.CFrame * CFrame.new(math.cos(a) * 1.1, 0.3, math.sin(a) * 1.1) * CFrame.Angles(0, t * 40 + i, 0)
-			end
-		end))
-		return clean
-	end)
-end
-
----------------------------------------------------------------- 3) SPRAY
-local sprayColors = {Color3.fromRGB(255, 0, 110), Color3.fromRGB(0, 229, 255), Color3.fromRGB(255, 230, 0), Color3.fromRGB(120, 255, 60), Color3.fromRGB(170, 80, 255)}
-local sprayIdx, sprayFolder = 1, nil
-
-local function sprayAt(pos, n, tag)
-	if not sprayFolder or not sprayFolder.Parent then
-		sprayFolder = Instance.new("Folder", workspace); sprayFolder.Name = "AngelSprays"
+		return K.add(RS.RenderStepped:Connect(function(dt) f(os.clock() - t0, dt) end))
 	end
-	local col = sprayColors[sprayIdx]
-	local up = math.abs(n.Y) > 0.95 and Vector3.new(0, 0, 1) or Vector3.yAxis
-	local base = CFrame.lookAt(pos + n * 0.03, pos + n * 1.03, up)
-	if tag then
-		local p = Instance.new("Part")
-		p.Size, p.Transparency, p.Anchored, p.CanCollide, p.CFrame = Vector3.new(5, 1.8, 0.05), 1, true, false, base
-		p.Parent = sprayFolder
-		local sg = Instance.new("SurfaceGui", p)
-		sg.Face, sg.SizingMode, sg.PixelsPerStud, sg.LightInfluence = Enum.NormalId.Front, Enum.SurfaceGuiSizingMode.PixelsPerStud, 50, 0
-		local l = Instance.new("TextLabel", sg)
-		l.Size, l.BackgroundTransparency, l.Text, l.Font = UDim2.fromScale(1, 1), 1, "ANGEL", Enum.Font.Bangers
-		l.TextScaled, l.TextColor3, l.TextStrokeTransparency, l.Rotation = true, col, 0, -6
-	else
-		for i = 1, 9 do
-			local s = i == 1 and math.random(30, 45) / 10 or math.random(3, 12) / 10
-			local off = i == 1 and Vector3.zero or Vector3.new(math.random(-20, 20) / 10, math.random(-20, 20) / 10, 0)
-			local d = Instance.new("Part")
-			d.Shape, d.Size, d.Color, d.Material = Enum.PartType.Cylinder, Vector3.new(0.04, s, s), col, Enum.Material.Neon
-			d.Anchored, d.CanCollide = true, false
-			d.CFrame = base * CFrame.new(off.X, off.Y, -i * 0.003) * CFrame.Angles(0, math.pi / 2, 0)
-			d.Parent = sprayFolder
-		end
+	function K.part(size, cf, col, mat, o, class)
+		local p = Instance.new(class or "Part")
+		p.Size, p.Color, p.Material = size, col, mat or M.SmoothPlastic
+		p.CanCollide, p.CanQuery, p.CanTouch, p.Massless, p.CastShadow = false, false, false, true, false
+		if o then for k, v in pairs(o) do p[k] = v end end
+		p.Parent = K.parent
+		local w = Instance.new("Weld"); w.Part0, w.Part1, w.C0 = K.base, p, cf; w.Parent = p
+		K.add(p) return p, w
 	end
+	function K.cyl(len, dia, cf, col, mat, o)
+		o = o or {}; o.Shape = Enum.PartType.Cylinder
+		return K.part(Vector3.new(len, dia, dia), cf * CFrame.Angles(0, 0, math.pi / 2), col, mat, o)
+	end
+	function K.cylZ(len, dia, cf, col, mat, o)
+		o = o or {}; o.Shape = Enum.PartType.Cylinder
+		return K.part(Vector3.new(len, dia, dia), cf * CFrame.Angles(0, math.pi / 2, 0), col, mat, o)
+	end
+	function K.ball(d, cf, col, mat, o)
+		o = o or {}; o.Shape = Enum.PartType.Ball
+		return K.part(Vector3.new(d, d, d), cf, col, mat, o)
+	end
+	function K.rod(a, b, th, col, mat, o)
+		o = o or {}; o.Shape = Enum.PartType.Cylinder
+		return K.part(Vector3.new((b - a).Magnitude, th, th), dirCF(a, b), col, mat, o)
+	end
+	function K.moveRod(p, w, a, b)
+		p.Size = Vector3.new(math.max((b - a).Magnitude, 0.05), p.Size.Y, p.Size.Z); w.C0 = dirCF(a, b)
+	end
+	function K.tri(col, mat, o)
+		local p1, w1 = K.part(Vector3.new(0.05, 1, 1), CFrame.new(), col, mat, o, "WedgePart")
+		local p2, w2 = K.part(Vector3.new(0.05, 1, 1), CFrame.new(), col, mat, o, "WedgePart")
+		return {p1 = p1, w1 = w1, p2 = p2, w2 = w2}
+	end
+	function K.setTri(T, a, b, c)
+		local s1, c1, s2, c2 = triCF(a, b, c)
+		if not s1 then return end
+		T.p1.Size, T.w1.C0, T.p2.Size, T.w2.C0 = s1, c1, s2, c2
+	end
+	function K.on(p, fn) local o = K.base; K.base = p; fn(); K.base = o end
+	function K.light(par, col, range, br)
+		local l = Instance.new("PointLight"); l.Color, l.Range, l.Brightness = col, range, br; l.Parent = par
+		K.add(l) return l
+	end
+	function K.emit(par, pr)
+		local e = Instance.new("ParticleEmitter")
+		for k, v in pairs(pr) do e[k] = v end
+		e.Parent = par; K.add(e) return e
+	end
+	function K.torso()
+		K.base = c:FindFirstChild("UpperTorso") or c:FindFirstChild("Torso"); return K.base
+	end
+	function K.hand()
+		local h = c:FindFirstChild("RightHand") or c:FindFirstChild("Right Arm")
+		if not h then error("sem mão direita") end
+		local a = Instance.new("Part")
+		a.Size, a.Transparency, a.CanCollide, a.CanQuery, a.CanTouch, a.Massless, a.CastShadow = Vector3.one * 0.2, 1, false, false, false, true, false
+		a.Parent = c
+		local w = Instance.new("Weld")
+		w.Part0, w.Part1 = h, a
+		w.C0 = CFrame.new(0, h.Name == "RightHand" and -0.2 or -0.95, 0) * CFrame.Angles(-math.pi / 2, 0, 0)
+		w.Parent = a
+		K.add(a); K.base = a; return a
+	end
+	return K
 end
+onKill(function() for K in pairs(live) do K.clean() end end)
 
-local function sprayMode(tag)
-	toggle(tag and "Spray Tag ANGEL" or "Spray Splat", function()
-		local add, clean = bag()
-		add(onTap(function(rayData)
-			local ig = {char()}
-			if sprayFolder then ig[#ig + 1] = sprayFolder end
-			local res = ray(rayData, ig)
-			if res then sprayAt(res.Position, res.Normal, tag) end
-		end))
-		return clean
-	end)
-end
-
----------------------------------------------------------------- 4) PODERES
-local function webSwing()
-	toggle("Teia Homem-Aranha", function()
-		local add, clean = bag()
-		local a0 = add(Instance.new("Attachment", hrp()))
-		local anchor
-		local function release() if anchor then anchor:Destroy(); anchor = nil end end
-		add(release)
-		add(onTap(function(rayData)
-			release()
-			local r = hrp(); if not r then return end
-			local res = ray(rayData, {char()})
-			if not res then return end
-			anchor = Instance.new("Part")
-			anchor.Size, anchor.Anchored, anchor.CanCollide, anchor.Transparency, anchor.Position = Vector3.one * 0.3, true, false, 1, res.Position
-			anchor.Parent = workspace
-			local a1 = Instance.new("Attachment", anchor)
-			local b = Instance.new("Beam", anchor)
-			b.Attachment0, b.Attachment1, b.Width0, b.Width1, b.LightEmission, b.FaceCamera = a0, a1, 0.12, 0.12, 1, true
-		end))
-		add(UIS.JumpRequest:Connect(release))
-		add(RS.Heartbeat:Connect(function(dt)
-			local r = hrp(); if not (anchor and r) then return end
-			local d = anchor.Position - r.Position
-			if d.Magnitude < 4 then release() return end
-			local v = r.AssemblyLinearVelocity + d.Unit * 140 * dt
-			if v.Magnitude > 90 then v = v.Unit * 90 end
-			r.AssemblyLinearVelocity = v
-		end))
-		return clean
-	end)
-end
-
-local function blink()
-	local r = hrp(); if not r then return end
-	local look = cam.CFrame.LookVector * Vector3.new(1, 0, 1)
-	if look.Magnitude == 0 then return end
-	look = look.Unit
-	local res = ray({Origin = r.Position, Direction = look * 35 / 300}, {char()})
-	local dist = res and math.max(res.Distance - 3, 0) or 35
-	local from = r.Position
-	r.CFrame = r.CFrame + look * dist
-	local line = Instance.new("Part")
-	line.Anchored, line.CanCollide, line.Material, line.Color = true, false, Enum.Material.Neon, Color3.fromRGB(120, 200, 255)
-	line.Size = Vector3.new(0.6, 0.6, math.max(dist, 0.1))
-	line.CFrame = CFrame.lookAt(from, from + look) * CFrame.new(0, 0, -dist / 2)
-	line.Parent = workspace
-	TS:Create(line, TweenInfo.new(0.5), {Transparency = 1, Size = Vector3.new(0, 0, math.max(dist, 0.1))}):Play()
-	Debris:AddItem(line, 0.6)
-end
-
-local function slam()
-	local r, h = hrp(), hum(); if not (r and h) then return end
-	r.AssemblyLinearVelocity = Vector3.new(0, 80, 0)
-	task.spawn(function()
-		task.wait(0.5)
-		r.AssemblyLinearVelocity = Vector3.new(0, -200, 0)
-		local t = os.clock()
-		task.wait(0.1)
-		repeat task.wait() until h.FloorMaterial ~= Enum.Material.Air or os.clock() - t > 3
-		local ring = Instance.new("Part")
-		ring.Shape, ring.Anchored, ring.CanCollide, ring.Material, ring.Color = Enum.PartType.Cylinder, true, false, Enum.Material.Neon, Color3.fromRGB(255, 140, 0)
-		ring.Size = Vector3.new(0.3, 2, 2)
-		ring.CFrame = CFrame.new(r.Position - Vector3.new(0, 3, 0)) * CFrame.Angles(0, 0, math.pi / 2)
-		ring.Parent = workspace
-		TS:Create(ring, TweenInfo.new(0.6), {Size = Vector3.new(0.3, 40, 40), Transparency = 1}):Play()
-		Debris:AddItem(ring, 0.7)
-		for _ = 1, 10 do h.CameraOffset = Vector3.new(math.random() - 0.5, math.random() - 0.5, 0); task.wait(0.03) end
-		h.CameraOffset = Vector3.zero
-	end)
-end
-
-local function levitate()
-	toggle("Telecinese (flutuar)", function()
-		local add, clean = bag()
-		local rocks = {}
-		for i = 1, 7 do
-			rocks[i] = add(mk(workspace, Vector3.one * (0.5 + math.random() * 0.5), Color3.fromRGB(90, 90, 100), Enum.Material.Slate))
-			rocks[i].Anchored = true
-		end
-		local t0 = os.clock()
-		add(RS.Heartbeat:Connect(function()
-			local r = hrp(); if not r then return end
-			local t = os.clock() - t0
-			local res = ray({Origin = r.Position, Direction = Vector3.new(0, -30, 0) / 300}, {char()})
-			local ground = res and res.Position.Y or r.Position.Y - 3
-			local v = r.AssemblyLinearVelocity
-			r.AssemblyLinearVelocity = Vector3.new(v.X, (ground + 7 + math.sin(t * 2) - r.Position.Y) * 6, v.Z)
-			for i, p in ipairs(rocks) do
-				local a = t * 1.5 + i * (math.pi * 2 / #rocks)
-				p.CFrame = CFrame.new(r.Position + Vector3.new(math.cos(a) * 5, math.sin(t + i) * 1.5 - 1, math.sin(a) * 5)) * CFrame.Angles(t, t * i * 0.3, 0)
-			end
-		end))
-		return clean
-	end)
-end
-
----------------------------------------------------------------- 5) TRAJES
-local saved = {}
-local function restoreOutfit()
-	local c = char(); if not c then return end
-	for _, o in ipairs(c:GetDescendants()) do if o:GetAttribute("AngelFit") then o:Destroy() end end
+-- troca de roupa (restaura ao soltar o item)
+local function outfit(K, cfg)
+	local c = K.c
 	local bc = c:FindFirstChildOfClass("BodyColors")
-	if saved.bc and bc then for k, v in pairs(saved.bc) do bc[k] = v end end
-	for _, o in ipairs(saved.cloth or {}) do o.Parent = c end
-	local f = c:FindFirstChild("Head") and c.Head:FindFirstChild("face")
-	if f then f.Transparency = 0 end
-	saved = {}
-end
-
-local function acc(partName, size, color, mat, cf)
-	local c = char(); local base = c and c:FindFirstChild(partName)
-	if not base then return end
-	local p = mk(c, size, color, mat); p:SetAttribute("AngelFit", true)
-	weld(base, p, cf)
-	return p
-end
-
-local W, K = Color3.new(1, 1, 1), Color3.new(0.05, 0.05, 0.05)
-local presets = {
-	["Homem-Aranha"] = {head = Color3.fromRGB(200, 20, 30), torso = Color3.fromRGB(200, 20, 30), arms = Color3.fromRGB(200, 20, 30), legs = Color3.fromRGB(30, 60, 170),
-		extra = function(c, hs)
-			for _, s in ipairs({-1, 1}) do
-				acc("Head", Vector3.new(hs.X * 0.22, hs.Y * 0.2, 0.05), W, Enum.Material.Neon, CFrame.new(s * hs.X * 0.2, hs.Y * 0.1, -hs.Z / 2 - 0.02) * CFrame.Angles(0, 0, -s * math.rad(25)))
-			end
-			acc(torsoName(), Vector3.new(0.4, 0.7, 0.05), K, Enum.Material.SmoothPlastic, CFrame.new(0, 0.3, -0.52))
-		end},
-	["Femboy Meme (kawaii)"] = {torso = Color3.fromRGB(255, 160, 200), arms = Color3.fromRGB(255, 235, 240), legs = Color3.fromRGB(250, 250, 250),
-		extra = function(c, hs)
-			local pink = Color3.fromRGB(255, 140, 190)
-			for _, s in ipairs({-1, 1}) do
-				acc("Head", Vector3.new(0.4, 0.7, 0.15), pink, Enum.Material.SmoothPlastic, CFrame.new(s * hs.X * 0.3, hs.Y / 2 + 0.25, 0) * CFrame.Angles(0, 0, -s * math.rad(20)))
-			end
-			acc(torsoName(), Vector3.new(2.3, 0.7, 1.3), pink, Enum.Material.SmoothPlastic, CFrame.new(0, -0.9, 0))
-			acc(torsoName(), Vector3.new(0.25, 0.25, 1.4), pink, Enum.Material.SmoothPlastic, CFrame.new(0.5, -0.9, 0.9) * CFrame.Angles(math.rad(-25), 0, 0))
-			acc(torsoName(), Vector3.new(0.5, 0.5, 0.05), Color3.fromRGB(255, 60, 140), Enum.Material.Neon, CFrame.new(0, 0.3, -0.52))
-		end},
-	["Astronauta"] = {head = W, torso = W, arms = W, legs = W,
-		extra = function(c, hs)
-			local g = acc("Head", hs * 1.9, Color3.fromRGB(150, 210, 255), Enum.Material.Glass, CFrame.new())
-			if g then g.Shape = Enum.PartType.Ball; g.Transparency = 0.6 end
-		end},
-	["Ninja"] = {head = K, torso = K, arms = K, legs = K,
-		extra = function(c, hs)
-			acc("Head", Vector3.new(hs.X + 0.1, 0.25, hs.Z + 0.1), Color3.fromRGB(220, 20, 20), Enum.Material.Fabric, CFrame.new(0, hs.Y * 0.15, 0))
-			for _, s in ipairs({-1, 1}) do
-				acc("Head", Vector3.new(hs.X * 0.2, 0.08, 0.05), W, Enum.Material.Neon, CFrame.new(s * hs.X * 0.2, -hs.Y * 0.05, -hs.Z / 2 - 0.02))
-			end
-		end},
-}
-
-local function dress(name)
-	local c = char(); if not c then return end
-	local p = presets[name]
-	restoreOutfit()
-	local bc = c:FindFirstChildOfClass("BodyColors") or Instance.new("BodyColors", c)
-	saved.bc = {HeadColor3 = bc.HeadColor3, TorsoColor3 = bc.TorsoColor3, LeftArmColor3 = bc.LeftArmColor3,
+	local made = false
+	if not bc then bc = Instance.new("BodyColors"); bc.Parent = c; made = true end
+	local old = {HeadColor3 = bc.HeadColor3, TorsoColor3 = bc.TorsoColor3, LeftArmColor3 = bc.LeftArmColor3,
 		RightArmColor3 = bc.RightArmColor3, LeftLegColor3 = bc.LeftLegColor3, RightLegColor3 = bc.RightLegColor3}
-	saved.cloth = {}
+	local cloth = {}
 	for _, o in ipairs(c:GetChildren()) do
-		if o:IsA("Shirt") or o:IsA("Pants") or o:IsA("ShirtGraphic") then table.insert(saved.cloth, o); o.Parent = nil end
+		if o:IsA("Shirt") or o:IsA("Pants") or o:IsA("ShirtGraphic") then cloth[#cloth + 1] = o; o.Parent = nil end
 	end
-	if p.head then bc.HeadColor3 = p.head end
-	bc.TorsoColor3, bc.LeftArmColor3, bc.RightArmColor3, bc.LeftLegColor3, bc.RightLegColor3 = p.torso, p.arms, p.arms, p.legs, p.legs
 	local head = c:FindFirstChild("Head")
-	local f = head and head:FindFirstChild("face")
-	if f then f.Transparency = 1 end
-	if head then p.extra(c, head.Size) end
-	notify("Traje: " .. name)
-end
-
----------------------------------------------------------------- 6) EFEITOS
-local function rainbowTrail()
-	toggle("Rastro Arco-íris", function()
-		local add, clean = bag(); local r = hrp()
-		local a0 = add(Instance.new("Attachment", r)); a0.Position = Vector3.new(0, 1, 0)
-		local a1 = add(Instance.new("Attachment", r)); a1.Position = Vector3.new(0, -1, 0)
-		local tr = add(Instance.new("Trail", r))
-		tr.Attachment0, tr.Attachment1, tr.Lifetime, tr.LightEmission = a0, a1, 1.2, 1
-		tr.Transparency = NumberSequence.new(0, 1)
-		tr.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)), ColorSequenceKeypoint.new(0.25, Color3.fromRGB(255, 220, 0)),
-			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 100)), ColorSequenceKeypoint.new(0.75, Color3.fromRGB(0, 140, 255)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 0, 255))})
-		return clean
+	local face = head and head:FindFirstChild("face")
+	if face then face.Transparency = 1 end
+	if cfg.head then bc.HeadColor3 = cfg.head end
+	bc.TorsoColor3, bc.LeftArmColor3, bc.RightArmColor3 = cfg.torso, cfg.arms, cfg.arms
+	bc.LeftLegColor3, bc.RightLegColor3 = cfg.legs, cfg.legs
+	K.add(function()
+		if made then bc:Destroy() else for k, v in pairs(old) do bc[k] = v end end
+		for _, o in ipairs(cloth) do o.Parent = c end
+		if face then face.Transparency = 0 end
 	end)
 end
 
-local function aura()
-	toggle("Aura Mística", function()
-		local add, clean = bag()
-		local pe = add(Instance.new("ParticleEmitter", hrp()))
-		pe.Rate, pe.Lifetime, pe.Speed, pe.SpreadAngle = 40, NumberRange.new(1, 1.6), NumberRange.new(2, 5), Vector2.new(180, 180)
-		pe.Size, pe.LightEmission, pe.Color = NumberSequence.new(0.5, 0), 1, ColorSequence.new(Color3.fromRGB(170, 90, 255), Color3.fromRGB(80, 220, 255))
-		return clean
-	end)
+local function feet(c)
+	local r = {}
+	for _, n in ipairs({"LeftFoot", "RightFoot"}) do
+		local p = c:FindFirstChild(n); if p then r[#r + 1] = {p = p, h = p.Size.Y, y = 0} end
+	end
+	if #r == 0 then
+		for _, n in ipairs({"Left Leg", "Right Leg"}) do
+			local p = c:FindFirstChild(n); if p then r[#r + 1] = {p = p, h = 0.8, y = -(p.Size.Y / 2 - 0.4)} end
+		end
+	end
+	return r
 end
 
-local function neonOutline()
-	toggle("Contorno Neon", function()
-		local add, clean = bag()
-		local hl = add(Instance.new("Highlight", char()))
-		hl.FillTransparency, hl.DepthMode = 0.8, Enum.HighlightDepthMode.AlwaysOnTop
-		add(RS.Heartbeat:Connect(function()
-			local c = Color3.fromHSV(os.clock() % 3 / 3, 1, 1)
-			hl.OutlineColor, hl.FillColor = c, c
-		end))
-		return clean
-	end)
+-- raio da mira
+local function aim(K, dist)
+	local r = mouse.UnitRay
+	local res = Workspace:Raycast(r.Origin, r.Direction * (dist or 250), K.rp)
+	return res, res and res.Position or (r.Origin + r.Direction * 80)
 end
 
-local function footGlow()
-	toggle("Pegadas de Luz", function()
-		local add, clean = bag(); local last = 0
-		add(RS.Heartbeat:Connect(function()
-			local h, r = hum(), hrp(); if not (h and r) then return end
-			if h.MoveDirection.Magnitude > 0 and h.FloorMaterial ~= Enum.Material.Air and os.clock() - last > 0.12 then
-				last = os.clock()
-				local p = Instance.new("Part")
-				p.Shape, p.Anchored, p.CanCollide, p.Material = Enum.PartType.Cylinder, true, false, Enum.Material.Neon
-				p.Color, p.Size = Color3.fromHSV(os.clock() % 2 / 2, 1, 1), Vector3.new(0.1, 1.5, 1.5)
-				p.CFrame = CFrame.new(r.Position - Vector3.new(0, h.HipHeight + r.Size.Y / 2 - 0.05, 0)) * CFrame.Angles(0, 0, math.pi / 2)
-				p.Parent = workspace
-				TS:Create(p, TweenInfo.new(0.8), {Transparency = 1, Size = Vector3.new(0.1, 3, 3)}):Play()
-				Debris:AddItem(p, 0.9)
+------------------------------------------------------------------ efeitos de mundo
+local function bolt(a, b, col)
+	local n = math.clamp(math.floor((b - a).Magnitude / 3.5), 6, 20)
+	local pts = {a}
+	for i = 1, n - 1 do pts[#pts + 1] = a + (b - a) * (i / n) + Vector3.new(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)) * 1.3 end
+	pts[#pts + 1] = b
+	local f = new("Folder", {}, junk)
+	local function seg(p1, p2, th, c, tr)
+		local s = wpart(Vector3.new((p2 - p1).Magnitude, th, th), c, M.Neon, {Shape = Enum.PartType.Cylinder, CFrame = dirCF(p1, p2), Transparency = tr, Parent = f})
+		tw(s, 0.35, {Transparency = 1, Size = Vector3.new(s.Size.X, th * 0.3, th * 0.3)})
+	end
+	for i = 1, #pts - 1 do seg(pts[i], pts[i + 1], 0.38, col, 0.4); seg(pts[i], pts[i + 1], 0.12, WHT, 0) end
+	for _ = 1, 2 do
+		local q = pts[math.random(2, #pts - 1)]
+		for _ = 1, 3 do local nq = q + Vector3.new(rnd(-3, 3), rnd(-3, 3), rnd(-3, 3)); seg(q, nq, 0.14, col, 0.3); q = nq end
+	end
+	local e = wpart(Vector3.one * 0.5, col, M.Neon, {Transparency = 1, Position = b, Parent = f})
+	local l = new("PointLight", {Color = col, Range = 26, Brightness = 6}, e); tw(l, 0.35, {Brightness = 0})
+	new("ParticleEmitter", {Speed = NumberRange.new(20, 40), SpreadAngle = Vector2.new(180, 180), Lifetime = NumberRange.new(0.3, 0.5),
+		Size = NumberSequence.new(0.5, 0), LightEmission = 1, Color = ColorSequence.new(col), Rate = 0}, e):Emit(24)
+	Debris:AddItem(f, 0.7)
+	shake(0.25)
+end
+
+local sprayF
+local sprays = {}
+local function doSpray(K, mode, text)
+	if os.clock() - K.last < 0.4 then return end
+	K.last = os.clock()
+	local res = aim(K, 220)
+	K.hue = (K.hue + 0.13) % 1
+	local col = Color3.fromHSV(K.hue, 0.85, 1)
+	if K.label then tw(K.label, 0.3, {Color = col}) end
+	if K.mist then K.mist.Color = ColorSequence.new(col); K.mist:Emit(28) end
+	if not res then return end
+	if not sprayF or not sprayF.Parent then sprayF = new("Folder", {Name = "AngelSprays"}, Workspace) end
+	local n, pos = res.Normal, res.Position
+	local up = math.abs(n.Y) > 0.9 and Vector3.zAxis or Vector3.yAxis
+	local base = CFrame.lookAt(pos + n * 0.03, pos + n * 1.03, up)
+	K.rp.FilterDescendantsInstances = {K.c, sprayF}
+	local function reg(i) sprays[#sprays + 1] = i; if #sprays > 100 then local o = table.remove(sprays, 1); if o and o.Parent then o:Destroy() end end end
+	local mp = wpart(Vector3.one * 0.2, col, M.Neon, {Transparency = 1, Position = pos + n * 0.4, Parent = sprayF})
+	new("ParticleEmitter", {Color = ColorSequence.new(col), Rate = 0, Lifetime = NumberRange.new(0.4, 0.7), Speed = NumberRange.new(3, 7),
+		SpreadAngle = Vector2.new(180, 180), Size = NumberSequence.new(0.3, 1.6), Transparency = NumberSequence.new(0.3, 1), LightEmission = 0.4}, mp):Emit(16)
+	Debris:AddItem(mp, 1)
+	local function drips(spread, count)
+		if math.abs(n.Y) > 0.6 then return end
+		for _ = 1, count do
+			local x, L = rnd(-spread, spread), rnd(0.8, 2.4)
+			local d = wpart(Vector3.new(0.12, 0.05, 0.04), col, M.Neon, {CFrame = base * CFrame.new(x, -0.4, 0), Parent = sprayF}); reg(d)
+			task.delay(rnd(0.3, 0.9), function()
+				if d.Parent then tw(d, rnd(1.2, 2.4), {Size = Vector3.new(0.12, L, 0.04), CFrame = base * CFrame.new(x, -0.4 - L / 2, 0)}, Enum.EasingStyle.Quad) end
+			end)
+		end
+	end
+	if mode == "splat" then
+		for i = 1, 9 do
+			local s = i == 1 and rnd(3, 4.5) or rnd(0.3, 1.2)
+			local off = i == 1 and Vector3.zero or Vector3.new(rnd(-2, 2), rnd(-2, 2), 0)
+			local d = wpart(Vector3.new(0.04, 0.2, 0.2), col, M.Neon, {CFrame = base * CFrame.new(off.X, off.Y, -i * 0.003) * CFrame.Angles(0, math.pi / 2, 0), Shape = Enum.PartType.Cylinder, Parent = sprayF})
+			reg(d); tw(d, 0.3, {Size = Vector3.new(0.04, s, s)}, Enum.EasingStyle.Back)
+		end
+		drips(1.6, 3)
+	else
+		local sz = mode == "heart" and Vector3.new(2.8, 2.8, 0.05) or Vector3.new(5.4, 1.9, 0.05)
+		local p = wpart(Vector3.new(0.2, 0.1, 0.05), col, nil, {Transparency = 1, CFrame = base, Parent = sprayF}); reg(p)
+		local sg = new("SurfaceGui", {Face = Enum.NormalId.Front, SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud, PixelsPerStud = 60, LightInfluence = 0}, p)
+		local l = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = text, Font = Enum.Font.PermanentMarker,
+			TextScaled = true, TextColor3 = col, TextTransparency = 0.7, Rotation = -5}, sg)
+		new("UIStroke", {Thickness = 2.5, Color = BLK}, l)
+		tw(p, 0.35, {Size = sz}, Enum.EasingStyle.Back); tw(l, 0.35, {TextTransparency = 0})
+		drips(sz.X * 0.35, 3)
+	end
+end
+
+local function webSplat(pos, n)
+	local m = new("Model", {}, junk)
+	local up = math.abs(n.Y) > 0.9 and Vector3.zAxis or Vector3.yAxis
+	local cf = CFrame.lookAt(pos + n * 0.05, pos + n * 1.05, up)
+	local function rod(a, b, th) wpart(Vector3.new((b - a).Magnitude, th, th), rgb(250, 250, 255), M.SmoothPlastic, {Shape = Enum.PartType.Cylinder, CFrame = dirCF(a, b), Transparency = 0.1, Parent = m}) end
+	local function at(a, r) return (cf * CFrame.new(math.cos(a) * r, math.sin(a) * r, 0)).Position end
+	for i = 1, 8 do
+		local a, a2 = i / 8 * math.pi * 2, (i % 8 + 1) / 8 * math.pi * 2
+		rod(pos + n * 0.05, at(a, 1.4), 0.04); rod(at(a, 0.7), at(a2, 0.7), 0.03); rod(at(a, 1.1), at(a2, 1.1), 0.025)
+	end
+	return m
+end
+
+------------------------------------------------------------------ catálogo de itens
+local D = {}
+local function item(t) D[#D + 1] = t return t end
+
+---------------------------------------------------------------- TAB 1: ASAS
+item{id = "delta", tab = 1, name = "Asa Delta", icon = "🪂", desc = "Pule e plane pelo ar, com vento nas pontas.", c1 = rgb(255, 80, 90), c2 = rgb(255, 170, 70),
+build = function(K)
+	K.torso()
+	local red, white, cy, metal = rgb(232, 52, 60), rgb(248, 248, 250), rgb(90, 230, 255), rgb(190, 195, 205)
+	local trails = {}
+	local C0, Wd, L = Vector3.new(0, 2.5, 1.1), 7, 6.2
+	K.rod(C0 + Vector3.new(0, 0, -L), C0, 0.12, cy, M.Neon)
+	for _, s in ipairs({-1, 1}) do
+		local R = CFrame.new(C0) * CFrame.Angles(0, 0, s * math.rad(6))
+		K.part(Vector3.new(0.06, Wd, L), R * CFrame.new(s * Wd / 2, 0, -L / 2) * CFrame.Angles(0, 0, -s * math.pi / 2), red, M.Fabric, nil, "WedgePart")
+		K.part(Vector3.new(0.07, Wd * 0.55, L * 0.55), R * CFrame.new(s * Wd * 0.275, 0.015, -L * 0.275) * CFrame.Angles(0, 0, -s * math.pi / 2), white, M.Fabric, nil, "WedgePart")
+		local nose, tip = (R * CFrame.new(0, 0, -L)).Position, (R * CFrame.new(s * Wd, 0, 0)).Position
+		K.rod(nose, tip, 0.12, metal, M.Metal)
+		K.rod(Vector3.new(s * 0.55, 0.6, 0.35), Vector3.new(0, 2.5, -1.4), 0.07, metal, M.Metal)
+		local tp = K.part(Vector3.one * 0.2, CFrame.new(tip), WHT, nil, {Transparency = 1})
+		local a0 = new("Attachment", {Position = Vector3.new(0, 0.15, 0)}, tp)
+		local a1 = new("Attachment", {Position = Vector3.new(0, -0.15, 0)}, tp)
+		trails[#trails + 1] = new("Trail", {Attachment0 = a0, Attachment1 = a1, Lifetime = 0.5, LightEmission = 0.8, Enabled = false,
+			Color = ColorSequence.new(WHT, cy), Transparency = NumberSequence.new(0.3, 1)}, tp)
+	end
+	K.add(RS.Heartbeat:Connect(function()
+		local h, r = K.c:FindFirstChildOfClass("Humanoid"), K.c:FindFirstChild("HumanoidRootPart")
+		if not (h and r) then return end
+		local v = r.AssemblyLinearVelocity
+		local g = h.FloorMaterial == Enum.Material.Air and v.Y < 0
+		for _, t in ipairs(trails) do t.Enabled = g end
+		if g then
+			local look = cam.CFrame.LookVector * Vector3.new(1, 0, 1)
+			if look.Magnitude > 0 then look = look.Unit end
+			r.AssemblyLinearVelocity = Vector3.new(look.X * 58, math.max(v.Y, -7), look.Z * 58)
+		end
+	end))
+end}
+
+item{id = "angel", tab = 1, name = "Asas de Anjo", icon = "🪽", desc = "Penas em camadas batendo, com halo dourado.", c1 = rgb(150, 200, 255), c2 = rgb(255, 240, 200),
+build = function(K)
+	local tor = K.torso()
+	local rows = {{6, 3.4, rgb(255, 255, 255)}, {5, 2.4, rgb(236, 243, 255)}, {4, 1.5, rgb(255, 236, 205)}}
+	local f, halo = {}, {}
+	for _, s in ipairs({-1, 1}) do
+		for r, row in ipairs(rows) do
+			for i = 1, row[1] do
+				local L = row[2] * (0.55 + 0.45 * i / row[1])
+				local _, w = K.part(Vector3.new(0.3 - r * 0.03, L, 0.05), CFrame.new(), row[3], M.SmoothPlastic, {Reflectance = 0.08})
+				f[#f + 1] = {w = w, s = s, i = i, n = row[1], L = L, r = r}
 			end
-		end))
-		return clean
-	end)
-end
-
----------------------------------------------------------------- 7) CÂMERA & CORPO
-local function cinema()
-	toggle("Câmera Cinema", function()
-		local add, clean = bag(); local t0 = os.clock()
-		cam.CameraType = Enum.CameraType.Scriptable
-		add(function() cam.CameraType = Enum.CameraType.Custom; cam.FieldOfView = 70 end)
-		add(RS.RenderStepped:Connect(function()
-			local r = hrp(); if not r then return end
-			local t, c = (os.clock() - t0) * 0.5, r.Position
-			cam.FieldOfView = 55
-			cam.CFrame = CFrame.lookAt(c + Vector3.new(math.cos(t) * 14, 5, math.sin(t) * 14), c + Vector3.new(0, 1, 0))
-		end))
-		return clean
-	end)
-end
-
-local function scale(name, f)
-	toggle(name, function()
-		local h = hum(); local olds = {}
-		for _, k in ipairs({"BodyHeightScale", "BodyWidthScale", "BodyDepthScale", "HeadScale"}) do
-			local v = h and h:FindFirstChild(k)
-			if not v then notify("Precisa ser avatar R15") return end
-			olds[k] = v.Value
 		end
-		for k, v in pairs(olds) do h[k].Value = v * f end
-		return function()
-			local hh = hum()
-			if hh then for k, v in pairs(olds) do local o = hh:FindFirstChild(k) if o then o.Value = v end end end
+	end
+	local head = K.c:FindFirstChild("Head")
+	local hy = head and head.Size.Y / 2 + 0.7 or 0
+	if head then K.on(head, function() for i = 1, 20 do local _, w = K.part(Vector3.new(0.34, 0.07, 0.08), CFrame.new(), rgb(255, 214, 90), M.Neon); halo[i] = w end end) end
+	K.emit(tor, {Rate = 10, Lifetime = NumberRange.new(2.5, 3.5), Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, -1.5, 0),
+		SpreadAngle = Vector2.new(180, 180), Size = NumberSequence.new(0.22, 0), LightEmission = 1, Color = ColorSequence.new(rgb(255, 245, 210)), Transparency = NumberSequence.new(0.2, 1)})
+	K.light(tor, rgb(255, 230, 170), 14, 0.8)
+	K.loop(function(t)
+		local flap = math.sin(t * 1.8)
+		for _, d in ipairs(f) do
+			local a = math.rad(12 + (d.i - 1) * (100 / (d.n - 1))) + math.sin(t * 1.8 - d.i * 0.22) * math.rad(10) * (d.i / d.n) + flap * math.rad(7)
+			d.w.C0 = CFrame.new(d.s * 0.45, 0.9 + d.r * 0.12, 0.55 + d.r * 0.03) * CFrame.Angles(math.rad(8), 0, -d.s * a) * CFrame.new(0, d.L / 2, 0)
+		end
+		for i, w in ipairs(halo) do
+			w.C0 = CFrame.new(0, hy + math.sin(t * 2) * 0.06, 0) * CFrame.Angles(0, i / 20 * math.pi * 2 + t * 0.6, 0) * CFrame.new(0, 0, -0.8)
 		end
 	end)
-end
+end}
 
-local function moonGravity()
-	toggle("Gravidade Lunar", function()
-		local old = workspace.Gravity; workspace.Gravity = 45
-		return function() workspace.Gravity = old end
-	end)
-end
-
----------------------------------------------------------------- 8) AMBIENTE
-local function neonWorld()
-	toggle("Mundo Neon", function()
-		local add, clean = bag()
-		local ct, br = Lighting.ClockTime, Lighting.Brightness
-		Lighting.ClockTime, Lighting.Brightness = 0, 1.5
-		local cc = add(Instance.new("ColorCorrectionEffect", Lighting))
-		cc.Tint, cc.Saturation, cc.Contrast = Color3.fromRGB(190, 150, 255), 0.5, 0.2
-		local bl = add(Instance.new("BloomEffect", Lighting))
-		bl.Intensity, bl.Size, bl.Threshold = 1.2, 40, 0.8
-		add(function() Lighting.ClockTime, Lighting.Brightness = ct, br end)
-		return clean
-	end)
-end
-
-local function snow()
-	toggle("Neve Local", function()
-		local add, clean = bag()
-		local p = add(mk(workspace, Vector3.new(80, 1, 80), W)); p.Anchored, p.Transparency = true, 1
-		local pe = Instance.new("ParticleEmitter", p)
-		pe.Rate, pe.Lifetime, pe.Speed = 250, NumberRange.new(5, 7), NumberRange.new(12, 16)
-		pe.EmissionDirection, pe.Size, pe.LightEmission = Enum.NormalId.Bottom, NumberSequence.new(0.3), 0.5
-		add(RS.RenderStepped:Connect(function() p.Position = cam.CFrame.Position + Vector3.new(0, 35, 0) end))
-		return clean
-	end)
-end
-
-local function fireflies()
-	toggle("Vagalumes", function()
-		local add, clean = bag(); local f = {}
-		for i = 1, 24 do
-			local p = add(mk(workspace, Vector3.one * 0.35, Color3.fromRGB(255, 240, 120), Enum.Material.Neon))
-			p.Shape, p.Anchored = Enum.PartType.Ball, true
-			Instance.new("PointLight", p).Range = 6
-			f[i] = {p = p, s = Vector3.new(math.random(), math.random(), math.random()) * 6.28, r = math.random(6, 16)}
-		end
-		local t0 = os.clock()
-		add(RS.Heartbeat:Connect(function()
-			local r = hrp(); if not r then return end
-			local t = os.clock() - t0
-			for _, d in ipairs(f) do
-				d.p.Position = r.Position + Vector3.new(math.cos(t * 0.4 + d.s.X) * d.r, 2 + math.sin(t * 0.7 + d.s.Y) * 3, math.sin(t * 0.5 + d.s.Z) * d.r)
+item{id = "dragon", tab = 1, name = "Asas de Dragão", icon = "🐉", desc = "Ossos, membrana e brasas que acompanham o bater.", c1 = rgb(200, 30, 50), c2 = rgb(255, 140, 40),
+build = function(K)
+	K.torso()
+	local bone, mem, glow = rgb(34, 24, 26), rgb(150, 24, 38), rgb(255, 120, 30)
+	local P = {E = Vector3.new(1.8, 2.2, 0.6), Wr = Vector3.new(4.2, 3, 1.2), B = Vector3.new(0.2, -1.6, 0.5),
+		F = {Vector3.new(7, 3.8, 2.2), Vector3.new(6.8, 1.4, 3.2), Vector3.new(5.2, -0.8, 3.6), Vector3.new(3.2, -2, 3.2)}}
+	local Ws = {}
+	local function rod(th, col, mat) local p, w = K.rod(Vector3.zero, Vector3.xAxis, th, col, mat); return {p = p, w = w} end
+	for _, s in ipairs({-1, 1}) do
+		local w = {s = s, arm = {rod(0.2, bone, M.Slate), rod(0.16, bone, M.Slate)}, fin = {}, edge = {}, tris = {}}
+		for i = 1, 4 do w.fin[i] = rod(0.11, bone, M.Slate); w.tris[i] = K.tri(mem, M.Fabric, {Transparency = 0.06}) end
+		for i = 1, 3 do w.edge[i] = rod(0.05, glow, M.Neon) end
+		K.emit(w.fin[1].p, {Rate = 14, Lifetime = NumberRange.new(1, 1.8), Speed = NumberRange.new(1, 3), Acceleration = Vector3.new(0, 3, 0),
+			Size = NumberSequence.new(0.25, 0), LightEmission = 1, Color = ColorSequence.new(rgb(255, 170, 40), rgb(255, 40, 20)), SpreadAngle = Vector2.new(60, 60)})
+		Ws[#Ws + 1] = w
+	end
+	K.loop(function(t)
+		for _, w in ipairs(Ws) do
+			local s = w.s
+			local S = Vector3.new(s * 0.5, 0.9, 0.5)
+			local R = CFrame.Angles(0, 0, s * math.rad(5 + math.sin(t * 1.6) * 24))
+			local function pt(v) return S + R * Vector3.new(v.X * s, v.Y, v.Z) end
+			local E, Wr = pt(P.E), pt(P.Wr)
+			K.moveRod(w.arm[1].p, w.arm[1].w, S, E); K.moveRod(w.arm[2].p, w.arm[2].w, E, Wr)
+			local tips = {}
+			for i, f in ipairs(P.F) do
+				local rel = CFrame.Angles(0, 0, s * math.sin(t * 1.6 - i * 0.5) * 0.14) * Vector3.new((f.X - P.Wr.X) * s, f.Y - P.Wr.Y, f.Z - P.Wr.Z)
+				tips[i] = Wr + R * rel
+				K.moveRod(w.fin[i].p, w.fin[i].w, Wr, tips[i])
 			end
-		end))
-		return clean
+			for i = 1, 3 do K.moveRod(w.edge[i].p, w.edge[i].w, tips[i], tips[i + 1]) end
+			local B = pt(P.B)
+			K.setTri(w.tris[1], Wr, tips[1], tips[2]); K.setTri(w.tris[2], Wr, tips[2], tips[3])
+			K.setTri(w.tris[3], Wr, tips[3], tips[4]); K.setTri(w.tris[4], Wr, tips[4], B)
+		end
+	end)
+end}
+
+---------------------------------------------------------------- TAB 2: DRONES
+local function droneBuild(K, cinema)
+	local hr = K.c:FindFirstChild("HumanoidRootPart")
+	local root = new("Part", {Size = Vector3.one * 0.4, Transparency = 1, Anchored = true, CanCollide = false, CanQuery = false, CFrame = hr.CFrame * CFrame.new(3, 4.5, 0)}, junk)
+	K.add(root); K.base, K.parent = root, junk
+	local main = cinema and rgb(255, 140, 40) or rgb(26, 27, 33)
+	local carbon, green, red = rgb(44, 46, 56), rgb(60, 255, 120), rgb(255, 50, 60)
+	K.part(Vector3.new(1.3, 0.34, 1.7), CFrame.new(), main, M.Metal)
+	K.part(Vector3.new(1, 0.22, 1.3), CFrame.new(0, 0.26, 0), carbon)
+	K.part(Vector3.new(1.02, 0.03, 0.12), CFrame.new(0, 0.38, -0.5), rgb(0, 230, 255), M.Neon)
+	K.ball(0.5, CFrame.new(0, -0.35, -0.55), BLK)
+	K.ball(0.22, CFrame.new(0, -0.35, -0.8), rgb(80, 180, 255), M.Neon)
+	K.light(K.ball(0.1, CFrame.new(0, -0.35, -0.85), WHT, M.Neon, {Transparency = 1}), rgb(120, 200, 255), 14, 1.5)
+	for _, x in ipairs({-0.6, 0.6}) do
+		K.rod(Vector3.new(x, -0.15, -0.7), Vector3.new(x, -0.15, 0.7), 0.06, carbon, M.Metal)
+		K.rod(Vector3.new(x, -0.15, -0.5), Vector3.new(x, 0, -0.3), 0.06, carbon, M.Metal)
+	end
+	local props, leds = {}, {}
+	for _, sg in ipairs({{-1, -1}, {1, -1}, {-1, 1}, {1, 1}}) do
+		local x, z = sg[1] * 1.5, sg[2] * 1.5
+		K.rod(Vector3.new(sg[1] * 0.4, 0, sg[2] * 0.4), Vector3.new(x, 0.05, z), 0.13, carbon, M.Metal)
+		K.cyl(0.3, 0.38, CFrame.new(x, 0.12, z), main, M.Metal)
+		K.cyl(0.02, 1.75, CFrame.new(x, 0.34, z), rgb(220, 230, 255), nil, {Transparency = 0.82})
+		local _, w1 = K.part(Vector3.new(1.7, 0.025, 0.16), CFrame.new(), rgb(30, 30, 34), M.Metal)
+		local _, w2 = K.part(Vector3.new(1.7, 0.025, 0.16), CFrame.new(), rgb(30, 30, 34), M.Metal)
+		props[#props + 1] = {w1, w2, x, z, sg[1] * sg[2]}
+		leds[#leds + 1] = K.ball(0.14, CFrame.new(x, 0, z), sg[2] < 0 and green or red, M.Neon)
+	end
+	local pos, prev, view = root.Position, root.Position, false
+	local function setView(v)
+		view = v
+		local h = hum()
+		if h then cam.CameraSubject = v and root or h end
+	end
+	K.add(function() setView(false) end)
+	K.setView = function() setView(not view) end
+	if cinema then task.defer(function() setView(true) end) end
+	K.loop(function(t, dt)
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		local look = r.CFrame.LookVector
+		local target = r.Position + r.CFrame.RightVector * 3.2 + Vector3.new(0, 4.6 + math.sin(t * 1.4) * 0.25, 0) - look * 1.2
+		if cinema then target = r.Position + Vector3.new(math.cos(t * 0.4) * 9, 7 + math.sin(t) * 0.5, math.sin(t * 0.4) * 9) end
+		pos = pos:Lerp(target, 1 - math.exp(-dt * 3.5))
+		local vel = (pos - prev) / math.max(dt, 1e-3); prev = pos
+		local fl = Vector3.new(look.X, 0, look.Z)
+		local face = CFrame.lookAt(Vector3.zero, cinema and (r.Position - pos) * Vector3.new(1, 0, 1) + Vector3.new(0, 0, 1e-3) or (fl.Magnitude > 0 and fl or -Vector3.zAxis))
+		local loc = face:VectorToObjectSpace(vel)
+		root.CFrame = CFrame.new(pos) * face * CFrame.Angles(math.clamp(loc.Z * 0.02, -0.4, 0.4), 0, math.clamp(-loc.X * 0.02, -0.4, 0.4))
+		for _, p in ipairs(props) do
+			local a = t * 60 * p[5]
+			p[1].C0 = CFrame.new(p[3], 0.3, p[4]) * CFrame.Angles(0, a, 0)
+			p[2].C0 = CFrame.new(p[3], 0.3, p[4]) * CFrame.Angles(0, a + math.pi / 2, 0)
+		end
+		for i, l in ipairs(leds) do l.Transparency = (math.sin(t * 8 + i * 1.6) > 0) and 0 or 0.7 end
 	end)
 end
+item{id = "drone", tab = 2, name = "Drone Quad", icon = "🚁", desc = "Quadricóptero que te segue. Toque = visão do drone.", c1 = rgb(0, 200, 255), c2 = rgb(90, 90, 255),
+build = function(K) droneBuild(K, false) end, act = function(K) if K.setView then K.setView() end end}
+item{id = "drone2", tab = 2, name = "Drone Cinema", icon = "📹", desc = "Orbita você filmando. Toque = alterna a câmera.", c1 = rgb(255, 140, 40), c2 = rgb(255, 70, 90),
+build = function(K) droneBuild(K, true) end, act = function(K) if K.setView then K.setView() end end}
 
----------------------------------------------------------------- MENU
-header("🪽 ASAS")
-lib:AddButton("Asa Delta (planar)", deltaWing)
-lib:AddButton("Asas de Anjo (batendo)", angelWings)
+item{id = "orb", tab = 2, name = "Sentinela", icon = "🔵", desc = "Esfera com anéis girando e varredura de luz.", c1 = rgb(0, 230, 255), c2 = rgb(255, 80, 200),
+build = function(K)
+	local core = K.add(wpart(Vector3.one * 0.9, rgb(0, 230, 255), M.Neon, {Shape = Enum.PartType.Ball}))
+	local shell = K.add(wpart(Vector3.one * 1.5, rgb(180, 240, 255), M.Glass, {Shape = Enum.PartType.Ball, Transparency = 0.55}))
+	new("PointLight", {Color = rgb(0, 230, 255), Range = 18, Brightness = 2}, core)
+	local a0 = new("Attachment", {Position = Vector3.new(0, 0.4, 0)}, core)
+	local a1 = new("Attachment", {Position = Vector3.new(0, -0.4, 0)}, core)
+	new("Trail", {Attachment0 = a0, Attachment1 = a1, Lifetime = 0.6, LightEmission = 1, Color = ColorSequence.new(rgb(0, 230, 255), rgb(255, 80, 200)), Transparency = NumberSequence.new(0.2, 1)}, core)
+	local beam = K.add(wpart(Vector3.new(1, 0.1, 0.1), rgb(0, 230, 255), M.Neon, {Shape = Enum.PartType.Cylinder, Transparency = 0.75}))
+	local rings = {}
+	for i, rad in ipairs({1.5, 1.95, 2.4}) do
+		local m = K.add(new("Model", {}, junk))
+		m.PrimaryPart = wpart(Vector3.one * 0.1, WHT, nil, {Transparency = 1, Parent = m})
+		for k = 1, 18 do
+			wpart(Vector3.new(0.34, 0.08, 0.1), i == 2 and rgb(255, 80, 200) or rgb(0, 230, 255), M.Neon,
+				{CFrame = CFrame.Angles(0, k / 18 * math.pi * 2, 0) * CFrame.new(0, 0, -rad), Parent = m})
+		end
+		rings[i] = {m = m, v = Vector3.new(rnd(0.6, 1.4), rnd(0.5, 1.3), rnd(0.3, 1))}
+	end
+	K.boost, K.nextScan = 1, 0
+	K.loop(function(t, dt)
+		K.boost = K.boost + (1 - K.boost) * math.min(dt * 2, 1)
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		local pos = r.Position + Vector3.new(math.cos(t * 0.8) * 3.6, 3 + math.sin(t * 1.5) * 0.4, math.sin(t * 0.8) * 3.6)
+		core.Position, shell.Position = pos, pos
+		core.Size = Vector3.one * (0.9 + math.sin(t * 5) * 0.08 + (K.boost - 1) * 0.15)
+		for _, rg in ipairs(rings) do rg.m:PivotTo(CFrame.new(pos) * CFrame.Angles(rg.v.X * t * K.boost, rg.v.Y * t * K.boost, rg.v.Z * t)) end
+		local res = Workspace:Raycast(pos, Vector3.new(0, -60, 0), K.rp)
+		local gp = res and res.Position or pos - Vector3.new(0, 20, 0)
+		beam.Size = Vector3.new((pos - gp).Magnitude, 0.1 + math.sin(t * 6) * 0.03, 0.1 + math.sin(t * 6) * 0.03)
+		beam.CFrame = dirCF(pos, gp)
+		if t > K.nextScan then K.nextScan = t + 2.6; ring(gp + Vector3.new(0, 0.1, 0), rgb(0, 230, 255), 18, 1.1) end
+		K.gp = gp
+	end)
+end, act = function(K) K.boost = 6; if K.gp then ring(K.gp + Vector3.new(0, 0.1, 0), rgb(255, 80, 200), 34, 0.9) end end}
 
-header("🚁 DRONE")
-lib:AddButton("Drone companheiro", function() drone(false) end)
-lib:AddButton("Drone câmera (visão aérea)", function() drone(true) end)
+---------------------------------------------------------------- TAB 3: SPRAY
+local function canBuild(K, nameCol)
+	K.hand()
+	K.hue = math.random()
+	local col = Color3.fromHSV(K.hue, 0.85, 1)
+	local sil = rgb(205, 210, 220)
+	K.cyl(1.1, 0.42, CFrame.new(0, 0.1, 0), sil, M.Metal, {Reflectance = 0.25})
+	K.label = K.cyl(0.62, 0.435, CFrame.new(0, 0.1, 0), col)
+	for _, y in ipairs({-0.15, 0.35}) do K.cyl(0.04, 0.45, CFrame.new(0, y, 0), WHT, M.Neon) end
+	K.cyl(0.12, 0.32, CFrame.new(0, 0.72, 0), sil, M.Metal)
+	K.cyl(0.3, 0.3, CFrame.new(0, 0.88, 0), BLK)
+	K.part(Vector3.new(0.1, 0.1, 0.16), CFrame.new(0, 1.07, -0.04), WHT)
+	local nz = K.part(Vector3.one * 0.06, CFrame.new(0, 1.07, -0.14), sil, nil, {Transparency = 1})
+	K.mist = K.emit(nz, {Rate = 0, EmissionDirection = Enum.NormalId.Front, Lifetime = NumberRange.new(0.35, 0.6), Speed = NumberRange.new(10, 14),
+		SpreadAngle = Vector2.new(10, 10), Size = NumberSequence.new(0.3, 1.5), Transparency = NumberSequence.new(0.4, 1), LightEmission = 0.4, Color = ColorSequence.new(col)})
+end
+item{id = "can1", tab = 3, name = "Spray Splat", icon = "🎨", desc = "Toque na parede: mancha neon com tinta escorrendo.", c1 = rgb(255, 0, 140), c2 = rgb(255, 200, 0),
+build = function(K) canBuild(K) end, act = function(K) doSpray(K, "splat") end}
+item{id = "can2", tab = 3, name = "Spray Tag", icon = "✍️", desc = "Pichação 'ANGEL' que aparece e escorre.", c1 = rgb(0, 220, 255), c2 = rgb(120, 90, 255),
+build = function(K) canBuild(K) end, act = function(K) doSpray(K, "tag", "ANGEL") end}
+item{id = "can3", tab = 3, name = "Spray Coração", icon = "💜", desc = "Corações grandes de tinta colorida.", c1 = rgb(255, 90, 170), c2 = rgb(190, 90, 255),
+build = function(K) canBuild(K) end, act = function(K) doSpray(K, "heart", "♥") end}
 
-header("🎨 SPRAY")
-lib:AddButton("Spray Splat (toque na parede)", function() sprayMode(false) end)
-lib:AddButton("Spray Tag ANGEL", function() sprayMode(true) end)
-lib:AddButton("Trocar cor do spray", function() sprayIdx = sprayIdx % #sprayColors + 1; notify("Cor " .. sprayIdx) end)
-lib:AddButton("Limpar sprays", function() if sprayFolder then sprayFolder:ClearAllChildren() end end)
+---------------------------------------------------------------- TAB 4: PODERES
+item{id = "web", tab = 4, name = "Lança-Teias", icon = "🕸️", desc = "Toque p/ prender a teia e balançar. Pule p/ soltar.", c1 = rgb(210, 25, 40), c2 = rgb(40, 70, 200),
+build = function(K)
+	K.hand()
+	local red = rgb(190, 20, 30)
+	K.part(Vector3.new(1.0, 0.95, 0.95), CFrame.new(0, 0, 0.05), red, M.Fabric)
+	K.cylZ(0.75, 1.15, CFrame.new(0, 0, 0.85), BLK, M.Metal)
+	K.cylZ(0.12, 1.2, CFrame.new(0, 0, 1.2), red, M.Fabric)
+	K.ball(0.18, CFrame.new(0, 0.62, 0.85), BLK)
+	for i = 1, 4 do for _, sx in ipairs({-1, 1}) do
+		K.rod(Vector3.new(0, 0.62, 0.85), Vector3.new(sx * 0.36, 0.62, 0.85 + (i - 2.5) * 0.17), 0.03, BLK)
+	end end
+	K.cylZ(0.35, 0.2, CFrame.new(0, -0.1, -0.65), rgb(200, 205, 215), M.Metal)
+	local tip = K.ball(0.13, CFrame.new(0, -0.1, -0.85), WHT, M.Neon)
+	local a0 = new("Attachment", {Position = Vector3.new(0, 0, -0.1)}, tip)
+	local web
+	local baseFov = 70
+	local function release()
+		if web then fadeOut(web.model, 0.4); web.anchor:Destroy(); web = nil end
+	end
+	K.add(release)
+	K.add(function() cam.FieldOfView = baseFov end)
+	K.add(UIS.JumpRequest:Connect(release))
+	K.loop(function(t) tip.Size = Vector3.one * (0.13 + math.sin(t * 8) * 0.03) end)
+	K.fire = function()
+		release()
+		local res = aim(K, 250); if not res then return end
+		local anchor = wpart(Vector3.one * 0.3, WHT, nil, {Transparency = 1, Position = res.Position})
+		local a1 = new("Attachment", {}, anchor)
+		local b = new("Beam", {Attachment0 = a0, Attachment1 = a1, Width0 = 0.1, Width1 = 0.1, LightEmission = 1, FaceCamera = true, Segments = 24,
+			CurveSize0 = 5, CurveSize1 = -5, Color = ColorSequence.new(WHT)}, anchor)
+		tw(b, 0.25, {CurveSize0 = 0, CurveSize1 = 0})
+		web = {anchor = anchor, model = webSplat(res.Position, res.Normal)}
+	end
+	K.add(RS.Heartbeat:Connect(function(dt)
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		local v = r.AssemblyLinearVelocity
+		cam.FieldOfView = cam.FieldOfView + (math.clamp(70 + v.Magnitude * 0.25, 70, 100) - cam.FieldOfView) * math.min(dt * 5, 1)
+		if not web then return end
+		local d = web.anchor.Position - r.Position
+		if d.Magnitude < 4 then release() return end
+		v = v + d.Unit * 140 * dt
+		if v.Magnitude > 90 then v = v.Unit * 90 end
+		r.AssemblyLinearVelocity = v
+	end))
+end, act = function(K) K.fire() end}
 
-header("⚡ PODERES")
-lib:AddButton("Teia (toque p/ prender, pule p/ soltar)", webSwing)
-lib:AddButton("Blink (teleporte curto)", blink)
-lib:AddButton("Ground Slam", slam)
-lib:AddButton("Telecinese (flutuar + pedras)", levitate)
+item{id = "tk", tab = 4, name = "Luvas Telecinéticas", icon = "🔮", desc = "Flutue com pedras orbitando. Toque = pulso de força.", c1 = rgb(170, 90, 255), c2 = rgb(90, 220, 255),
+build = function(K)
+	K.hand()
+	local vio = rgb(170, 90, 255)
+	K.part(Vector3.new(0.95, 0.9, 0.95), CFrame.new(0, 0, 0.05), rgb(40, 36, 60), M.Fabric)
+	local orb = K.ball(0.55, CFrame.new(0, 0, -1.0), vio, M.Neon)
+	local rw = {}
+	for ri = 1, 2 do for k = 1, 10 do
+		local _, w = K.part(Vector3.new(0.2, 0.05, 0.06), CFrame.new(), ri == 1 and vio or rgb(90, 220, 255), M.Neon)
+		rw[#rw + 1] = {w = w, ri = ri, k = k}
+	end end
+	K.emit(orb, {Rate = 30, Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(1, 3), SpreadAngle = Vector2.new(180, 180),
+		Size = NumberSequence.new(0.2, 0), LightEmission = 1, Color = ColorSequence.new(vio), Transparency = NumberSequence.new(0, 1)})
+	K.light(orb, vio, 12, 1.5)
+	local rocks = {}
+	for i = 1, 8 do
+		local s = rnd(0.5, 1.1)
+		rocks[i] = {p = K.add(wpart(Vector3.new(s, s * rnd(0.7, 1.2), s * rnd(0.8, 1.3)), rgb(80, 78, 92), M.Slate)), r = rnd(4, 5.8), y = rnd(-1, 2), sp = rnd(0.7, 1.5), ph = rnd(0, 6.28)}
+	end
+	K.burst = 1
+	K.loop(function(t, dt)
+		K.burst = K.burst + (1 - K.burst) * math.min(dt * 3, 1)
+		orb.Size = Vector3.one * (0.55 + 0.06 * math.sin(t * 6))
+		for _, d in ipairs(rw) do
+			local a = d.k / 10 * math.pi * 2 + t * (d.ri == 1 and 2.5 or -3.4)
+			d.w.C0 = CFrame.new(0, 0, -1.0) * (d.ri == 2 and CFrame.Angles(0.9, 0, 0) or CFrame.new()) * CFrame.Angles(0, 0, a) * CFrame.new(0.55 + 0.1 * d.ri, 0, 0) * CFrame.Angles(0, 0, math.pi / 2)
+		end
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		local rr = Workspace:Raycast(r.Position, Vector3.new(0, -40, 0), K.rp)
+		local ground = rr and rr.Position.Y or r.Position.Y - 3
+		local v = r.AssemblyLinearVelocity
+		r.AssemblyLinearVelocity = Vector3.new(v.X, (ground + 6.5 + math.sin(t * 2) * 0.5 - r.Position.Y) * 6, v.Z)
+		for i, k in ipairs(rocks) do
+			local a = t * k.sp + k.ph
+			k.p.CFrame = CFrame.new(r.Position + Vector3.new(math.cos(a) * k.r * K.burst, k.y + math.sin(t * 1.7 + i), math.sin(a) * k.r * K.burst)) * CFrame.Angles(t * 0.9 + i, t * 0.6, i)
+		end
+	end)
+end, act = function(K)
+	K.burst = 3.2
+	local r = K.c:FindFirstChild("HumanoidRootPart")
+	if r then ring(r.Position - Vector3.new(0, 3, 0), rgb(170, 90, 255), 34, 0.8); shake(0.3) end
+end}
 
-header("🕷️ TRAJES")
-lib:AddButton("Vestir Homem-Aranha", function() dress("Homem-Aranha") end)
-lib:AddButton("Vestir Femboy Meme", function() dress("Femboy Meme (kawaii)") end)
-lib:AddButton("Vestir Astronauta", function() dress("Astronauta") end)
-lib:AddButton("Vestir Ninja", function() dress("Ninja") end)
-lib:AddButton("Restaurar roupa original", restoreOutfit)
+item{id = "staff", tab = 4, name = "Cajado Relâmpago", icon = "⚡", desc = "Toque para descarregar um raio com ramificações.", c1 = rgb(90, 200, 255), c2 = rgb(255, 255, 255),
+build = function(K)
+	K.hand()
+	local wood, gold, blue = rgb(70, 45, 30), rgb(220, 175, 70), rgb(90, 200, 255)
+	K.cyl(3.6, 0.16, CFrame.new(0, 0.6, 0), wood, M.Wood)
+	for _, y in ipairs({-0.6, 0, 0.8, 1.6}) do K.cyl(0.07, 0.22, CFrame.new(0, y, 0), gold, M.Metal) end
+	for i = 1, 4 do
+		local a = i * math.pi / 2
+		K.rod(Vector3.new(0, 2.2, 0), Vector3.new(math.cos(a) * 0.45, 3.0, math.sin(a) * 0.45), 0.06, gold, M.Metal)
+	end
+	K.cr = K.ball(0.55, CFrame.new(0, 2.65, 0), blue, M.Neon)
+	K.ball(0.25, CFrame.new(0, 2.65, 0), WHT, M.Neon)
+	K.light(K.cr, blue, 16, 2)
+	K.emit(K.cr, {Rate = 20, Lifetime = NumberRange.new(0.4, 0.8), Speed = NumberRange.new(1, 3), SpreadAngle = Vector2.new(180, 180),
+		Size = NumberSequence.new(0.15, 0), LightEmission = 1, Color = ColorSequence.new(blue)})
+	local sh = {}
+	for i = 1, 4 do local _, w = K.part(Vector3.new(0.1, 0.3, 0.1), CFrame.new(), WHT, M.Neon); sh[i] = w end
+	K.loop(function(t)
+		K.cr.Size = Vector3.one * (0.55 + math.sin(t * 9) * 0.05)
+		for i, w in ipairs(sh) do
+			w.C0 = CFrame.new(0, 2.65, 0) * CFrame.Angles(0, t * 2 + i * math.pi / 2, 0) * CFrame.new(0.55, math.sin(t * 3 + i) * 0.2, 0) * CFrame.Angles(t * 3, 0, t * 2)
+		end
+	end)
+end, act = function(K)
+	if os.clock() - K.last < 0.3 then return end
+	K.last = os.clock()
+	local _, target = aim(K, 250)
+	bolt(K.cr.Position, target, rgb(90, 200, 255))
+end}
 
-header("✨ EFEITOS")
-lib:AddButton("Rastro Arco-íris", rainbowTrail)
-lib:AddButton("Aura Mística", aura)
-lib:AddButton("Contorno Neon RGB", neonOutline)
-lib:AddButton("Pegadas de Luz", footGlow)
+---------------------------------------------------------------- TAB 5: TRAJES
+item{id = "spider", tab = 5, name = "Traje Aranha", icon = "🕷️", desc = "Máscara com olhos, teia no peito e emblema.", c1 = rgb(200, 25, 35), c2 = rgb(40, 70, 190),
+build = function(K)
+	local red, blue = rgb(190, 22, 32), rgb(30, 56, 160)
+	outfit(K, {head = red, torso = red, arms = red, legs = blue})
+	local tor = K.torso(); local sz = tor.Size; local fz = -(sz.Z / 2 + 0.02)
+	for i = -1, 1 do K.part(Vector3.new(0.04, sz.Y * 0.95, 0.02), CFrame.new(i * sz.X * 0.28, 0, fz), BLK) end
+	for _, y in ipairs({0.3, 0, -0.3}) do K.part(Vector3.new(sz.X * 0.95, 0.035, 0.02), CFrame.new(0, y * sz.Y, fz), BLK) end
+	local c0 = Vector3.new(0, sz.Y * 0.2, fz - 0.03)
+	K.ball(0.24, CFrame.new(c0), BLK)
+	for i = 1, 4 do for _, sx in ipairs({-1, 1}) do K.rod(c0, c0 + Vector3.new(sx * 0.4, (i - 2.5) * 0.17, 0), 0.035, BLK) end end
+	local head = K.c:FindFirstChild("Head")
+	if head then K.on(head, function()
+		local hs = head.Size
+		for _, s in ipairs({-1, 1}) do
+			K.part(Vector3.new(hs.X * 0.33, hs.Y * 0.3, 0.04), CFrame.new(s * hs.X * 0.2, hs.Y * 0.1, -hs.Z / 2 - 0.015) * CFrame.Angles(0, 0, -s * math.rad(25)), BLK)
+			K.part(Vector3.new(hs.X * 0.26, hs.Y * 0.22, 0.05), CFrame.new(s * hs.X * 0.2, hs.Y * 0.1, -hs.Z / 2 - 0.03) * CFrame.Angles(0, 0, -s * math.rad(25)), WHT, M.Neon)
+		end
+	end) end
+end}
 
-header("🎥 CÂMERA & CORPO")
-lib:AddButton("Câmera Cinema orbital", cinema)
-lib:AddButton("Gigante x2.5 (R15)", function() scale("Gigante", 2.5) end)
-lib:AddButton("Mini x0.4 (R15)", function() scale("Mini", 0.4) end)
-lib:AddButton("Gravidade Lunar", moonGravity)
+item{id = "femboy", tab = 5, name = "Femboy Meme", icon = "🎀", desc = "Orelhinhas, saia plissada, rabinho e corações.", c1 = rgb(255, 130, 190), c2 = rgb(255, 220, 240),
+build = function(K)
+	local pink, light = rgb(255, 140, 190), rgb(255, 205, 225)
+	outfit(K, {torso = rgb(255, 160, 205), arms = rgb(255, 232, 240), legs = rgb(250, 250, 252)})
+	local tor = K.torso(); local sz = tor.Size
+	local pleats = {}
+	for i = 1, 16 do
+		local _, w = K.part(Vector3.new(0.62, 0.95, 0.05), CFrame.new(), i % 2 == 0 and pink or WHT, M.Fabric)
+		local a = i / 16 * math.pi * 2
+		w.C0 = CFrame.new(0, -sz.Y / 2 + 0.15, 0) * CFrame.Angles(0, a, 0) * CFrame.new(0, 0, 1.0) * CFrame.Angles(math.rad(-22), 0, 0) * CFrame.new(0, -0.47, 0)
+		pleats[i] = {w = w, a = a}
+	end
+	K.part(Vector3.new(sz.X * 0.62, 0.12, sz.Z * 0.62), CFrame.new(0, sz.Y / 2 - 0.02, 0), BLK)
+	K.ball(0.16, CFrame.new(0, sz.Y / 2 - 0.12, -sz.Z * 0.34), rgb(255, 210, 90), M.Metal)
+	K.ball(0.3, CFrame.new(0, 0.2, fz or -(sz.Z / 2 + 0.03)), pink, M.Neon, {Transparency = 0.3})
+	for _, leg in ipairs({"LeftUpperLeg", "RightUpperLeg", "Left Leg", "Right Leg"}) do
+		local p = K.c:FindFirstChild(leg)
+		if p then K.on(p, function()
+			K.part(Vector3.new(p.Size.X + 0.05, 0.14, p.Size.Z + 0.05), CFrame.new(0, p.Size.Y / 2 - 0.3, 0), pink)
+			K.part(Vector3.new(p.Size.X + 0.05, 0.08, p.Size.Z + 0.05), CFrame.new(0, p.Size.Y / 2 - 0.5, 0), pink)
+		end) end
+	end
+	local tail = {}
+	for i = 1, 6 do tail[i] = {K.ball(0.3 - i * 0.03, CFrame.new(), i == 6 and WHT or pink, M.SmoothPlastic)} end
+	local head = K.c:FindFirstChild("Head")
+	local ears
+	if head then
+		local hs = head.Size
+		ears = {}
+		K.on(head, function()
+			for _, s in ipairs({-1, 1}) do
+				local _, w = K.part(Vector3.new(0.42, 0.55, 0.1), CFrame.new(), pink)
+				local _, wi = K.part(Vector3.new(0.26, 0.38, 0.05), CFrame.new(), light)
+				ears[#ears + 1] = {w = w, wi = wi, s = s, hs = hs}
+			end
+		end)
+	end
+	local acc = 0
+	K.loop(function(t, dt)
+		for i, d in ipairs(tail) do
+			d[1].Parent = d[1].Parent
+		end
+		for i, d in ipairs(tail) do
+			local _, w = d[1], nil
+		end
+		for i = 1, 6 do
+			local p = Vector3.new(math.sin(t * 3 - i * 0.7) * 0.12 * i, 0.03 * i * i, 0.3 * i)
+			K.base = tor
+		end
+		for i, pl in ipairs(pleats) do pl.w.C0 = pl.w.C0 end
+		if ears then
+			local tw0 = math.max(0, math.sin(t * 0.9)) ^ 10 * 0.35
+			for k, e in ipairs(ears) do
+				local tilt = e.s * math.rad(15) + (k == 1 and tw0 or 0)
+				e.w.C0 = CFrame.new(e.s * e.hs.X * 0.28, e.hs.Y / 2 + 0.22, 0) * CFrame.Angles(0, 0, -tilt)
+				e.wi.C0 = e.w.C0 * CFrame.new(0, 0, -0.04)
+			end
+		end
+		acc = acc + dt
+		if acc > 1.1 and head then
+			acc = 0
+			local b = new("BillboardGui", {Size = UDim2.fromOffset(34, 34), StudsOffset = Vector3.new(rnd(-0.8, 0.8), head.Size.Y / 2 + 0.8, 0), AlwaysOnTop = true, Adornee = head}, head)
+			local l = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "♥", TextScaled = true, TextColor3 = rgb(255, 90, 160), Font = Enum.Font.GothamBold}, b)
+			tw(b, 1.6, {StudsOffset = b.StudsOffset + Vector3.new(0, 2.2, 0)}, Enum.EasingStyle.Sine); tw(l, 1.6, {TextTransparency = 1})
+			Debris:AddItem(b, 1.7)
+		end
+	end)
+end}
 
-header("🌌 AMBIENTE")
-lib:AddButton("Mundo Neon", neonWorld)
-lib:AddButton("Neve Local", snow)
-lib:AddButton("Vagalumes", fireflies)
+item{id = "astro", tab = 5, name = "Astronauta", icon = "🧑‍🚀", desc = "Capacete de vidro, mochila de oxigênio e LEDs.", c1 = rgb(200, 210, 230), c2 = rgb(255, 200, 80),
+build = function(K)
+	outfit(K, {torso = WHT, arms = WHT, legs = WHT})
+	local tor = K.torso(); local sz = tor.Size
+	local gray = rgb(170, 175, 185)
+	K.part(Vector3.new(1.6, 2, 0.8), CFrame.new(0, 0.1, sz.Z / 2 + 0.45), gray, M.Metal)
+	K.part(Vector3.new(1.2, 0.5, 0.3), CFrame.new(0, 0.5, sz.Z / 2 + 0.95), rgb(60, 62, 70), M.Metal)
+	for _, s in ipairs({-1, 1}) do K.rod(Vector3.new(s * 0.5, 0.9, sz.Z / 2 + 0.2), Vector3.new(s * 0.8, sz.Y / 2, 0), 0.1, rgb(240, 120, 40), M.Metal) end
+	K.part(Vector3.new(0.9, 0.5, 0.1), CFrame.new(0, 0.25, -(sz.Z / 2 + 0.05)), rgb(40, 42, 50), M.Metal)
+	local leds = {}
+	for i = -1, 1 do leds[#leds + 1] = K.ball(0.1, CFrame.new(i * 0.28, 0.25, -(sz.Z / 2 + 0.12)), i == 0 and rgb(60, 255, 120) or rgb(255, 70, 70), M.Neon) end
+	local head = K.c:FindFirstChild("Head")
+	if head then K.on(head, function()
+		local d = math.max(head.Size.Y, head.Size.Z) * 1.75
+		K.ball(d, CFrame.new(), rgb(160, 215, 255), M.Glass, {Transparency = 0.55, Reflectance = 0.25})
+		K.ball(d * 0.96, CFrame.new(0, 0, -0.1), rgb(255, 200, 80), M.Glass, {Transparency = 0.8, Reflectance = 0.6})
+		K.cyl(0.18, d * 0.75, CFrame.new(0, -d / 2 + 0.1, 0), rgb(255, 205, 90), M.Metal)
+	end) end
+	K.loop(function(t) for i, l in ipairs(leds) do l.Transparency = math.sin(t * 5 + i * 2) > 0 and 0 or 0.8 end end)
+end}
 
-header("⚙️ SISTEMA")
-lib:AddButton("Desligar TUDO + restaurar roupa", function()
-	offAll(); restoreOutfit()
-	if sprayFolder then sprayFolder:ClearAllChildren() end
+---------------------------------------------------------------- TAB 6: ARCANO
+item{id = "saber", tab = 6, name = "Sabre de Luz", icon = "🗡️", desc = "Acende com brilho, zumbe e deixa rastro. Toque = cor.", c1 = rgb(60, 140, 255), c2 = rgb(160, 90, 255),
+build = function(K)
+	K.hand()
+	local cols = {rgb(60, 140, 255), rgb(60, 255, 120), rgb(255, 50, 60), rgb(190, 90, 255)}
+	K.ci = 1
+	K.cyl(1.0, 0.22, CFrame.new(0, -0.05, 0), rgb(160, 165, 175), M.Metal, {Reflectance = 0.3})
+	for _, y in ipairs({-0.35, -0.15, 0.05}) do K.cyl(0.05, 0.25, CFrame.new(0, y, 0), BLK) end
+	K.cyl(0.25, 0.3, CFrame.new(0, 0.55, 0), rgb(220, 180, 80), M.Metal)
+	K.ball(0.26, CFrame.new(0, -0.6, 0), rgb(150, 155, 165), M.Metal)
+	K.part(Vector3.new(0.05, 0.1, 0.14), CFrame.new(0, 0, -0.12), rgb(255, 60, 60), M.Neon)
+	local core = K.cyl(0.1, 0.14, CFrame.new(0, 0.7, 0), WHT, M.Neon)
+	local glow, glw = K.cyl(0.1, 0.28, CFrame.new(0, 0.7, 0), cols[1], M.Neon, {Transparency = 0.35})
+	local halo, hw = K.cyl(0.1, 0.55, CFrame.new(0, 0.7, 0), cols[1], M.Neon, {Transparency = 0.85})
+	local _, cw = K.cyl(0.1, 0.14, CFrame.new(0, 0.7, 0), WHT, M.Neon)
+	local a0 = new("Attachment", {}, core); local a1 = new("Attachment", {}, core)
+	local tr = new("Trail", {Attachment0 = a0, Attachment1 = a1, Lifetime = 0.2, LightEmission = 1, Color = ColorSequence.new(cols[1]), Transparency = NumberSequence.new(0.2, 1)}, core)
+	local light = K.light(core, cols[1], 14, 2)
+	K.core, K.glow, K.halo, K.tr, K.light, K.cols = core, glow, halo, tr, light, cols
+	local ext = 0
+	K.loop(function(t, dt)
+		ext = math.min(ext + dt * 15, 4.4)
+		local e = ext * (1 + math.sin(t * 40) * 0.004)
+		local cy = 0.7 + e / 2
+		for _, d in ipairs({{core, 0.14}, {glow, 0.28}, {halo, 0.55 + math.sin(t * 12) * 0.03}}) do
+			d[1].Size = Vector3.new(math.max(e, 0.1), d[2], d[2])
+		end
+		for _, w in ipairs({K.core:FindFirstChildOfClass("Weld"), glow:FindFirstChildOfClass("Weld"), halo:FindFirstChildOfClass("Weld")}) do
+			w.C0 = CFrame.new(0, cy, 0) * CFrame.Angles(0, 0, math.pi / 2)
+		end
+		a0.Position = Vector3.new(-e / 2, 0, 0); a1.Position = Vector3.new(e / 2, 0, 0)
+		light.Brightness = 2 + math.sin(t * 30) * 0.3
+	end)
+end, act = function(K)
+	K.ci = K.ci % #K.cols + 1
+	local c = K.cols[K.ci]
+	K.glow.Color, K.halo.Color, K.light.Color = c, c, c
+	K.tr.Color = ColorSequence.new(c)
+	ring(K.core.Position, c, 8, 0.5)
+end}
+
+item{id = "arcane", tab = 6, name = "Orbe Arcano", icon = "🌀", desc = "Esfera com glifos girando. Toque = disparar.", c1 = rgb(170, 90, 255), c2 = rgb(255, 90, 200),
+build = function(K)
+	K.hand()
+	local vio, cy = rgb(170, 90, 255), rgb(90, 220, 255)
+	K.orb = K.ball(0.7, CFrame.new(0, 0.3, -1.1), vio, M.Neon)
+	K.ball(0.35, CFrame.new(0, 0.3, -1.1), WHT, M.Neon)
+	K.light(K.orb, vio, 14, 2)
+	local g = {}
+	for ri = 1, 3 do for k = 1, 12 do
+		local _, w = K.part(Vector3.new(0.22, 0.06, 0.07), CFrame.new(), ri == 2 and cy or vio, M.Neon)
+		g[#g + 1] = {w = w, ri = ri, k = k}
+	end end
+	K.emit(K.orb, {Rate = 25, Lifetime = NumberRange.new(0.6, 1), Speed = NumberRange.new(2, 4), SpreadAngle = Vector2.new(180, 180),
+		Size = NumberSequence.new(0.18, 0), LightEmission = 1, Color = ColorSequence.new(vio, cy)})
+	K.loop(function(t)
+		K.orb.Size = Vector3.one * (0.7 + math.sin(t * 5) * 0.05)
+		for _, d in ipairs(g) do
+			local a = d.k / 12 * math.pi * 2 + t * (d.ri % 2 == 0 and -2.2 or 2.8)
+			local tilt = CFrame.Angles(d.ri == 1 and 0 or (d.ri == 2 and 1.05 or -1.05), d.ri == 3 and t * 0.5 or 0, 0)
+			d.w.C0 = CFrame.new(0, 0.3, -1.1) * tilt * CFrame.Angles(0, 0, a) * CFrame.new(0.78 + d.ri * 0.08, 0, 0) * CFrame.Angles(0, 0, math.pi / 2)
+		end
+	end)
+end, act = function(K)
+	if os.clock() - K.last < 0.5 then return end
+	K.last = os.clock()
+	local _, target = aim(K, 300)
+	local from = K.orb.Position
+	local col = rgb(170, 90, 255)
+	local o = wpart(Vector3.one * 0.9, col, M.Neon, {Shape = Enum.PartType.Ball, Position = from})
+	new("PointLight", {Color = col, Range = 16, Brightness = 3}, o)
+	local a0 = new("Attachment", {Position = Vector3.new(0, 0.3, 0)}, o); local a1 = new("Attachment", {Position = Vector3.new(0, -0.3, 0)}, o)
+	new("Trail", {Attachment0 = a0, Attachment1 = a1, Lifetime = 0.4, LightEmission = 1, Color = ColorSequence.new(col, rgb(90, 220, 255)),
+		Transparency = NumberSequence.new(0, 1), WidthScale = NumberSequence.new(1, 0)}, o)
+	local dir, t0 = (target - from).Unit, os.clock()
+	local conn
+	conn = RS.Heartbeat:Connect(function(dt)
+		local step = dir * 90 * dt
+		local res = Workspace:Raycast(o.Position, step, K.rp)
+		if res or os.clock() - t0 > 3 then
+			conn:Disconnect()
+			local at = res and res.Position or o.Position + step
+			ring(at, col, 22, 0.6)
+			local b = wpart(Vector3.one, col, M.Neon, {Shape = Enum.PartType.Ball, Position = at, Transparency = 0.2})
+			tw(b, 0.5, {Size = Vector3.one * 9, Transparency = 1}); Debris:AddItem(b, 0.6)
+			local e = new("ParticleEmitter", {Speed = NumberRange.new(15, 30), SpreadAngle = Vector2.new(180, 180), Lifetime = NumberRange.new(0.4, 0.8),
+				Size = NumberSequence.new(0.5, 0), LightEmission = 1, Color = ColorSequence.new(col), Rate = 0}, b); e:Emit(30)
+			shake(0.3); o:Destroy()
+		else o.Position = o.Position + step end
+	end)
+end}
+
+item{id = "rboots", tab = 6, name = "Botas Arco-íris", icon = "🌈", desc = "Rastro de luz, solado neon e ondas a cada passo.", c1 = rgb(255, 90, 90), c2 = rgb(90, 140, 255),
+build = function(K)
+	local boots = {}
+	local rainbow = ColorSequence.new({ColorSequenceKeypoint.new(0, rgb(255, 0, 0)), ColorSequenceKeypoint.new(0.25, rgb(255, 220, 0)),
+		ColorSequenceKeypoint.new(0.5, rgb(0, 255, 100)), ColorSequenceKeypoint.new(0.75, rgb(0, 140, 255)), ColorSequenceKeypoint.new(1, rgb(180, 0, 255))})
+	for _, f in ipairs(feet(K.c)) do
+		K.on(f.p, function()
+			local sz = f.p.Size
+			local b = K.part(Vector3.new(sz.X + 0.14, f.h + 0.1, sz.Z + 0.14), CFrame.new(0, f.y, 0), WHT, nil, {Reflectance = 0.15})
+			local sole = K.part(Vector3.new(sz.X + 0.18, 0.1, sz.Z + 0.18), CFrame.new(0, f.y - f.h / 2, 0), WHT, M.Neon)
+			boots[#boots + 1] = {b, sole, f.p}
+			local a0 = new("Attachment", {Position = Vector3.new(-0.4, -f.h / 2, 0)}, b); local a1 = new("Attachment", {Position = Vector3.new(0.4, -f.h / 2, 0)}, b)
+			new("Trail", {Attachment0 = a0, Attachment1 = a1, Lifetime = 1.1, LightEmission = 1, Color = rainbow, Transparency = NumberSequence.new(0.2, 1)}, b)
+			K.emit(sole, {Rate = 15, Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(1, 3), SpreadAngle = Vector2.new(180, 180),
+				Size = NumberSequence.new(0.2, 0), LightEmission = 1, Color = rainbow})
+		end)
+	end
+	local last = 0
+	K.loop(function(t)
+		for i, bt in ipairs(boots) do
+			bt[1].Color = Color3.fromHSV((t * 0.3 + i * 0.5) % 1, 0.7, 1); bt[2].Color = Color3.fromHSV((t * 0.3 + i * 0.5 + 0.3) % 1, 1, 1)
+		end
+		local h = hum()
+		if h and h.MoveDirection.Magnitude > 0 and h.FloorMaterial ~= Enum.Material.Air and t - last > 0.28 and boots[1] then
+			last = t
+			ring(boots[(math.floor(t * 4) % #boots) + 1][3].Position - Vector3.new(0, 1.2, 0), Color3.fromHSV(t % 1, 1, 1), 4, 0.6)
+		end
+	end)
+end}
+
+---------------------------------------------------------------- TAB 7: CORPO & CÂMERA
+item{id = "cine", tab = 7, name = "Câmera Cinema", icon = "🎬", desc = "Faixas de cinema + órbita suave. Toque = ângulo.", c1 = rgb(255, 80, 80), c2 = rgb(255, 190, 90),
+build = function(K)
+	K.hand()
+	local steel = rgb(32, 34, 40)
+	K.part(Vector3.new(0.85, 0.7, 1.5), CFrame.new(0, 0.15, -0.3), steel, M.Metal)
+	K.cylZ(0.7, 0.5, CFrame.new(0, 0.15, -1.3), BLK, M.Metal)
+	K.ball(0.34, CFrame.new(0, 0.15, -1.62), rgb(60, 120, 200), M.Glass, {Reflectance = 0.5})
+	local reels = {}
+	for i, z in ipairs({-0.05, -0.7}) do
+		local _, w = K.part(Vector3.new(0.14, 0.75, 0.75), CFrame.new(0, 0.75, z), rgb(160, 165, 175), M.Metal, {Shape = Enum.PartType.Cylinder})
+		reels[i] = {w, z}
+	end
+	local rec = K.ball(0.12, CFrame.new(0.32, 0.5, 0.2), rgb(255, 30, 30), M.Neon)
+	local top = new("Frame", {BackgroundColor3 = BLK, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), ZIndex = 0}, gui)
+	local bot = new("Frame", {BackgroundColor3 = BLK, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), ZIndex = 0}, gui)
+	tw(top, 0.6, {Size = UDim2.new(1, 0, 0.1, 0)}); tw(bot, 0.6, {Size = UDim2.new(1, 0, 0.1, 0)})
+	K.add(function()
+		tw(top, 0.4, {Size = UDim2.new(1, 0, 0, 0)}); tw(bot, 0.4, {Size = UDim2.new(1, 0, 0, 0)}); Debris:AddItem(top, 0.5); Debris:AddItem(bot, 0.5)
+	end)
+	K.add(function() cam.CameraType = Enum.CameraType.Custom; cam.FieldOfView = 70 end)
+	cam.CameraType = Enum.CameraType.Scriptable
+	K.modes = {{r = 14, h = 5, sp = 0.35}, {r = 8, h = 2, sp = 0.6}, {r = 20, h = 12, sp = 0.2}}
+	K.mode, K.ang = 1, 0
+	K.loop(function(t, dt)
+		for _, r in ipairs(reels) do r[1].C0 = CFrame.new(0, 0.75, r[2]) * CFrame.Angles(t * 3, 0, 0) end
+		rec.Transparency = math.sin(t * 4) > 0 and 0 or 0.8
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		local m = K.modes[K.mode]
+		K.ang = K.ang + dt * m.sp
+		local c = r.Position + Vector3.new(0, 1.5, 0)
+		local sh = Vector3.new(math.noise(t * 0.7, 1), math.noise(t * 0.8, 5), math.noise(t * 0.6, 9)) * 0.6
+		cam.FieldOfView = 50
+		cam.CFrame = CFrame.lookAt(c + Vector3.new(math.cos(K.ang) * m.r, m.h, math.sin(K.ang) * m.r) + sh, c)
+	end)
+end, act = function(K) K.mode = K.mode % #K.modes + 1 end}
+
+item{id = "giant", tab = 7, name = "Poção Gigante", icon = "🧪", desc = "Cresce suavemente enquanto segura (avatar R15).", c1 = rgb(80, 255, 120), c2 = rgb(0, 190, 160),
+build = function(K)
+	K.hand()
+	local green = rgb(80, 255, 120)
+	K.ball(0.95, CFrame.new(0, 0.05, 0), rgb(200, 255, 220), M.Glass, {Transparency = 0.45, Reflectance = 0.2})
+	local liq = K.ball(0.8, CFrame.new(0, -0.02, 0), green, M.Neon, {Transparency = 0.15})
+	K.cyl(0.55, 0.3, CFrame.new(0, 0.65, 0), rgb(200, 255, 220), M.Glass, {Transparency = 0.45})
+	K.cyl(0.22, 0.34, CFrame.new(0, 0.98, 0), rgb(120, 80, 45), M.Wood)
+	K.emit(liq, {Rate = 22, Lifetime = NumberRange.new(0.6, 1), Speed = NumberRange.new(0.5, 1.5), Acceleration = Vector3.new(0, 2, 0), EmissionDirection = Enum.NormalId.Top,
+		SpreadAngle = Vector2.new(40, 40), Size = NumberSequence.new(0.12, 0), LightEmission = 1, Color = ColorSequence.new(green)})
+	K.light(liq, green, 10, 1)
+	local h = hum()
+	local keys, olds = {"BodyHeightScale", "BodyWidthScale", "BodyDepthScale", "HeadScale"}, {}
+	for _, k in ipairs(keys) do local v = h and h:FindFirstChild(k); if v then olds[k] = v.Value end end
+	if next(olds) == nil then toast("Precisa de avatar R15 p/ crescer") return end
+	local r = hrp()
+	if r then ring(r.Position - Vector3.new(0, 3, 0), green, 24, 0.8) end
+	K.add(function() local hh = hum(); if hh then for k, v in pairs(olds) do local o = hh:FindFirstChild(k); if o then o.Value = v end end end end)
+	local cur = 1
+	K.loop(function(t, dt)
+		cur = cur + (2.5 - cur) * math.min(dt * 2.5, 1)
+		local hh = hum(); if not hh then return end
+		for k, v in pairs(olds) do local o = hh:FindFirstChild(k); if o then o.Value = v * cur end end
+	end)
+end}
+
+item{id = "lunar", tab = 7, name = "Botas Lunares", icon = "🚀", desc = "Gravidade baixa, jatos azuis e poeira ao pousar.", c1 = rgb(120, 170, 255), c2 = rgb(255, 150, 60),
+build = function(K)
+	local old = Workspace.Gravity
+	Workspace.Gravity = 45
+	K.add(function() Workspace.Gravity = old end)
+	local fl, dust = {}, {}
+	for _, f in ipairs(feet(K.c)) do
+		K.on(f.p, function()
+			local sz = f.p.Size
+			K.part(Vector3.new(sz.X + 0.14, f.h + 0.1, sz.Z + 0.14), CFrame.new(0, f.y, 0), rgb(60, 64, 76), M.Metal)
+			K.part(Vector3.new(sz.X + 0.18, 0.08, sz.Z + 0.18), CFrame.new(0, f.y + f.h / 2 - 0.05, 0), rgb(0, 220, 255), M.Neon)
+			local nz = K.cyl(0.2, 0.3, CFrame.new(0, f.y - f.h / 2 - 0.08, 0), BLK, M.Metal)
+			fl[#fl + 1] = K.emit(nz, {Rate = 90, Enabled = false, EmissionDirection = Enum.NormalId.Bottom, Lifetime = NumberRange.new(0.25, 0.4), Speed = NumberRange.new(6, 9),
+				SpreadAngle = Vector2.new(6, 6), Size = NumberSequence.new(0.45, 0), LightEmission = 1, Color = ColorSequence.new(rgb(255, 170, 60), rgb(80, 160, 255))})
+			dust[#dust + 1] = K.emit(nz, {Rate = 0, EmissionDirection = Enum.NormalId.Bottom, Lifetime = NumberRange.new(0.5, 0.9), Speed = NumberRange.new(4, 8),
+				SpreadAngle = Vector2.new(90, 90), Size = NumberSequence.new(0.6, 2), Transparency = NumberSequence.new(0.4, 1), Color = ColorSequence.new(rgb(190, 190, 200))})
+		end)
+	end
+	local was = false
+	K.loop(function()
+		local h = hum(); if not h then return end
+		local air = h.FloorMaterial == Enum.Material.Air
+		for _, e in ipairs(fl) do e.Enabled = air end
+		if was and not air then for _, e in ipairs(dust) do e:Emit(14) end end
+		was = air
+	end)
+end}
+
+---------------------------------------------------------------- TAB 8: MUNDO
+item{id = "snow", tab = 8, name = "Globo de Neve", icon = "❄️", desc = "Neve cai ao seu redor enquanto você segura.", c1 = rgb(170, 220, 255), c2 = rgb(255, 255, 255),
+build = function(K)
+	K.hand()
+	K.cyl(0.3, 1.0, CFrame.new(0, -0.5, 0), rgb(110, 70, 40), M.Wood)
+	K.cyl(0.08, 1.15, CFrame.new(0, -0.32, 0), rgb(220, 175, 70), M.Metal)
+	K.ball(1.35, CFrame.new(0, 0.3, 0), rgb(210, 235, 255), M.Glass, {Transparency = 0.6, Reflectance = 0.2})
+	K.part(Vector3.new(0.4, 0.28, 0.35), CFrame.new(0, -0.1, 0), rgb(200, 90, 70))
+	K.part(Vector3.new(0.46, 0.06, 0.4), CFrame.new(0, 0.07, 0), WHT)
+	K.part(Vector3.new(0.12, 0.12, 0.02), CFrame.new(0.08, -0.08, -0.18), rgb(255, 220, 120), M.Neon)
+	K.part(Vector3.new(0.14, 0.2, 0.14), CFrame.new(-0.35, 0.0, 0.1), rgb(30, 110, 60))
+	local snowE = K.emit(K.part(Vector3.new(0.9, 0.2, 0.9), CFrame.new(0, 0.65, 0), WHT, nil, {Transparency = 1}),
+		{Rate = 25, Lifetime = NumberRange.new(1.5, 2.5), Speed = NumberRange.new(0.1, 0.4), Acceleration = Vector3.new(0, -0.6, 0), Size = NumberSequence.new(0.05), LightEmission = 0.6})
+	K.light(K.base, rgb(255, 220, 150), 8, 0.6)
+	local sp = K.add(wpart(Vector3.new(90, 1, 90), WHT, nil, {Transparency = 1}))
+	new("ParticleEmitter", {Rate = 220, Lifetime = NumberRange.new(5, 7), Speed = NumberRange.new(12, 16), EmissionDirection = Enum.NormalId.Bottom,
+		Size = NumberSequence.new(0.3), LightEmission = 0.5, Acceleration = Vector3.new(2, 0, 0)}, sp)
+	K.loop(function(t) sp.Position = cam.CFrame.Position + Vector3.new(0, 35, 0); if math.floor(t * 0.5) ~= K.sw then K.sw = math.floor(t * 0.5); snowE:Emit(25) end end)
+end}
+
+item{id = "lantern", tab = 8, name = "Lanterna Vagalume", icon = "🏮", desc = "Vagalumes piscando ao seu redor e na lanterna.", c1 = rgb(255, 210, 90), c2 = rgb(255, 130, 50),
+build = function(K)
+	K.hand()
+	local iron = rgb(40, 36, 34)
+	K.cyl(0.9, 0.6, CFrame.new(0, 0.4, 0), rgb(255, 230, 170), M.Glass, {Transparency = 0.7})
+	K.cyl(0.08, 0.8, CFrame.new(0, -0.05, 0), iron, M.Metal); K.cyl(0.08, 0.8, CFrame.new(0, 0.85, 0), iron, M.Metal)
+	K.cyl(0.18, 0.5, CFrame.new(0, 0.97, 0), iron, M.Metal)
+	for i = 1, 4 do local a = i * math.pi / 2; K.rod(Vector3.new(math.cos(a) * 0.3, -0.05, math.sin(a) * 0.3), Vector3.new(math.cos(a) * 0.3, 0.85, math.sin(a) * 0.3), 0.05, iron, M.Metal) end
+	for i = 0, 5 do
+		local a1, a2 = i / 6 * math.pi, (i + 1) / 6 * math.pi
+		K.rod(Vector3.new(math.cos(a1) * 0.3, 1.05 + math.sin(a1) * 0.3, 0), Vector3.new(math.cos(a2) * 0.3, 1.05 + math.sin(a2) * 0.3, 0), 0.04, iron, M.Metal)
+	end
+	local flame = K.ball(0.28, CFrame.new(0, 0.3, 0), rgb(255, 190, 80), M.Neon, {Transparency = 0.2})
+	local L = K.light(flame, rgb(255, 190, 90), 20, 2)
+	local inner = {}
+	for i = 1, 6 do inner[i] = {K.ball(0.07, CFrame.new(), rgb(255, 240, 120), M.Neon), rnd(0, 6.28)} end
+	local ff = {}
+	for i = 1, 24 do
+		local p = K.add(wpart(Vector3.one * 0.3, rgb(255, 240, 120), M.Neon, {Shape = Enum.PartType.Ball}))
+		local l = new("PointLight", {Color = rgb(255, 240, 120), Range = 6}, p)
+		ff[i] = {p = p, l = l, s = Vector3.new(math.random(), math.random(), math.random()) * 6.28, r = math.random(6, 16)}
+	end
+	K.loop(function(t)
+		flame.Size = Vector3.one * (0.28 + math.noise(t * 6, 2) * 0.06); L.Brightness = 2 + math.noise(t * 8, 4) * 1.2
+		for i, d in ipairs(inner) do
+			local _, w = nil, d[1]:FindFirstChildOfClass("Weld")
+			w.C0 = CFrame.new(math.cos(t * 1.3 + d[2]) * 0.2, 0.4 + math.sin(t * 2 + d[2] * 2) * 0.25, math.sin(t * 1.3 + d[2]) * 0.2)
+			d[1].Transparency = math.sin(t * 5 + i) > 0 and 0 or 0.6
+		end
+		local r = K.c:FindFirstChild("HumanoidRootPart"); if not r then return end
+		for _, d in ipairs(ff) do
+			d.p.Position = r.Position + Vector3.new(math.cos(t * 0.4 + d.s.X) * d.r, 2 + math.sin(t * 0.7 + d.s.Y) * 3, math.sin(t * 0.5 + d.s.Z) * d.r)
+			local b = (math.sin(t * 3 + d.s.Z) + 1) / 2
+			d.p.Transparency = 1 - b; d.l.Brightness = b * 1.5
+		end
+	end)
+end}
+
+item{id = "neon", tab = 8, name = "Tubo Neon", icon = "💡", desc = "Transforma o mundo em noite neon com bloom.", c1 = rgb(255, 60, 200), c2 = rgb(80, 120, 255),
+build = function(K)
+	K.hand()
+	K.cyl(2.6, 0.22, CFrame.new(0, 0.6, 0), rgb(255, 60, 200), M.Neon)
+	K.cyl(0.22, 0.34, CFrame.new(0, -0.75, 0), rgb(60, 60, 70), M.Metal); K.cyl(0.22, 0.34, CFrame.new(0, 1.95, 0), rgb(60, 60, 70), M.Metal)
+	K.part(Vector3.new(0.4, 0.5, 0.4), CFrame.new(0, 0, 0), BLK, M.Metal)
+	local tube = K.add(K.base:GetChildren()[1])
+	local tubeP
+	for _, it in ipairs(K.items) do if it:IsA("BasePart") and it.Material == M.Neon then tubeP = it break end end
+	local lt = K.light(tubeP, rgb(255, 60, 200), 20, 2)
+	local ct, br = Lighting.ClockTime, Lighting.Brightness
+	Lighting.ClockTime, Lighting.Brightness = 0, 1.5
+	local cc = K.add(new("ColorCorrectionEffect", {Tint = rgb(190, 150, 255), Saturation = 0.5, Contrast = 0.2}, Lighting))
+	K.add(new("BloomEffect", {Intensity = 1.2, Size = 40, Threshold = 0.8}, Lighting))
+	K.add(function() Lighting.ClockTime, Lighting.Brightness = ct, br end)
+	K.loop(function(t)
+		local c = Color3.fromHSV((t * 0.08 + 0.8) % 1, 0.85, 1)
+		tubeP.Color, lt.Color = c, c
+		cc.Tint = c:Lerp(WHT, 0.45)
+		lt.Brightness = 2 + (math.noise(t * 20, 1) > 0.45 and -1.2 or 0)
+	end)
+end}
+
+------------------------------------------------------------------ sistema de Tools
+local function findTool(id)
+	for _, par in ipairs({lp:FindFirstChildOfClass("Backpack"), lp.Character}) do
+		if par then for _, t in ipairs(par:GetChildren()) do if t:IsA("Tool") and t:GetAttribute("AngelItem") == id then return t end end end
+	end
+end
+local function mkTool(def)
+	local tool = Instance.new("Tool")
+	tool.Name, tool.RequiresHandle, tool.CanBeDropped, tool.ToolTip = def.name, false, false, def.desc
+	tool:SetAttribute("AngelItem", def.id)
+	local K
+	tool.Equipped:Connect(function()
+		local c = lp.Character; if not c then return end
+		if K then K.clean() end
+		K = ctx(c)
+		local ok, e = pcall(def.build, K)
+		if not ok then warn("[AngelHub] " .. def.name .. ": " .. tostring(e)); K.clean(); K = nil end
+	end)
+	tool.Unequipped:Connect(function() if K then K.clean(); K = nil end end)
+	tool.Destroying:Connect(function() if K then K.clean(); K = nil end end)
+	tool.Activated:Connect(function()
+		if K and def.act then local ok, e = pcall(def.act, K); if not ok then warn("[AngelHub] " .. tostring(e)) end end
+	end)
+	return tool
+end
+onKill(function()
+	for _, d in ipairs(D) do local t = findTool(d.id); if t then t:Destroy() end end
 end)
 
-notify("Angel Menu carregado")
+------------------------------------------------------------------ UI
+local TABS = {{"Asas", "🪽"}, {"Drones", "🚁"}, {"Spray", "🎨"}, {"Poderes", "⚡"}, {"Trajes", "🕷️"}, {"Arcano", "🔮"}, {"Corpo & Câmera", "🎥"}, {"Mundo", "🌌"}}
+local isOpen, curTab, fitScale = false, 1, 1
+
+local function drag(handle, target, onClick)
+	local dragging, moved, start, spos = false, false
+	handle.InputBegan:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+			dragging, moved, start, spos = true, false, i.Position, target.Position
+			i.Changed:Connect(function()
+				if i.UserInputState == Enum.UserInputState.End then dragging = false; if not moved and onClick then onClick() end end
+			end)
+		end
+	end)
+	local c = UIS.InputChanged:Connect(function(i)
+		if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+			local d = i.Position - start
+			if d.Magnitude > 8 then moved = true end
+			if moved then target.Position = UDim2.new(spos.X.Scale, spos.X.Offset + d.X, spos.Y.Scale, spos.Y.Offset + d.Y) end
+		end
+	end)
+	onKill(function() c:Disconnect() end)
+end
+
+-- pílula minimizada
+local pill = new("CanvasGroup", {Name = "Pill", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, -70), Size = UDim2.fromOffset(190, 40),
+	BackgroundColor3 = C.bg, BackgroundTransparency = 0.05, Visible = false}, gui)
+corner(pill, "full")
+local pst = stroke(pill, C.a1, 1.4, 0.2); grad(pst, C.a1, C.a2, 0)
+new("UIGradient", {Transparency = NumberSequence.new(0.9, 1), Rotation = 90}, new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHT, BorderSizePixel = 0}, pill))
+local pscale = new("UIScale", {}, pill)
+local orb = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(24, 20), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = WHT}, pill)
+corner(orb, "full"); grad(orb, C.a1, C.a2, 45)
+TS:Create(orb, TweenInfo.new(1.2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Size = UDim2.fromOffset(9, 9), BackgroundTransparency = 0.4}):Play()
+local ptl = new("TextLabel", {Position = UDim2.fromOffset(42, 0), Size = UDim2.fromOffset(110, 40), BackgroundTransparency = 1, Text = "ANGEL HUB", Font = Enum.Font.GothamBold,
+	TextSize = 13, TextColor3 = WHT, TextXAlignment = Enum.TextXAlignment.Left}, pill)
+grad(ptl, C.txt, C.a2, 0)
+new("TextLabel", {Position = UDim2.fromOffset(152, 0), Size = UDim2.fromOffset(28, 40), BackgroundTransparency = 1, Text = "⌄", Font = Enum.Font.GothamBold, TextSize = 18, TextColor3 = C.dim}, pill)
+
+-- menu
+local Root = new("CanvasGroup", {Name = "Menu", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(590, 370),
+	BackgroundTransparency = 1, GroupTransparency = 1, Visible = false}, gui)
+local sc = new("UIScale", {}, Root)
+local Panel = new("Frame", {Position = UDim2.fromOffset(92, 12), Size = UDim2.fromOffset(486, 346), BackgroundColor3 = C.bg, BackgroundTransparency = 0.06}, Root)
+corner(Panel, 28)
+grad(stroke(Panel, C.a1, 1.4, 0.25), C.a1, C.a2, 35)
+new("UIGradient", {Transparency = NumberSequence.new(0.92, 1), Rotation = 90}, new("Frame", {Size = UDim2.fromScale(1, 1), BackgroundColor3 = WHT, BorderSizePixel = 0}, Panel))
+corner(Panel:FindFirstChildOfClass("Frame"), 28)
+
+local title = new("TextLabel", {Position = UDim2.fromOffset(24, 12), Size = UDim2.fromOffset(220, 22), BackgroundTransparency = 1, Text = "ANGEL HUB", Font = Enum.Font.GothamBold,
+	TextSize = 18, TextColor3 = WHT, TextXAlignment = Enum.TextXAlignment.Left}, Panel)
+grad(title, C.a1, C.a2, 0)
+local sub = new("TextLabel", {Position = UDim2.fromOffset(24, 34), Size = UDim2.fromOffset(300, 16), BackgroundTransparency = 1, Text = "", Font = Enum.Font.GothamMedium,
+	TextSize = 11, TextColor3 = C.dim, TextXAlignment = Enum.TextXAlignment.Left}, Panel)
+local hit = new("Frame", {Size = UDim2.new(1, -60, 0, 58), BackgroundTransparency = 1}, Panel)
+local close = new("TextButton", {Position = UDim2.fromOffset(436, 14), Size = UDim2.fromOffset(30, 30), BackgroundColor3 = WHT, BackgroundTransparency = 0.93, Text = "✕",
+	Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = C.dim, AutoButtonColor = false}, Panel)
+corner(close, "full")
+close.MouseEnter:Connect(function() tw(close, 0.2, {BackgroundTransparency = 0.8, TextColor3 = WHT}) end)
+close.MouseLeave:Connect(function() tw(close, 0.2, {BackgroundTransparency = 0.93, TextColor3 = C.dim}) end)
+local sep = new("Frame", {Position = UDim2.fromOffset(20, 58), Size = UDim2.fromOffset(446, 1), BackgroundColor3 = WHT, BorderSizePixel = 0}, Panel)
+new("UIGradient", {Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.6), NumberSequenceKeypoint.new(1, 1)})}, sep)
+
+local Body = new("ScrollingFrame", {Position = UDim2.fromOffset(12, 66), Size = UDim2.fromOffset(462, 268), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+	ScrollBarImageColor3 = C.a1, CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y}, Panel)
+new("UIGridLayout", {CellSize = UDim2.fromOffset(146, 252), CellPadding = UDim2.fromOffset(8, 8), SortOrder = Enum.SortOrder.LayoutOrder}, Body)
+new("UIPadding", {PaddingLeft = UDim.new(0, 4), PaddingTop = UDim.new(0, 4)}, Body)
+
+local tbox = new("Frame", {AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -12), Size = UDim2.fromOffset(250, 30), BackgroundColor3 = C.bg, BackgroundTransparency = 1, ZIndex = 5}, Panel)
+corner(tbox, "full")
+local tst = stroke(tbox, C.a2, 1, 1)
+local tlab = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", Font = Enum.Font.GothamMedium, TextSize = 11, TextColor3 = WHT, TextTransparency = 1, ZIndex = 6}, tbox)
+local tgen = 0
+toast = function(msg)
+	tgen = tgen + 1; local g = tgen
+	tlab.Text = msg
+	tw(tbox, 0.25, {BackgroundTransparency = 0.05}); tw(tlab, 0.25, {TextTransparency = 0}); tw(tst, 0.25, {Transparency = 0.2})
+	task.delay(1.8, function()
+		if g == tgen then tw(tbox, 0.4, {BackgroundTransparency = 1}); tw(tlab, 0.4, {TextTransparency = 1}); tw(tst, 0.4, {Transparency = 1}) end
+	end)
+end
+
+-- trilho de abas flutuante
+local Rail = new("Frame", {Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(66, 346), BackgroundColor3 = C.bg, BackgroundTransparency = 0.06}, Root)
+corner(Rail, "full")
+grad(stroke(Rail, C.a2, 1.4, 0.3), C.a2, C.a1, 90)
+local Sel = new("Frame", {Position = UDim2.fromOffset(13, 9), Size = UDim2.fromOffset(40, 40), BackgroundColor3 = WHT}, Rail)
+corner(Sel, "full"); grad(Sel, C.a1, C.a2, 45)
+stroke(Sel, WHT, 1.2, 0.75)
+local tabBtns = {}
+local bridge = new("Frame", {Size = UDim2.fromOffset(14, 2), BackgroundColor3 = WHT, BorderSizePixel = 0}, Root)
+grad(bridge, C.a2, C.a1, 0); corner(bridge, "full")
+local dotA = new("Frame", {Size = UDim2.fromOffset(6, 6), BackgroundColor3 = C.a2}, Root); corner(dotA, "full")
+local dotB = new("Frame", {Size = UDim2.fromOffset(6, 6), BackgroundColor3 = C.a1}, Root); corner(dotB, "full")
+
+local floaters, setters = {}, {}
+local function hasTool(id) return findTool(id) ~= nil end
+
+local function toggleItem(def)
+	local ex = findTool(def.id)
+	if ex then
+		ex:Destroy(); if setters[def.id] then setters[def.id](false) end
+		toast(def.name .. " removido") return
+	end
+	local bp = lp:FindFirstChildOfClass("Backpack")
+	if not bp then toast("Inventário não encontrado") return end
+	mkTool(def).Parent = bp
+	if setters[def.id] then setters[def.id](true) end
+	toast(def.name .. " no inventário · segure p/ usar")
+end
+
+local function buildCard(def, n)
+	local card = new("CanvasGroup", {BackgroundColor3 = C.card, BackgroundTransparency = 0.1, GroupTransparency = 1, LayoutOrder = n}, Body)
+	corner(card, 20)
+	local cs = stroke(card, WHT, 1, 0.9)
+	local csc = new("UIScale", {Scale = 0.9}, card)
+	local stage = new("Frame", {Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(130, 112), BackgroundColor3 = WHT}, card)
+	corner(stage, 15)
+	local sg = grad(stage, def.c1:Lerp(BLK, 0.55), def.c2:Lerp(BLK, 0.55), 30)
+	local glow = new("Frame", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(76, 76), BackgroundColor3 = def.c1, BackgroundTransparency = 0.6}, stage)
+	corner(glow, "full"); new("UIGradient", {Transparency = NumberSequence.new(0.2, 1), Rotation = 90}, glow)
+	local icon = new("TextLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(80, 80), BackgroundTransparency = 1, Text = def.icon, TextSize = 46}, stage)
+	new("TextLabel", {Position = UDim2.fromOffset(10, 126), Size = UDim2.fromOffset(126, 18), BackgroundTransparency = 1, Text = def.name, Font = Enum.Font.GothamBold, TextSize = 13,
+		TextColor3 = C.txt, TextXAlignment = Enum.TextXAlignment.Left}, card)
+	new("TextLabel", {Position = UDim2.fromOffset(10, 146), Size = UDim2.fromOffset(126, 52), BackgroundTransparency = 1, Text = def.desc, Font = Enum.Font.GothamMedium, TextSize = 10.5,
+		TextColor3 = C.dim, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, TextWrapped = true}, card)
+	local btn = new("TextButton", {Position = UDim2.fromOffset(10, 206), Size = UDim2.fromOffset(126, 34), BackgroundColor3 = WHT, Text = "", AutoButtonColor = false}, card)
+	corner(btn, "full")
+	local bg = grad(btn, C.a1, C.a2, 0)
+	local bs = stroke(btn, C.ok, 1.2, 1)
+	local bl = new("TextLabel", {Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "PEGAR ITEM", Font = Enum.Font.GothamBold, TextSize = 11, TextColor3 = WHT}, btn)
+	local bsc = new("UIScale", {}, btn)
+	local function setOwned(o)
+		if o then
+			tw(btn, 0.3, {BackgroundColor3 = rgb(18, 40, 34)}); bg.Enabled = false; tw(bs, 0.3, {Transparency = 0.1}); bl.Text = "✓ NO INVENTÁRIO"; bl.TextColor3 = C.ok
+		else
+			tw(btn, 0.3, {BackgroundColor3 = WHT}); bg.Enabled = true; tw(bs, 0.3, {Transparency = 1}); bl.Text = "PEGAR ITEM"; bl.TextColor3 = WHT
+		end
+	end
+	setters[def.id] = setOwned
+	setOwned(hasTool(def.id))
+	btn.MouseButton1Down:Connect(function() tw(bsc, 0.1, {Scale = 0.93}) end)
+	btn.MouseButton1Up:Connect(function() tw(bsc, 0.25, {Scale = 1}, Enum.EasingStyle.Back) end)
+	btn.MouseLeave:Connect(function() tw(bsc, 0.2, {Scale = 1}) end)
+	btn.MouseButton1Click:Connect(function() toggleItem(def) end)
+	card.MouseEnter:Connect(function() tw(cs, 0.25, {Transparency = 0.45, Color = def.c1}) end)
+	card.MouseLeave:Connect(function() tw(cs, 0.25, {Transparency = 0.9, Color = WHT}) end)
+	floaters[#floaters + 1] = {icon = icon, g = sg, ph = n * 1.7}
+	task.delay((n - 1) * 0.07, function()
+		if card.Parent then tw(card, 0.4, {GroupTransparency = 0}); tw(csc, 0.5, {Scale = 1}, Enum.EasingStyle.Back) end
+	end)
+end
+
+local function setTab(i)
+	curTab = i
+	for _, c in ipairs(Body:GetChildren()) do if c:IsA("CanvasGroup") then c:Destroy() end end
+	floaters, setters = {}, {}
+	local n = 0
+	for _, def in ipairs(D) do if def.tab == i then n = n + 1; buildCard(def, n) end end
+	sub.Text = TABS[i][1] .. "  ·  " .. n .. " itens"
+	Body.CanvasPosition = Vector2.zero
+	tw(Sel, 0.45, {Position = UDim2.fromOffset(13, 9 + (i - 1) * 41)}, Enum.EasingStyle.Back)
+	for k, b in ipairs(tabBtns) do tw(b, 0.3, {TextTransparency = k == i and 0 or 0.45}) end
+end
+
+for i, t in ipairs(TABS) do
+	local b = new("TextButton", {Position = UDim2.fromOffset(15, 11 + (i - 1) * 41), Size = UDim2.fromOffset(36, 36), BackgroundTransparency = 1, Text = t[2], TextSize = 18,
+		TextTransparency = 0.45, AutoButtonColor = false, ZIndex = 3}, Rail)
+	b.MouseButton1Click:Connect(function() if curTab ~= i then setTab(i) end end)
+	tabBtns[i] = b
+end
+
+local function fit()
+	local v = cam.ViewportSize
+	fitScale = math.clamp(math.min((v.X - 16) / 590, (v.Y - 16) / 370), 0.45, 1.15)
+	if isOpen then sc.Scale = fitScale end
+end
+fit()
+local vc = cam:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+onKill(function() vc:Disconnect() end)
+
+local function setOpen(v)
+	if v == isOpen then return end
+	isOpen = v
+	if v then
+		setTab(curTab)
+		Root.Visible = true; Root.GroupTransparency = 1; sc.Scale = fitScale * 0.86
+		tw(sc, 0.5, {Scale = fitScale}, Enum.EasingStyle.Back); tw(Root, 0.3, {GroupTransparency = 0}); tw(blur, 0.4, {Size = 12})
+		tw(pill, 0.25, {GroupTransparency = 1}); task.delay(0.25, function() if isOpen then pill.Visible = false end end)
+	else
+		tw(sc, 0.3, {Scale = fitScale * 0.9}); tw(Root, 0.28, {GroupTransparency = 1}); tw(blur, 0.3, {Size = 0})
+		pill.Visible = true; pill.GroupTransparency = 1; tw(pill, 0.35, {GroupTransparency = 0})
+		task.delay(0.3, function() if not isOpen then Root.Visible = false end end)
+	end
+end
+close.MouseButton1Click:Connect(function() setOpen(false) end)
+drag(hit, Root)
+drag(pill, pill, function() setOpen(true) end)
+pill.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then tw(pscale, 0.1, {Scale = 0.94}) end end)
+pill.InputEnded:Connect(function() tw(pscale, 0.25, {Scale = 1}, Enum.EasingStyle.Back) end)
+local kb = UIS.InputBegan:Connect(function(i, gp) if not gp and i.KeyCode == Enum.KeyCode.RightShift then setOpen(not isOpen) end end)
+onKill(function() kb:Disconnect() end)
+
+-- animação contínua (aba flutuando, ícones, ponte de luz)
+local bridgeRel = 29
+local uiLoop = RS.RenderStepped:Connect(function(dt)
+	if not isOpen then return end
+	local t = os.clock()
+	local bob = math.sin(t * 1.4) * 3
+	Rail.Position = UDim2.fromOffset(12, 12 + bob)
+	bridgeRel = bridgeRel + ((29 + (curTab - 1) * 41) - bridgeRel) * math.min(dt * 12, 1)
+	local y = 12 + bob + bridgeRel
+	bridge.Position = UDim2.fromOffset(78, y - 1)
+	dotA.Position = UDim2.fromOffset(75, y - 3); dotB.Position = UDim2.fromOffset(88, y - 3)
+	bridge.BackgroundTransparency = 0.1 + (math.sin(t * 4) + 1) * 0.1
+	for _, f in ipairs(floaters) do
+		if f.icon.Parent then
+			f.icon.Position = UDim2.new(0.5, 0, 0.5, math.sin(t * 2 + f.ph) * 5)
+			f.icon.Rotation = math.sin(t * 1.3 + f.ph) * 6
+			f.g.Rotation = (t * 25 + f.ph * 30) % 360
+		end
+	end
+end)
+onKill(function() uiLoop:Disconnect() end)
+
+respawnConn = lp.CharacterAdded:Connect(function() task.wait(0.6); if isOpen then setTab(curTab) end end)
+onKill(function() respawnConn:Disconnect() end)
+
+------------------------------------------------------------------ intro
+do
+	local f = new("Frame", {BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1)}, gui)
+	local lbl = new("TextLabel", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 10), Size = UDim2.fromOffset(520, 50), BackgroundTransparency = 1,
+		Text = "ANGEL HUB EXECUTADO", Font = Enum.Font.GothamBold, TextSize = 26, TextColor3 = WHT, TextTransparency = 1}, f)
+	grad(lbl, C.txt, C.a2, 0)
+	local st = new("UIStroke", {Color = C.a1, Thickness = 1.5, Transparency = 1}, lbl)
+	local line = new("Frame", {AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 30), Size = UDim2.fromOffset(0, 2), BackgroundColor3 = WHT, BorderSizePixel = 0}, f)
+	corner(line, "full"); grad(line, C.a1, C.a2, 0)
+	tw(lbl, 0.5, {TextTransparency = 0, Position = UDim2.fromScale(0.5, 0.5)}); tw(st, 0.5, {Transparency = 0.5}); tw(line, 0.7, {Size = UDim2.fromOffset(260, 2)})
+	task.delay(1.4, function() tw(lbl, 0.6, {TextTransparency = 1}); tw(st, 0.6, {Transparency = 1}); tw(line, 0.6, {BackgroundTransparency = 1, Size = UDim2.fromOffset(0, 2)}) end)
+	task.delay(2.05, function()
+		f:Destroy()
+		pill.Visible = true
+		tw(pill, 0.8, {Position = UDim2.new(0.5, 0, 0, 14)}, Enum.EasingStyle.Back)
+	end)
+end
